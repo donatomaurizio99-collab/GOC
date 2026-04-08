@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
+from goal_ops_console.models import BackpressureError
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(tags=["system"])
@@ -22,6 +23,7 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
     total_events = services.db.fetch_scalar("SELECT COUNT(*) FROM events") or 0
     total_goals = services.db.fetch_scalar("SELECT COUNT(*) FROM goals") or 0
     total_tasks = services.db.fetch_scalar("SELECT COUNT(*) FROM task_state") or 0
+    backpressure = services.event_bus.backpressure_snapshot()
     return {
         "spec_version": SPEC_VERSION,
         "default_consumer_id": services.settings.consumer_id,
@@ -29,6 +31,12 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
             "events": int(total_events),
             "goals": int(total_goals),
             "tasks": int(total_tasks),
+        },
+        "backpressure": backpressure,
+        "retention": {
+            "events_days": services.settings.events_retention_days,
+            "event_processing_days": services.settings.event_processing_retention_days,
+            "failure_log_days": services.settings.failure_log_retention_days,
         },
         "retry_budget_per_cycle": MAX_TOTAL_RETRIES_PER_CYCLE,
         "consumer_stats": services.event_bus.consumer_stats(),
@@ -59,12 +67,14 @@ def queue_snapshot(services: AppServices = Depends(get_services)) -> list[dict]:
 
 @router.post("/system/scheduler/age")
 def age_scheduler_queue(services: AppServices = Depends(get_services)) -> dict:
+    services.event_bus.ensure_within_backpressure()
     aged = [goal for goal in services.scheduler.age_queue() if goal]
     return {"aged_count": len(aged), "goals": aged}
 
 
 @router.post("/system/scheduler/pick")
 def pick_next_goal(services: AppServices = Depends(get_services)) -> dict:
+    services.event_bus.ensure_within_backpressure()
     picked = services.scheduler.pick_next_goal()
     return {"picked_goal": picked}
 
@@ -75,6 +85,14 @@ def drain_consumer(
     batch_size: int = CONSUMER_BATCH_SIZE,
     services: AppServices = Depends(get_services),
 ) -> dict:
+    if batch_size > services.settings.max_consumer_drain_batch_size:
+        raise BackpressureError(
+            (
+                f"Requested batch_size {batch_size} exceeds safe limit "
+                f"{services.settings.max_consumer_drain_batch_size}."
+            ),
+            retry_after_seconds=services.settings.backpressure_retry_after_seconds,
+        )
     handled: list[str] = []
     processed = services.event_bus.consume_batch(
         consumer_id,
@@ -93,3 +111,21 @@ def drain_consumer(
 def reclaim_consumer(consumer_id: str, services: AppServices = Depends(get_services)) -> dict:
     reclaimed = services.event_bus.reclaim_stuck_processing(consumer_id)
     return {"consumer_id": consumer_id, "reclaimed_count": reclaimed}
+
+
+@router.get("/system/backpressure")
+def backpressure_status(services: AppServices = Depends(get_services)) -> dict:
+    return services.event_bus.backpressure_snapshot()
+
+
+@router.post("/system/maintenance/retention")
+def run_retention_cleanup(services: AppServices = Depends(get_services)) -> dict:
+    deleted = services.event_bus.run_retention_cleanup()
+    return {
+        **deleted,
+        "retention_days": {
+            "events": services.settings.events_retention_days,
+            "event_processing": services.settings.event_processing_retention_days,
+            "failure_log": services.settings.failure_log_retention_days,
+        },
+    }

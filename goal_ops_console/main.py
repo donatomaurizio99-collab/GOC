@@ -27,7 +27,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(DomainError)
     async def handle_domain_error(_: Request, exc: DomainError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+        content = {"detail": exc.message}
+        headers: dict[str, str] = {}
+        retry_after = getattr(exc, "retry_after_seconds", None)
+        if isinstance(retry_after, int) and retry_after > 0:
+            content["retry_after_seconds"] = retry_after
+            headers["Retry-After"] = str(retry_after)
+        return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
     return app
 

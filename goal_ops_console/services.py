@@ -30,8 +30,21 @@ def build_services(settings: Settings | None = None) -> AppServices:
     app_settings = settings or Settings()
     db = Database(app_settings.database_url)
     db.initialize()
-    event_bus = EventBus(db)
-    state_manager = StateManager(db, event_bus)
+    event_bus = EventBus(
+        db,
+        default_consumer_id=app_settings.consumer_id,
+        max_pending_events=app_settings.max_pending_events,
+        backpressure_retry_after_seconds=app_settings.backpressure_retry_after_seconds,
+        events_retention_days=app_settings.events_retention_days,
+        event_processing_retention_days=app_settings.event_processing_retention_days,
+        failure_log_retention_days=app_settings.failure_log_retention_days,
+    )
+    state_manager = StateManager(
+        db,
+        event_bus,
+        max_goal_queue_entries=app_settings.max_goal_queue_entries,
+        backpressure_retry_after_seconds=app_settings.backpressure_retry_after_seconds,
+    )
     failure_intelligence = FailureIntelligence(db)
     execution_layer = ExecutionLayer(db, state_manager, event_bus, failure_intelligence)
     scheduler = SchedulerService(db, state_manager)
