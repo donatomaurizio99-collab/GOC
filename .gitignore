@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-cache-files-*/
+goal_ops.db
+goal_ops.db-journal
+probe.db
+probe.db-journal
+sqlite_probe.txt

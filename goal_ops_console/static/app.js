@@ -1,0 +1,345 @@
+const stateClass = (value) => `state-${String(value || "").replaceAll(" ", "_")}`;
+
+let selectedGoalId = "";
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const isJson = response.headers.get("content-type")?.includes("application/json");
+  const payload = isJson ? await response.json() : await response.text();
+  if (!response.ok) {
+    const message = typeof payload === "object" && payload ? payload.detail || JSON.stringify(payload) : payload;
+    throw new Error(message || `Request failed: ${response.status}`);
+  }
+  return payload;
+}
+
+function showError(id, error) {
+  document.getElementById(id).textContent = error?.message || "";
+}
+
+function renderGoalButtons(goal) {
+  const actionsByState = {
+    draft: [
+      ["activate", "Activate"],
+      ["trace", "Trace"],
+    ],
+    active: [
+      ["block", "Block"],
+      ["trace", "Trace"],
+    ],
+    blocked: [
+      ["activate", "Activate"],
+      ["archive", "Archive"],
+      ["trace", "Trace"],
+    ],
+    escalation_pending: [
+      ["hitl_approve", "HITL Approve"],
+      ["archive", "Archive"],
+      ["trace", "Trace"],
+    ],
+    completed: [
+      ["archive", "Archive"],
+      ["trace", "Trace"],
+    ],
+    cancelled: [
+      ["archive", "Archive"],
+      ["trace", "Trace"],
+    ],
+    archived: [["trace", "Trace"]],
+  };
+  const actions = actionsByState[goal.state] || [["trace", "Trace"]];
+  return actions.map(([action, label]) => {
+    if (action === "trace") {
+      return `<button class="secondary" data-correlation="${goal.goal_id}">${label}</button>`;
+    }
+    return `<button class="secondary" data-goal-action="${action}" data-goal-id="${goal.goal_id}">${label}</button>`;
+  }).join("");
+}
+
+function renderTaskButtons(task) {
+  const terminalStates = new Set(["poison", "exhausted", "succeeded"]);
+  const buttons = [];
+  if (!terminalStates.has(task.status)) {
+    buttons.push(`<button class="secondary" data-task-action="success" data-task-id="${task.task_id}">Success</button>`);
+    buttons.push(`<button class="secondary" data-task-action="skill" data-task-id="${task.task_id}">Skill Fail</button>`);
+    buttons.push(`<button class="secondary" data-task-action="execution" data-task-id="${task.task_id}">Exec Fail</button>`);
+    buttons.push(`<button class="secondary" data-task-action="external" data-task-id="${task.task_id}">External Fail</button>`);
+  }
+  buttons.push(`<button class="secondary" data-correlation="${task.goal_id}">Goal Trace</button>`);
+  return buttons.join("");
+}
+
+function renderGoals(goals) {
+  const content = goals.length
+    ? `<div class="stack-list">
+        ${goals.map((goal) => `
+          <article class="entity-card ${selectedGoalId === goal.goal_id ? "selected" : ""}">
+            <div class="entity-header">
+              <div>
+                <div><span class="inline-link entity-title" data-select-goal="${goal.goal_id}">${goal.title}</span></div>
+                <div class="meta">${goal.goal_id}</div>
+              </div>
+              <span class="pill ${stateClass(goal.state)}">${goal.state}</span>
+            </div>
+            ${goal.blocked_reason ? `<div class="meta">${goal.blocked_reason}</div>` : ""}
+            ${goal.escalation_reason ? `<div class="meta">${goal.escalation_reason}</div>` : ""}
+            <div class="entity-grid">
+              <div class="entity-metric">
+                <span class="meta">Priority</span>
+                <div>base ${Number(goal.base_priority || 0).toFixed(2)} / effective ${Number(goal.priority || 0).toFixed(2)}</div>
+                <div class="priority-track"><div class="priority-fill" style="width:${Math.round((goal.priority || 0) * 100)}%"></div></div>
+              </div>
+              <div class="entity-metric">
+                <span class="meta">Tasks</span>
+                <div>${goal.task_count}</div>
+              </div>
+            </div>
+            <div class="entity-divider"></div>
+            <div class="actions">${renderGoalButtons(goal)}</div>
+          </article>`).join("")}
+      </div>`
+    : `<div class="meta">No goals yet.</div>`;
+  document.getElementById("goals-table").innerHTML = content;
+}
+
+function renderTasks(tasks) {
+  const container = document.getElementById("tasks-table");
+  if (!tasks.length) {
+    container.innerHTML = `<div class="meta">No tasks for the current selection.</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="stack-list">
+    ${tasks.map((task) => `
+      <article class="entity-card">
+        <div class="entity-header">
+          <div>
+            <div class="entity-title">${task.title}</div>
+            <div class="meta">${task.task_id}</div>
+          </div>
+          <span class="pill ${stateClass(task.status)}">${task.status}</span>
+        </div>
+        <div class="entity-grid">
+          <div class="entity-metric">
+            <span class="meta">Retry</span>
+            <div>${task.retry_count}</div>
+            <div class="meta">${task.correlation_id}</div>
+          </div>
+          <div class="entity-metric">
+            <span class="meta">Failure</span>
+            <div>${task.failure_type || "-"}</div>
+            <div class="meta">${task.error_hash || ""}</div>
+          </div>
+        </div>
+        <div class="entity-divider"></div>
+        <div class="actions">${renderTaskButtons(task)}</div>
+      </article>`).join("")}
+  </div>`;
+}
+
+function renderEvents(events) {
+  const container = document.getElementById("events-table");
+  if (!events.length) {
+    container.innerHTML = `<div class="meta">No events match the current filter.</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="table-scroll"><table>
+    <thead>
+      <tr>
+        <th>Seq</th>
+        <th>Event</th>
+        <th>Entity</th>
+        <th>Correlation</th>
+        <th>Payload</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${events.map((event) => `
+        <tr>
+          <td>${event.seq}</td>
+          <td>${event.event_type}<div class="meta">${event.emitted_at}</div></td>
+          <td>${event.entity_id}</td>
+          <td><span class="inline-link" data-correlation="${event.correlation_id}">${event.correlation_id}</span></td>
+          <td><pre>${JSON.stringify(event.payload || {}, null, 2)}</pre></td>
+        </tr>`).join("")}
+      </tbody>
+  </table></div>`;
+}
+
+function renderHealth(health) {
+  document.getElementById("health-cards").innerHTML = `
+    <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
+    <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
+    <div class="card"><span class="meta">Tasks</span><strong>${health.totals.tasks}</strong></div>
+    <div class="card"><span class="meta">Retry Budget</span><strong>${health.retry_budget_per_cycle}</strong></div>`;
+
+  document.getElementById("consumer-stats").innerHTML = health.consumer_stats.length
+    ? `<table><thead><tr><th>Consumer</th><th>Status</th><th>Count</th></tr></thead><tbody>${
+        health.consumer_stats.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.status}</td><td>${item.count}</td></tr>`).join("")
+      }</tbody></table>`
+    : `<div class="meta">No consumer activity yet.</div>`;
+
+  document.getElementById("stuck-events").innerHTML = health.stuck_events.length
+    ? `<table><thead><tr><th>Consumer</th><th>Event</th><th>Started</th></tr></thead><tbody>${
+        health.stuck_events.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.event_type} (${item.event_id})</td><td>${item.processing_started_at}</td></tr>`).join("")
+      }</tbody></table>`
+    : `<div class="meta">No stuck events.</div>`;
+
+  document.getElementById("invariant-violations").innerHTML = health.invariant_violations.length
+    ? `<ul>${health.invariant_violations.map((item) => `<li>${item}</li>`).join("")}</ul>`
+    : `<div class="meta">No invariant violations detected.</div>`;
+}
+
+async function refreshGoals() {
+  const goals = await api("/goals");
+  renderGoals(goals);
+  const selectedLabel = selectedGoalId ? `Selected goal: ${selectedGoalId}` : "No goal selected.";
+  document.getElementById("selected-goal-label").textContent = selectedLabel;
+}
+
+async function refreshTasks() {
+  const goalId = document.getElementById("task-goal-id").value.trim();
+  const path = goalId ? `/tasks?goal_id=${encodeURIComponent(goalId)}` : "/tasks";
+  const tasks = await api(path);
+  renderTasks(tasks);
+}
+
+async function refreshEvents() {
+  const correlationId = document.getElementById("event-correlation-id").value.trim();
+  const entityId = document.getElementById("event-entity-id").value.trim();
+  const params = new URLSearchParams();
+  if (correlationId) params.set("correlation_id", correlationId);
+  if (entityId) params.set("entity_id", entityId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const events = await api(`/events${suffix}`);
+  renderEvents(events);
+}
+
+async function refreshHealth() {
+  const health = await api("/system/health");
+  renderHealth(health);
+}
+
+async function refreshAll() {
+  await Promise.all([refreshGoals(), refreshTasks(), refreshEvents(), refreshHealth()]);
+}
+
+document.getElementById("goal-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("goal-error", null);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  try {
+    const goal = await api("/goals", {
+      method: "POST",
+      body: JSON.stringify({
+        title: form.get("title"),
+        description: form.get("description"),
+        urgency: Number(form.get("urgency")),
+        value: Number(form.get("value")),
+        deadline_score: Number(form.get("deadline_score")),
+      }),
+    });
+    selectedGoalId = goal.goal_id;
+    document.getElementById("task-goal-id").value = goal.goal_id;
+    document.getElementById("event-correlation-id").value = goal.goal_id;
+    formElement.reset();
+    await refreshAll();
+  } catch (error) {
+    showError("goal-error", error);
+  }
+});
+
+document.getElementById("task-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("task-error", null);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const goalId = String(form.get("goal_id") || "").trim();
+  try {
+    await api("/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        goal_id: goalId,
+        title: form.get("title"),
+      }),
+    });
+    formElement.reset();
+    document.getElementById("task-goal-id").value = goalId;
+    await refreshAll();
+  } catch (error) {
+    showError("task-error", error);
+  }
+});
+
+document.getElementById("event-filter-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await refreshEvents();
+});
+
+document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
+document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
+document.getElementById("refresh-events").addEventListener("click", refreshEvents);
+
+document.addEventListener("click", async (event) => {
+  const goalAction = event.target.dataset.goalAction;
+  const goalId = event.target.dataset.goalId;
+  const taskAction = event.target.dataset.taskAction;
+  const taskId = event.target.dataset.taskId;
+  const correlation = event.target.dataset.correlation;
+  const selectGoal = event.target.dataset.selectGoal;
+
+  try {
+    if (goalAction && goalId) {
+      await api(`/goals/${goalId}/${goalAction}`, { method: "POST" });
+      selectedGoalId = goalId;
+      document.getElementById("task-goal-id").value = goalId;
+      document.getElementById("event-correlation-id").value = goalId;
+      await refreshAll();
+    }
+
+    if (taskAction && taskId) {
+      if (taskAction === "success") {
+        await api(`/tasks/${taskId}/success`, { method: "POST" });
+      } else {
+        const failureMap = {
+          skill: { failure_type: "SkillFailure", error_message: "Repeated skill failure" },
+          execution: { failure_type: "ExecutionFailure", error_message: "Transient execution failure" },
+          external: { failure_type: "ExternalFailure", error_message: "External dependency outage" },
+        };
+        await api(`/tasks/${taskId}/fail`, {
+          method: "POST",
+          body: JSON.stringify(failureMap[taskAction]),
+        });
+      }
+      await refreshAll();
+    }
+
+    if (correlation) {
+      document.getElementById("event-correlation-id").value = correlation;
+      await refreshEvents();
+    }
+
+    if (selectGoal) {
+      selectedGoalId = selectGoal;
+      document.getElementById("task-goal-id").value = selectGoal;
+      document.getElementById("event-correlation-id").value = selectGoal;
+      await refreshTasks();
+      await refreshEvents();
+      document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
+    }
+  } catch (error) {
+    const target = goalAction ? "goal-error" : "task-error";
+    showError(target, error);
+  }
+});
+
+refreshAll();
+setInterval(() => {
+  refreshGoals().catch(() => {});
+  refreshTasks().catch(() => {});
+  refreshEvents().catch(() => {});
+  refreshHealth().catch(() => {});
+}, 5000);

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goal Ops Console</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: #fffaf2;
+      --ink: #1f1b17;
+      --muted: #6f655b;
+      --line: #ddcdbd;
+      --accent: #c46a2d;
+      --accent-soft: #f4d7c3;
+      --good: #2f855a;
+      --warn: #b7791f;
+      --bad: #c53030;
+      --info: #2b6cb0;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #f7d8bf 0, transparent 30%),
+        linear-gradient(160deg, #f4efe7 0%, #efe3d4 100%);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.5rem 2rem 1rem;
+      border-bottom: 1px solid rgba(31, 27, 23, 0.08);
+      background: rgba(255, 250, 242, 0.8);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 1.9rem; }
+    header p { margin: 0.35rem 0 0; color: var(--muted); }
+    main {
+      padding: 1.5rem;
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    }
+    section {
+      background: rgba(255, 250, 242, 0.88);
+      border: 1px solid rgba(31, 27, 23, 0.08);
+      border-radius: 18px;
+      padding: 1rem;
+      box-shadow: 0 20px 40px rgba(68, 50, 33, 0.08);
+      min-width: 0;
+    }
+    section h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.05rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .wide { grid-column: 1 / -1; }
+    form {
+      display: grid;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+    }
+    input, textarea, select, button {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      padding: 0.65rem 0.8rem;
+      background: white;
+      color: var(--ink);
+    }
+    textarea { min-height: 84px; resize: vertical; }
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+      border: none;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button.secondary {
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    button.ghost {
+      background: transparent;
+      color: var(--info);
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: 0.25rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.55rem 0.45rem;
+      border-bottom: 1px solid rgba(31, 27, 23, 0.08);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+      overflow-wrap: anywhere;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    .actions button {
+      padding: 0.35rem 0.55rem;
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .state-draft, .state-pending { background: #e9edf2; color: #314154; }
+    .state-active, .state-running, .state-succeeded, .state-completed { background: #dff5e7; color: var(--good); }
+    .state-blocked, .state-failed, .state-exhausted { background: #fdecc8; color: var(--warn); }
+    .state-escalation_pending, .state-poison, .state-cancelled, .state-archived { background: #fed7d7; color: var(--bad); }
+    .priority-track {
+      height: 9px;
+      border-radius: 999px;
+      background: #efe3d4;
+      overflow: hidden;
+      width: 130px;
+      margin-top: 0.25rem;
+    }
+    .priority-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #e2b280 0%, #c46a2d 100%);
+    }
+    .grid-two {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+    }
+    .card {
+      border: 1px solid rgba(31, 27, 23, 0.08);
+      border-radius: 14px;
+      padding: 0.8rem;
+      background: rgba(255,255,255,0.6);
+    }
+    .card strong { display: block; font-size: 1.4rem; }
+    .stack-list {
+      display: grid;
+      gap: 0.8rem;
+    }
+    .entity-card {
+      border: 1px solid rgba(31, 27, 23, 0.08);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.62);
+      padding: 0.85rem;
+      display: grid;
+      gap: 0.7rem;
+    }
+    .entity-card.selected {
+      border-color: rgba(196, 106, 45, 0.45);
+      box-shadow: 0 0 0 2px rgba(196, 106, 45, 0.12);
+    }
+    .entity-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 0.75rem;
+    }
+    .entity-title {
+      font-weight: 600;
+      font-size: 1rem;
+    }
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+    }
+    .entity-metric {
+      min-width: 0;
+    }
+    .entity-metric .meta {
+      display: block;
+      margin-bottom: 0.2rem;
+    }
+    .entity-divider {
+      height: 1px;
+      background: rgba(31, 27, 23, 0.08);
+    }
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 0.8rem;
+      border-radius: 12px;
+      background: #f6f0e6;
+      color: #4d4339;
+    }
+    .split {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1fr 1fr;
+    }
+    .error {
+      color: var(--bad);
+      min-height: 1.2rem;
+      font-size: 0.9rem;
+    }
+    .inline-link {
+      color: var(--info);
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    @media (max-width: 900px) {
+      .split { grid-template-columns: 1fr; }
+      .entity-header { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Goal Ops Console</h1>
+    <p>Spec {{ spec_version }}. SQLite-authoritative supervised MVP with atomic state writes and append-only events.</p>
+  </header>
+  <main>
+    <section>
+      <h2><span>Goals Dashboard</span><button class="secondary" id="refresh-goals">Refresh</button></h2>
+      <form id="goal-form">
+        <input name="title" placeholder="Goal title" required>
+        <textarea name="description" placeholder="Optional description"></textarea>
+        <div class="split">
+          <input name="urgency" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Urgency">
+          <input name="value" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Value">
+        </div>
+        <input name="deadline_score" type="number" step="0.1" min="0" max="1" value="0.0" placeholder="Deadline score">
+        <button type="submit">Create Goal</button>
+        <div class="error" id="goal-error"></div>
+      </form>
+      <div class="meta" id="selected-goal-label">No goal selected.</div>
+      <div id="goals-table"></div>
+    </section>
+
+    <section>
+      <h2><span>Task View</span><button class="secondary" id="refresh-tasks">Refresh</button></h2>
+      <form id="task-form">
+        <input name="goal_id" id="task-goal-id" placeholder="Goal ID" required>
+        <input name="title" placeholder="Task title" required>
+        <button type="submit">Create Task</button>
+        <div class="error" id="task-error"></div>
+      </form>
+      <div id="tasks-table"></div>
+    </section>
+
+    <section class="wide">
+      <h2><span>Event Log</span><button class="secondary" id="refresh-events">Refresh</button></h2>
+      <form id="event-filter-form">
+        <div class="split">
+          <input name="correlation_id" id="event-correlation-id" placeholder="Filter by correlation prefix">
+          <input name="entity_id" id="event-entity-id" placeholder="Optional entity id">
+        </div>
+        <button type="submit">Apply Filter</button>
+      </form>
+      <div id="events-table"></div>
+    </section>
+
+    <section>
+      <h2>System Health</h2>
+      <div id="health-cards" class="grid-two"></div>
+      <h3>Consumer Stats</h3>
+      <div id="consumer-stats"></div>
+      <h3>Stuck Events</h3>
+      <div id="stuck-events"></div>
+      <h3>Invariant Violations</h3>
+      <div id="invariant-violations"></div>
+    </section>
+
+    <section>
+      <h2>State Machines</h2>
+      <pre>Goal: draft -> active -> completed -> archived
+                \-> blocked -> active|completed|archived
+                \-> escalation_pending -> active|archived
+                \-> cancelled -> archived</pre>
+      <pre>Task: pending -> running -> succeeded
+               \-> failed -> running|exhausted|poison</pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
