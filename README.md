@@ -162,6 +162,26 @@ Current result during implementation:
 24 passed
 ```
 
+## CI And PR Guardrails
+
+GitHub Actions now runs `pytest` automatically for:
+
+- pushes to `master`
+- pull requests targeting `master`
+- manual dispatch (`workflow_dispatch`)
+
+Workflow file:
+[ci.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/ci.yml)
+
+Recommended branch protection on `master`:
+
+1. Open repository settings on GitHub.
+2. Go to `Branches` -> `Branch protection rules`.
+3. Add/update rule for `master`:
+4. Enable `Require a pull request before merging`.
+5. Enable `Require status checks to pass before merging`.
+6. Select required check: `Pytest (Python 3.11)` and `Pytest (Python 3.12)`.
+
 ## Troubleshooting
 
 ### Path With Spaces
