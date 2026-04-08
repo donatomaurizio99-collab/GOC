@@ -1,10 +1,14 @@
 import json
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from typing import Any
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, PROCESSING_TIMEOUT_SECONDS
 from goal_ops_console.database import Database, Transaction, new_id, now_utc
 from goal_ops_console.models import BackpressureError
+
+if TYPE_CHECKING:
+    from goal_ops_console.observability import ObservabilityService
 
 
 def make_payload(data: dict[str, Any] | None = None) -> str:
@@ -23,6 +27,7 @@ class EventBus:
         events_retention_days: int,
         event_processing_retention_days: int,
         failure_log_retention_days: int,
+        observability: "ObservabilityService | None" = None,
     ):
         self.db = db
         self.processing_timeout_seconds = processing_timeout_seconds
@@ -32,6 +37,7 @@ class EventBus:
         self.events_retention_days = events_retention_days
         self.event_processing_retention_days = event_processing_retention_days
         self.failure_log_retention_days = failure_log_retention_days
+        self.observability = observability
 
     def record_event(
         self,
@@ -46,7 +52,7 @@ class EventBus:
         self.ensure_within_backpressure(tx=tx)
         identifier = event_id or new_id()
         runner = tx or self.db
-        runner.execute(
+        inserted = runner.execute(
             "INSERT OR IGNORE INTO events "
             "(event_id, event_type, entity_id, correlation_id, payload, emitted_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -57,6 +63,8 @@ class EventBus:
             make_payload(payload),
             now_utc(),
         )
+        if inserted:
+            self._metric("events.emitted", tx=tx)
         return identifier
 
     def pending_backlog_count(
@@ -98,6 +106,7 @@ class EventBus:
         consumer = consumer_id or self.default_consumer_id
         pending = self.pending_backlog_count(consumer, tx=tx)
         if pending >= self.max_pending_events:
+            self._metric("backpressure.throttled", tx=tx)
             raise BackpressureError(
                 (
                     f"Event backlog limit reached for consumer '{consumer}' "
@@ -130,6 +139,16 @@ class EventBus:
                    WHERE created_at < datetime('now', ? || ' days')""",
                 f"-{self.failure_log_retention_days}",
             )
+            if events_deleted:
+                self._metric("maintenance.retention.events_deleted", events_deleted, tx=tx)
+            if event_processing_deleted:
+                self._metric(
+                    "maintenance.retention.event_processing_deleted",
+                    event_processing_deleted,
+                    tx=tx,
+                )
+            if failures_deleted:
+                self._metric("maintenance.retention.failure_log_deleted", failures_deleted, tx=tx)
         return {
             "events_deleted": events_deleted,
             "event_processing_deleted": event_processing_deleted,
@@ -161,7 +180,7 @@ class EventBus:
         return [self._row_to_event(row) for row in rows]
 
     def reclaim_stuck_processing(self, consumer_id: str) -> int:
-        return self.db.execute(
+        reclaimed = self.db.execute(
             """UPDATE event_processing
                SET    status = 'pending',
                       version = version + 1
@@ -171,6 +190,9 @@ class EventBus:
             consumer_id,
             f"-{self.processing_timeout_seconds}",
         )
+        if reclaimed:
+            self._metric("event_processing.reclaimed", reclaimed)
+        return reclaimed
 
     def process_event(
         self,
@@ -241,6 +263,7 @@ class EventBus:
                 event_id,
                 consumer_id,
             )
+            self._metric("events.processed")
             return True
         except Exception:
             self.db.execute(
@@ -249,6 +272,7 @@ class EventBus:
                 event_id,
                 consumer_id,
             )
+            self._metric("events.failed")
             raise
 
     def consume_batch(
@@ -273,6 +297,8 @@ class EventBus:
         for row in rows:
             if self.process_event(row["event_id"], consumer_id, handler):
                 processed += 1
+        if processed:
+            self._metric("event_batches.processed")
         return processed
 
     def consumer_stats(self) -> list[dict[str, Any]]:
@@ -314,3 +340,8 @@ class EventBus:
             "payload": json.loads(payload) if payload else None,
             "emitted_at": row["emitted_at"],
         }
+
+    def _metric(self, name: str, delta: int = 1, *, tx: Transaction | None = None) -> None:
+        if self.observability is None:
+            return
+        self.observability.increment_metric(name, delta=delta, tx=tx)

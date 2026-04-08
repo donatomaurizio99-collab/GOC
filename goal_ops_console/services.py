@@ -7,6 +7,7 @@ from goal_ops_console.database import Database
 from goal_ops_console.event_bus import EventBus
 from goal_ops_console.execution_layer import ExecutionLayer
 from goal_ops_console.failure_intelligence import FailureIntelligence
+from goal_ops_console.observability import ObservabilityService
 from goal_ops_console.scheduler import SchedulerService
 from goal_ops_console.state_manager import StateManager
 from goal_ops_console.stubs import PermissionManager, Planner, QdrantClientStub
@@ -16,6 +17,7 @@ from goal_ops_console.stubs import PermissionManager, Planner, QdrantClientStub
 class AppServices:
     settings: Settings
     db: Database
+    observability: ObservabilityService
     event_bus: EventBus
     state_manager: StateManager
     execution_layer: ExecutionLayer
@@ -30,6 +32,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
     app_settings = settings or Settings()
     db = Database(app_settings.database_url)
     db.initialize()
+    observability = ObservabilityService(db)
     event_bus = EventBus(
         db,
         default_consumer_id=app_settings.consumer_id,
@@ -38,19 +41,28 @@ def build_services(settings: Settings | None = None) -> AppServices:
         events_retention_days=app_settings.events_retention_days,
         event_processing_retention_days=app_settings.event_processing_retention_days,
         failure_log_retention_days=app_settings.failure_log_retention_days,
+        observability=observability,
     )
     state_manager = StateManager(
         db,
         event_bus,
+        observability=observability,
         max_goal_queue_entries=app_settings.max_goal_queue_entries,
         backpressure_retry_after_seconds=app_settings.backpressure_retry_after_seconds,
     )
     failure_intelligence = FailureIntelligence(db)
-    execution_layer = ExecutionLayer(db, state_manager, event_bus, failure_intelligence)
+    execution_layer = ExecutionLayer(
+        db,
+        state_manager,
+        event_bus,
+        failure_intelligence,
+        observability=observability,
+    )
     scheduler = SchedulerService(db, state_manager)
     return AppServices(
         settings=app_settings,
         db=db,
+        observability=observability,
         event_bus=event_bus,
         state_manager=state_manager,
         execution_layer=execution_layer,

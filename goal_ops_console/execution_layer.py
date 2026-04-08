@@ -1,3 +1,4 @@
+from typing import TYPE_CHECKING
 from typing import Any
 
 from goal_ops_console.config import RETRY_STRATEGY
@@ -7,6 +8,9 @@ from goal_ops_console.failure_intelligence import FailureIntelligence, compute_e
 from goal_ops_console.models import ConflictError, NotFoundError
 from goal_ops_console.state_manager import StateManager
 
+if TYPE_CHECKING:
+    from goal_ops_console.observability import ObservabilityService
+
 
 class ExecutionLayer:
     def __init__(
@@ -15,11 +19,14 @@ class ExecutionLayer:
         state_manager: StateManager,
         event_bus: EventBus,
         failure_intelligence: FailureIntelligence,
+        *,
+        observability: "ObservabilityService | None" = None,
     ):
         self.db = db
         self.state_manager = state_manager
         self.event_bus = event_bus
         self.failure_intelligence = failure_intelligence
+        self.observability = observability
 
     def create_task(self, *, goal_id: str, title: str) -> dict[str, Any]:
         goal = self.state_manager.get_goal(goal_id)
@@ -55,6 +62,7 @@ class ExecutionLayer:
                 {"goal_id": goal_id, "title": title},
                 tx=tx,
             )
+            self._metric("tasks.created", tx=tx)
         return self.get_task(task_id)
 
     def list_tasks(self, goal_id: str | None = None) -> list[dict[str, Any]]:
@@ -143,6 +151,7 @@ class ExecutionLayer:
                 payload={"to_state": "succeeded"},
                 tx=tx,
             )
+            self._metric("tasks.succeeded", tx=tx)
         return self.get_task(task_id)
 
     def simulate_failure(
@@ -197,6 +206,7 @@ class ExecutionLayer:
                 retry_count=next_retry_count,
                 error_message=error_message,
             )
+            self._metric(f"tasks.failed.{failure_type}", tx=tx)
 
             max_retries = RETRY_STRATEGY[failure_type]["max"]
             should_escalate = self.failure_intelligence.should_escalate(
@@ -251,6 +261,7 @@ class ExecutionLayer:
                     },
                     tx=tx,
                 )
+                self._metric("tasks.poison", tx=tx)
             elif next_retry_count >= max_retries:
                 final_state = "exhausted"
                 self.state_manager.transition_task(
@@ -267,6 +278,7 @@ class ExecutionLayer:
                     },
                     tx=tx,
                 )
+                self._metric("tasks.exhausted", tx=tx)
 
             if final_state == "poison" and goal["state"] == "active":
                 self.state_manager.transition_goal(
@@ -306,3 +318,8 @@ class ExecutionLayer:
         if row is None:
             raise NotFoundError(f"Task {task_id} not found")
         return dict(row)
+
+    def _metric(self, name: str, delta: int = 1, *, tx: Transaction | None = None) -> None:
+        if self.observability is None:
+            return
+        self.observability.increment_metric(name, delta=delta, tx=tx)

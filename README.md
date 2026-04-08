@@ -144,6 +144,10 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Resets timed-out `processing` entries back to `pending` for the given consumer id.
 - `Run Retention Cleanup`
   Removes old `events`, `event_processing` and `failure_log` rows based on retention policy.
+- `Audit Log` (new section)
+  Shows recent mutating API operations with status and request details.
+- `Metrics Hooks` (in System Health)
+  Shows live instrumentation counters for HTTP traffic, transitions, events and throttling.
 
 The queue table in this section shows:
 - goal state
@@ -163,6 +167,11 @@ Retention + backpressure endpoints:
 - `GET /system/backpressure`
 - `POST /system/maintenance/retention`
 
+Observability endpoints:
+
+- `GET /system/metrics`
+- `GET /system/audit`
+
 ## Run The Test Suite
 
 ```powershell
@@ -173,7 +182,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-30 passed
+34 passed
 ```
 
 ## CI And PR Guardrails

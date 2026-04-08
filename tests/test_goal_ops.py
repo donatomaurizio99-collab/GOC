@@ -532,3 +532,69 @@ def test_30_backpressure_endpoint_and_health_include_limits(client):
     assert snapshot.json()["max_pending_events"] == client.app.state.services.settings.max_pending_events
     assert "backpressure" in health.json()
     assert "retention" in health.json()
+
+
+def test_31_metrics_endpoint_exposes_hook_counters(client):
+    created = client.post(
+        "/goals",
+        json={"title": "Metrics goal", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+    )
+    metrics = client.get("/system/metrics")
+    assert created.status_code == 201
+    assert metrics.status_code == 200
+    payload = metrics.json()
+    lookup = {item["metric_name"]: item["value"] for item in payload["metrics"]}
+    assert lookup["goals.created"] >= 1
+    assert lookup["events.emitted"] >= 1
+
+
+def test_32_audit_endpoint_lists_mutating_requests(client):
+    response = client.post(
+        "/goals",
+        json={"title": "Audit goal", "description": "check", "urgency": 0.4, "value": 0.4, "deadline_score": 0.0},
+    )
+    audit = client.get("/system/audit")
+    assert response.status_code == 201
+    assert audit.status_code == 200
+    entries = audit.json()["entries"]
+    assert any(
+        item["action"] == "http.mutation"
+        and item["status"] == "success"
+        and item["entity_id"] == "/goals"
+        and item["details"]["method"] == "POST"
+        for item in entries
+    )
+
+
+def test_33_rejected_transition_updates_error_metrics_and_audit(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reject me", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.1},
+    ).json()
+    rejected = client.post(f"/goals/{goal['goal_id']}/archive")
+    metrics = client.get("/system/metrics?prefix=errors.domain")
+    audit_error = client.get("/system/audit?status=error")
+    assert rejected.status_code == 409
+    assert metrics.status_code == 200
+    assert audit_error.status_code == 200
+    metric_names = {item["metric_name"] for item in metrics.json()["metrics"]}
+    assert "errors.domain.ConflictError" in metric_names
+    assert any(
+        item["entity_id"] == "/goals/{goal_id}/archive"
+        and item["details"]["status_code"] == 409
+        for item in audit_error.json()["entries"]
+    )
+
+
+def test_34_health_includes_metrics_and_audit_summaries(client):
+    client.post(
+        "/goals",
+        json={"title": "Health goal", "description": "check", "urgency": 0.6, "value": 0.5, "deadline_score": 0.0},
+    )
+    health = client.get("/system/health")
+    assert health.status_code == 200
+    payload = health.json()
+    assert "metrics" in payload
+    assert "audit" in payload
+    assert payload["metrics"]["goals.created"] >= 1
+    assert payload["audit"]["entries_last_24h"] >= 1

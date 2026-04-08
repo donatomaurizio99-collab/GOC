@@ -38,6 +38,10 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
             "event_processing_days": services.settings.event_processing_retention_days,
             "failure_log_days": services.settings.failure_log_retention_days,
         },
+        "metrics": services.observability.metrics_summary(),
+        "audit": {
+            "entries_last_24h": services.observability.recent_audit_count(hours=24),
+        },
         "retry_budget_per_cycle": MAX_TOTAL_RETRIES_PER_CYCLE,
         "consumer_stats": services.event_bus.consumer_stats(),
         "stuck_events": services.event_bus.stuck_events(),
@@ -116,6 +120,34 @@ def reclaim_consumer(consumer_id: str, services: AppServices = Depends(get_servi
 @router.get("/system/backpressure")
 def backpressure_status(services: AppServices = Depends(get_services)) -> dict:
     return services.event_bus.backpressure_snapshot()
+
+
+@router.get("/system/metrics")
+def metrics_status(
+    prefix: str | None = None,
+    limit: int = 200,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return {
+        "metrics": services.observability.list_metrics(prefix=prefix, limit=limit),
+        "summary": services.observability.metrics_summary(),
+    }
+
+
+@router.get("/system/audit")
+def audit_log(
+    limit: int = 200,
+    action: str | None = None,
+    status: str | None = None,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return {
+        "entries": services.observability.list_audit(
+            limit=limit,
+            action=action,
+            status=status,
+        )
+    }
 
 
 @router.post("/system/maintenance/retention")
