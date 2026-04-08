@@ -271,6 +271,34 @@
     </section>
 
     <section class="wide">
+      <h2><span>Operator Controls</span><button class="secondary" id="refresh-queue">Refresh Queue</button></h2>
+      <div class="grid-two">
+        <div class="card">
+          <span class="meta">Scheduler</span>
+          <div class="actions" style="margin-top:0.75rem;">
+            <button type="button" data-operator-action="age">Age Queue</button>
+            <button type="button" data-operator-action="pick">Pick Next Goal</button>
+          </div>
+        </div>
+        <div class="card">
+          <span class="meta">Consumer</span>
+          <form id="consumer-form" style="margin:0.75rem 0 0;">
+            <div class="split">
+              <input id="consumer-id" placeholder="Consumer ID">
+              <input id="consumer-batch-size" type="number" min="1" max="500" value="50" placeholder="Batch size">
+            </div>
+            <div class="actions">
+              <button type="button" data-operator-action="drain">Drain Events</button>
+              <button type="button" class="secondary" data-operator-action="reclaim">Reclaim Stuck</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="error" id="system-feedback"></div>
+      <div id="queue-table"></div>
+    </section>
+
+    <section class="wide">
       <h2><span>Event Log</span><button class="secondary" id="refresh-events">Refresh</button></h2>
       <form id="event-filter-form">
         <div class="split">

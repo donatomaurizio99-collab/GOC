@@ -331,3 +331,81 @@ def test_19_flow_trace_lists_all_attempts_by_goal_prefix(client):
     assert goal["goal_id"] in correlation_ids
     assert f"{goal['goal_id']}:{task['task_id']}:0" in correlation_ids
     assert f"{goal['goal_id']}:{task['task_id']}:1" in correlation_ids
+
+
+def test_20_queue_endpoint_returns_priority_order(client):
+    low = client.post(
+        "/goals",
+        json={"title": "Low", "description": "check", "urgency": 0.2, "value": 0.2, "deadline_score": 0.1},
+    ).json()
+    high = client.post(
+        "/goals",
+        json={"title": "High", "description": "check", "urgency": 0.9, "value": 0.8, "deadline_score": 0.4},
+    ).json()
+    queue = client.get("/system/queue").json()
+    assert [item["goal_id"] for item in queue] == [high["goal_id"], low["goal_id"]]
+    assert queue[0]["queue_status"] == "queued"
+
+
+def test_21_scheduler_age_endpoint_increments_wait_cycles(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Age me", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+    ).json()
+    before = client.get(f"/goals/{goal['goal_id']}").json()
+    response = client.post("/system/scheduler/age")
+    after = client.get(f"/goals/{goal['goal_id']}").json()
+    assert response.status_code == 200
+    assert response.json()["aged_count"] == 1
+    assert after["wait_cycles"] == before["wait_cycles"] + 1
+    assert after["priority"] > before["priority"]
+
+
+def test_22_scheduler_pick_endpoint_activates_highest_priority_goal(client):
+    client.post(
+        "/goals",
+        json={"title": "Low", "description": "check", "urgency": 0.2, "value": 0.2, "deadline_score": 0.0},
+    )
+    high = client.post(
+        "/goals",
+        json={"title": "High", "description": "check", "urgency": 0.9, "value": 0.8, "deadline_score": 0.4},
+    ).json()
+    response = client.post("/system/scheduler/pick")
+    picked = response.json()["picked_goal"]
+    assert picked["goal_id"] == high["goal_id"]
+    assert picked["state"] == "active"
+
+
+def test_23_consumer_drain_endpoint_processes_pending_events(client):
+    services = client.app.state.services
+    event_id = services.event_bus.record_event("probe.event", "entity-1", "goal-1")
+    response = client.post("/system/consumers/manual/drain?batch_size=10")
+    row = services.db.fetch_one(
+        "SELECT status FROM event_processing WHERE event_id = ? AND consumer_id = ?",
+        event_id,
+        "manual",
+    )
+    assert response.status_code == 200
+    assert response.json()["processed_count"] == 1
+    assert row["status"] == "processed"
+
+
+def test_24_consumer_reclaim_endpoint_resets_stuck_processing(client):
+    services = client.app.state.services
+    event_id = services.event_bus.record_event("probe.event", "entity-1", "goal-1")
+    services.db.execute(
+        "INSERT INTO event_processing "
+        "(event_id, consumer_id, status, processing_started_at, version) "
+        "VALUES (?, ?, 'processing', datetime('now', '-120 seconds'), 1)",
+        event_id,
+        "manual",
+    )
+    response = client.post("/system/consumers/manual/reclaim")
+    row = services.db.fetch_one(
+        "SELECT status FROM event_processing WHERE event_id = ? AND consumer_id = ?",
+        event_id,
+        "manual",
+    )
+    assert response.status_code == 200
+    assert response.json()["reclaimed_count"] == 1
+    assert row["status"] == "pending"

@@ -1,6 +1,7 @@
 const stateClass = (value) => `state-${String(value || "").replaceAll(" ", "_")}`;
 
 let selectedGoalId = "";
+let defaultConsumerId = "goal_ops_console";
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -169,6 +170,11 @@ function renderEvents(events) {
 }
 
 function renderHealth(health) {
+  defaultConsumerId = health.default_consumer_id || defaultConsumerId;
+  const consumerInput = document.getElementById("consumer-id");
+  if (consumerInput && !consumerInput.value.trim()) {
+    consumerInput.value = defaultConsumerId;
+  }
   document.getElementById("health-cards").innerHTML = `
     <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
     <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
@@ -192,11 +198,51 @@ function renderHealth(health) {
     : `<div class="meta">No invariant violations detected.</div>`;
 }
 
+function renderQueue(goals) {
+  const container = document.getElementById("queue-table");
+  if (!goals.length) {
+    container.innerHTML = `<div class="meta">No queue entries yet.</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="table-scroll"><table>
+    <thead>
+      <tr>
+        <th>Goal</th>
+        <th>State</th>
+        <th>Queue</th>
+        <th>Wait</th>
+        <th>Priority</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${goals.map((goal) => `
+        <tr>
+          <td>
+            <div><span class="inline-link" data-select-goal="${goal.goal_id}">${goal.title}</span></div>
+            <div class="meta">${goal.goal_id}</div>
+          </td>
+          <td><span class="pill ${stateClass(goal.state)}">${goal.state}</span></td>
+          <td>${goal.queue_status}</td>
+          <td>${goal.wait_cycles}</td>
+          <td>
+            <div>base ${Number(goal.base_priority || 0).toFixed(2)} / effective ${Number(goal.priority || 0).toFixed(2)}</div>
+            <div class="priority-track"><div class="priority-fill" style="width:${Math.round((goal.priority || 0) * 100)}%"></div></div>
+          </td>
+        </tr>`).join("")}
+    </tbody>
+  </table></div>`;
+}
+
 async function refreshGoals() {
   const goals = await api("/goals");
   renderGoals(goals);
   const selectedLabel = selectedGoalId ? `Selected goal: ${selectedGoalId}` : "No goal selected.";
   document.getElementById("selected-goal-label").textContent = selectedLabel;
+}
+
+async function refreshQueue() {
+  const queue = await api("/system/queue");
+  renderQueue(queue);
 }
 
 async function refreshTasks() {
@@ -223,7 +269,32 @@ async function refreshHealth() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshGoals(), refreshTasks(), refreshEvents(), refreshHealth()]);
+  await Promise.all([refreshGoals(), refreshTasks(), refreshEvents(), refreshHealth(), refreshQueue()]);
+}
+
+async function runOperatorAction(action) {
+  const consumerId = document.getElementById("consumer-id").value.trim() || defaultConsumerId;
+  const batchSize = Number(document.getElementById("consumer-batch-size").value || 50);
+  let result;
+  if (action === "age") {
+    result = await api("/system/scheduler/age", { method: "POST" });
+    document.getElementById("system-feedback").textContent = `Aged ${result.aged_count} queue entries.`;
+  } else if (action === "pick") {
+    result = await api("/system/scheduler/pick", { method: "POST" });
+    const picked = result.picked_goal;
+    document.getElementById("system-feedback").textContent = picked
+      ? `Activated goal ${picked.goal_id}.`
+      : "No queued goal was available to pick.";
+  } else if (action === "drain") {
+    result = await api(`/system/consumers/${encodeURIComponent(consumerId)}/drain?batch_size=${batchSize}`, {
+      method: "POST",
+    });
+    document.getElementById("system-feedback").textContent = `Consumer ${consumerId} processed ${result.processed_count} events.`;
+  } else if (action === "reclaim") {
+    result = await api(`/system/consumers/${encodeURIComponent(consumerId)}/reclaim`, { method: "POST" });
+    document.getElementById("system-feedback").textContent = `Consumer ${consumerId} reclaimed ${result.reclaimed_count} stuck events.`;
+  }
+  await refreshAll();
 }
 
 document.getElementById("goal-form").addEventListener("submit", async (event) => {
@@ -282,6 +353,7 @@ document.getElementById("event-filter-form").addEventListener("submit", async (e
 document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
+document.getElementById("refresh-queue").addEventListener("click", refreshQueue);
 
 document.addEventListener("click", async (event) => {
   const goalAction = event.target.dataset.goalAction;
@@ -290,8 +362,13 @@ document.addEventListener("click", async (event) => {
   const taskId = event.target.dataset.taskId;
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
+  const operatorAction = event.target.dataset.operatorAction;
 
   try {
+    if (operatorAction) {
+      await runOperatorAction(operatorAction);
+    }
+
     if (goalAction && goalId) {
       await api(`/goals/${goalId}/${goalAction}`, { method: "POST" });
       selectedGoalId = goalId;
@@ -331,7 +408,7 @@ document.addEventListener("click", async (event) => {
       document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
     }
   } catch (error) {
-    const target = goalAction ? "goal-error" : "task-error";
+    const target = operatorAction ? "system-feedback" : goalAction ? "goal-error" : "task-error";
     showError(target, error);
   }
 });
