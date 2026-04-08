@@ -1,3 +1,4 @@
+from typing import TYPE_CHECKING
 from typing import Any
 
 from goal_ops_console.config import BACKPRESSURE_RETRY_AFTER_SECONDS, MAX_GOAL_QUEUE_ENTRIES, SPEC_VERSION
@@ -7,6 +8,9 @@ from goal_ops_console.models import BackpressureError, ConflictError, NotFoundEr
 from goal_ops_console.scheduler import base_priority
 from goal_ops_console.transition_rules import queue_status_for_goal_state, validate_transition
 
+if TYPE_CHECKING:
+    from goal_ops_console.observability import ObservabilityService
+
 
 class StateManager:
     def __init__(
@@ -14,11 +18,13 @@ class StateManager:
         db: Database,
         event_bus: EventBus,
         *,
+        observability: "ObservabilityService | None" = None,
         max_goal_queue_entries: int = MAX_GOAL_QUEUE_ENTRIES,
         backpressure_retry_after_seconds: int = BACKPRESSURE_RETRY_AFTER_SECONDS,
     ):
         self.db = db
         self.event_bus = event_bus
+        self.observability = observability
         self.max_goal_queue_entries = max_goal_queue_entries
         self.backpressure_retry_after_seconds = backpressure_retry_after_seconds
 
@@ -83,6 +89,7 @@ class StateManager:
                 },
                 tx=tx,
             )
+            self._metric("goals.created", tx=tx)
         return self.get_goal(goal_id)
 
     def list_goals(self) -> list[dict[str, Any]]:
@@ -164,6 +171,7 @@ class StateManager:
 
         valid, reason_text = validate_transition("goal", goal["state"], to_state, owner)
         if not valid:
+            self._metric("transition.rejected")
             self.event_bus.record_event(
                 "transition.rejected",
                 goal_id,
@@ -214,6 +222,7 @@ class StateManager:
             raise NotFoundError(f"Task {task_id} not found")
         valid, reason_text = validate_transition("task", task["status"], to_state, owner)
         if not valid:
+            self._metric("transition.rejected", tx=tx)
             self.event_bus.record_event(
                 "transition.rejected",
                 task_id,
@@ -246,6 +255,7 @@ class StateManager:
             payload or {"from_state": task["status"], "to_state": to_state},
             tx=tx,
         )
+        self._metric(f"tasks.transition.{to_state}", tx=tx)
         updated = tx.fetch_one(
             """SELECT ts.*, t.title
                FROM task_state ts
@@ -342,6 +352,7 @@ class StateManager:
             payload or {"from_state": goal["state"], "to_state": to_state, "reason": reason},
             tx=tx,
         )
+        self._metric(f"goals.transition.{to_state}", tx=tx)
         updated_goal = tx.fetch_one(
             """SELECT g.goal_id,
                       g.title,
@@ -367,3 +378,8 @@ class StateManager:
             goal["goal_id"],
         )
         return dict(updated_goal) if updated_goal else {}
+
+    def _metric(self, name: str, delta: int = 1, *, tx: Transaction | None = None) -> None:
+        if self.observability is None:
+            return
+        self.observability.increment_metric(name, delta=delta, tx=tx)

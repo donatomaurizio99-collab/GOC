@@ -183,6 +183,38 @@ function renderEvents(events) {
   </table></div>`;
 }
 
+function renderAudit(entries) {
+  const container = document.getElementById("audit-table");
+  if (!entries.length) {
+    container.innerHTML = `<div class="meta">No audit entries yet.</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="table-scroll"><table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Action</th>
+        <th>Status</th>
+        <th>Entity</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${entries.map((entry) => `
+        <tr>
+          <td>${entry.created_at}</td>
+          <td>${entry.action}<div class="meta">${entry.actor}</div></td>
+          <td>${entry.status}</td>
+          <td>
+            <div>${entry.entity_type || "-"}</div>
+            <div class="meta">${entry.entity_id || "-"}</div>
+          </td>
+          <td><pre>${JSON.stringify(entry.details || {}, null, 2)}</pre></td>
+        </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+}
+
 function renderHealth(health) {
   defaultConsumerId = health.default_consumer_id || defaultConsumerId;
   const consumerInput = document.getElementById("consumer-id");
@@ -191,13 +223,17 @@ function renderHealth(health) {
   }
   const backpressure = health.backpressure || {};
   const retention = health.retention || {};
+  const metrics = health.metrics || {};
+  const audit = health.audit || {};
   document.getElementById("health-cards").innerHTML = `
     <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
     <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
     <div class="card"><span class="meta">Tasks</span><strong>${health.totals.tasks}</strong></div>
     <div class="card"><span class="meta">Retry Budget</span><strong>${health.retry_budget_per_cycle}</strong></div>
     <div class="card"><span class="meta">Pending Events</span><strong>${backpressure.pending_events || 0}</strong></div>
-    <div class="card"><span class="meta">Backpressure</span><strong>${backpressure.is_throttled ? "ON" : "OFF"}</strong></div>`;
+    <div class="card"><span class="meta">Backpressure</span><strong>${backpressure.is_throttled ? "ON" : "OFF"}</strong></div>
+    <div class="card"><span class="meta">429 Count</span><strong>${metrics["http.requests.status.429"] || 0}</strong></div>
+    <div class="card"><span class="meta">Audit (24h)</span><strong>${audit.entries_last_24h || 0}</strong></div>`;
 
   document.getElementById("backpressure-status").innerHTML = `
     <div class="meta">Consumer: ${backpressure.consumer_id || "-"}</div>
@@ -208,6 +244,13 @@ function renderHealth(health) {
     <div class="meta">Events: ${retention.events_days || 0} days</div>
     <div class="meta">Event Processing: ${retention.event_processing_days || 0} days</div>
     <div class="meta">Failure Log: ${retention.failure_log_days || 0} days</div>`;
+
+  const metricRows = Object.entries(metrics);
+  document.getElementById("metrics-hooks").innerHTML = metricRows.length
+    ? `<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${
+        metricRows.map(([name, value]) => `<tr><td>${name}</td><td>${value}</td></tr>`).join("")
+      }</tbody></table>`
+    : `<div class="meta">No metrics captured yet.</div>`;
 
   document.getElementById("consumer-stats").innerHTML = health.consumer_stats.length
     ? `<table><thead><tr><th>Consumer</th><th>Status</th><th>Count</th></tr></thead><tbody>${
@@ -291,13 +334,31 @@ async function refreshEvents() {
   renderEvents(events);
 }
 
+async function refreshAudit() {
+  const action = document.getElementById("audit-action").value.trim();
+  const status = document.getElementById("audit-status").value.trim();
+  const params = new URLSearchParams();
+  if (action) params.set("action", action);
+  if (status) params.set("status", status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const payload = await api(`/system/audit${suffix}`);
+  renderAudit(payload.entries || []);
+}
+
 async function refreshHealth() {
   const health = await api("/system/health");
   renderHealth(health);
 }
 
 async function refreshAll() {
-  await Promise.all([refreshGoals(), refreshTasks(), refreshEvents(), refreshHealth(), refreshQueue()]);
+  await Promise.all([
+    refreshGoals(),
+    refreshTasks(),
+    refreshEvents(),
+    refreshAudit(),
+    refreshHealth(),
+    refreshQueue(),
+  ]);
 }
 
 async function runOperatorAction(action) {
@@ -386,9 +447,15 @@ document.getElementById("event-filter-form").addEventListener("submit", async (e
   await refreshEvents();
 });
 
+document.getElementById("audit-filter-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await refreshAudit();
+});
+
 document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
+document.getElementById("refresh-audit").addEventListener("click", refreshAudit);
 document.getElementById("refresh-queue").addEventListener("click", refreshQueue);
 
 document.addEventListener("click", async (event) => {
@@ -454,6 +521,7 @@ setInterval(() => {
   refreshGoals().catch(() => {});
   refreshTasks().catch(() => {});
   refreshEvents().catch(() => {});
+  refreshAudit().catch(() => {});
   refreshHealth().catch(() => {});
   refreshQueue().catch(() => {});
 }, 5000);

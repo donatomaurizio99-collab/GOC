@@ -159,6 +159,27 @@ CREATE TABLE IF NOT EXISTS learnings (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_active_version
 ON learnings(parent_learning_id)
 WHERE status = 'promoted';
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  audit_id        TEXT PRIMARY KEY,
+  action          TEXT NOT NULL,
+  actor           TEXT NOT NULL,
+  status          TEXT NOT NULL,
+  entity_type     TEXT,
+  entity_id       TEXT,
+  correlation_id  TEXT,
+  details         TEXT,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action_created_at ON audit_log(action, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS metrics_counters (
+  metric_name TEXT PRIMARY KEY,
+  value       INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_metrics_updated_at ON metrics_counters(updated_at DESC);
 """
 
 
