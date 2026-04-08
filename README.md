@@ -32,8 +32,7 @@ python -m pip install fastapi jinja2 uvicorn pytest
 Start the server:
 
 ```powershell
-$env:GOAL_OPS_DATABASE_URL="goal_ops.db"
-python -m uvicorn goal_ops_console.main:app --reload --app-dir "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\start-server.ps1
 ```
 
 Open the dashboard:
@@ -51,9 +50,7 @@ Ctrl + C
 Start it again:
 
 ```powershell
-Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-$env:GOAL_OPS_DATABASE_URL="goal_ops.db"
-python -m uvicorn goal_ops_console.main:app --reload --app-dir "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\start-server.ps1
 ```
 
 ## Reset The Local Database
@@ -64,8 +61,7 @@ Use this when you want a clean manual test run.
 2. Run:
 
 ```powershell
-Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-Remove-Item ".\goal_ops.db", ".\goal_ops.db-journal" -ErrorAction SilentlyContinue
+.\scripts\reset-db.ps1
 ```
 
 3. Start the server again.
@@ -138,8 +134,7 @@ Flow:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-$env:PYTHONDONTWRITEBYTECODE='1'
-python -m pytest -q
+.\scripts\run-tests.ps1
 ```
 
 Current result during implementation:
@@ -186,8 +181,7 @@ Use:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-$env:GOAL_OPS_DATABASE_URL="goal_ops.db"
-python -m uvicorn goal_ops_console.main:app --reload --app-dir "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\start-server.ps1
 ```
 
 ### Old Goals Or Tasks Still Visible
@@ -198,7 +192,7 @@ Reset it with:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-Remove-Item ".\goal_ops.db", ".\goal_ops.db-journal" -ErrorAction SilentlyContinue
+.\scripts\reset-db.ps1
 ```
 
 Then restart the server and hard-reload the browser.
@@ -248,4 +242,7 @@ If a value is rejected:
 - [main.py](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/main.py)
 - [app.js](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/static/app.js)
 - [index.html](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/templates/index.html)
+- [start-server.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-server.ps1)
+- [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
+- [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
