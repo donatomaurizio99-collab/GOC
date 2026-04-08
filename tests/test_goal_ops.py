@@ -3,9 +3,12 @@ from __future__ import annotations
 import threading
 
 import pytest
+from fastapi.testclient import TestClient
 
+from goal_ops_console.config import Settings
 from goal_ops_console.database import new_id, now_utc
 from goal_ops_console.failure_intelligence import compute_error_hash
+from goal_ops_console.main import create_app
 from goal_ops_console.models import OptimisticLockError, RetryBudgetExceeded
 from goal_ops_console.scheduler import RetryBudget, write_with_retry
 
@@ -409,3 +412,123 @@ def test_24_consumer_reclaim_endpoint_resets_stuck_processing(client):
     assert response.status_code == 200
     assert response.json()["reclaimed_count"] == 1
     assert row["status"] == "pending"
+
+
+def test_25_backpressure_blocks_new_events_with_retry_hint():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            max_pending_events=1,
+            backpressure_retry_after_seconds=7,
+        )
+    )
+    with TestClient(app) as local_client:
+        first = local_client.post(
+            "/goals",
+            json={"title": "A", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+        )
+        blocked = local_client.post(
+            "/goals",
+            json={"title": "B", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+        )
+        assert first.status_code == 201
+        assert blocked.status_code == 429
+        assert blocked.json()["retry_after_seconds"] == 7
+        assert "Event backlog limit reached" in blocked.json()["detail"]
+
+
+def test_26_goal_queue_limit_returns_429():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            max_pending_events=10_000,
+            max_goal_queue_entries=1,
+            backpressure_retry_after_seconds=9,
+        )
+    )
+    with TestClient(app) as local_client:
+        first = local_client.post(
+            "/goals",
+            json={"title": "A", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+        )
+        blocked = local_client.post(
+            "/goals",
+            json={"title": "B", "description": "check", "urgency": 0.5, "value": 0.5, "deadline_score": 0.0},
+        )
+        assert first.status_code == 201
+        assert blocked.status_code == 429
+        assert blocked.json()["retry_after_seconds"] == 9
+        assert "Goal queue limit reached" in blocked.json()["detail"]
+
+
+def test_27_scheduler_endpoints_return_429_under_backpressure():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            max_pending_events=1,
+            backpressure_retry_after_seconds=6,
+        )
+    )
+    with TestClient(app) as local_client:
+        created = local_client.post(
+            "/goals",
+            json={"title": "A", "description": "check", "urgency": 0.4, "value": 0.4, "deadline_score": 0.0},
+        )
+        response = local_client.post("/system/scheduler/age")
+        assert created.status_code == 201
+        assert response.status_code == 429
+        assert response.json()["retry_after_seconds"] == 6
+
+
+def test_28_consumer_drain_enforces_batch_limit_with_429(client):
+    response = client.post("/system/consumers/manual/drain?batch_size=9999")
+    assert response.status_code == 429
+    assert "exceeds safe limit" in response.json()["detail"]
+
+
+def test_29_retention_cleanup_deletes_old_records(client):
+    services = client.app.state.services
+    old_event_id = new_id()
+    old_failure_id = new_id()
+    services.db.execute(
+        "INSERT INTO events (event_id, event_type, entity_id, correlation_id, payload, emitted_at) "
+        "VALUES (?, 'retention.old', 'entity-1', 'goal-1', '{}', datetime('now', '-120 days'))",
+        old_event_id,
+    )
+    services.db.execute(
+        "INSERT INTO event_processing "
+        "(event_id, consumer_id, status, processing_started_at, processed_at, version) "
+        "VALUES (?, ?, 'processed', datetime('now', '-120 days'), datetime('now', '-120 days'), 1)",
+        old_event_id,
+        services.settings.consumer_id,
+    )
+    services.db.execute(
+        "INSERT INTO failure_log "
+        "(id, task_id, goal_id, correlation_id, failure_type, fingerprint, retry_count, "
+        " last_error, status, version, created_at, updated_at) "
+        "VALUES (?, 'task-old', 'goal-old', 'goal-old:task-old:0', 'ExecutionFailure', "
+        " 'old-fingerprint', 1, 'old', 'recorded', 1, datetime('now', '-120 days'), datetime('now', '-120 days'))",
+        old_failure_id,
+    )
+    response = client.post("/system/maintenance/retention")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_processing_deleted"] == 1
+    assert payload["events_deleted"] == 1
+    assert payload["failure_log_deleted"] == 1
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM events WHERE event_id = ?", old_event_id) == 0
+    assert (
+        services.db.fetch_scalar("SELECT COUNT(*) FROM event_processing WHERE event_id = ?", old_event_id)
+        == 0
+    )
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM failure_log WHERE id = ?", old_failure_id) == 0
+
+
+def test_30_backpressure_endpoint_and_health_include_limits(client):
+    snapshot = client.get("/system/backpressure")
+    health = client.get("/system/health")
+    assert snapshot.status_code == 200
+    assert health.status_code == 200
+    assert snapshot.json()["max_pending_events"] == client.app.state.services.settings.max_pending_events
+    assert "backpressure" in health.json()
+    assert "retention" in health.json()

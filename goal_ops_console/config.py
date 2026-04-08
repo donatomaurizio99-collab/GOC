@@ -28,6 +28,12 @@ OL_MAX_RETRIES = 3
 OL_BASE_BACKOFF_MS = 10
 MAX_TOTAL_RETRIES_PER_CYCLE = 100
 
+# Backpressure
+MAX_PENDING_EVENTS = 1_000
+MAX_GOAL_QUEUE_ENTRIES = 500
+MAX_CONSUMER_DRAIN_BATCH_SIZE = 500
+BACKPRESSURE_RETRY_AFTER_SECONDS = 10
+
 # Event Processing
 PROCESSING_TIMEOUT_SECONDS = 30
 CONSUMER_BATCH_SIZE = 50
@@ -41,6 +47,9 @@ ERROR_HASH_ESCALATION_WINDOW_MINUTES = 30
 # Maintenance
 EPHEMERAL_CLEANUP_INTERVAL_SECONDS = 300
 EPHEMERAL_MAX_ROWS = 10_000
+EVENTS_RETENTION_DAYS = 30
+EVENT_PROCESSING_RETENTION_DAYS = 30
+FAILURE_LOG_RETENTION_DAYS = 90
 
 # The sandbox in this workspace rejects file-backed SQLite locks, so the
 # persistent `goal_ops.db` path should be supplied via GOAL_OPS_DATABASE_URL.
@@ -60,3 +69,10 @@ GOAL_QUEUE_STATUS_MAP = {
 class Settings:
     database_url: str = DEFAULT_DATABASE_URL
     consumer_id: str = DEFAULT_CONSUMER_ID
+    max_pending_events: int = MAX_PENDING_EVENTS
+    max_goal_queue_entries: int = MAX_GOAL_QUEUE_ENTRIES
+    max_consumer_drain_batch_size: int = MAX_CONSUMER_DRAIN_BATCH_SIZE
+    backpressure_retry_after_seconds: int = BACKPRESSURE_RETRY_AFTER_SECONDS
+    events_retention_days: int = EVENTS_RETENTION_DAYS
+    event_processing_retention_days: int = EVENT_PROCESSING_RETENTION_DAYS
+    failure_log_retention_days: int = FAILURE_LOG_RETENTION_DAYS

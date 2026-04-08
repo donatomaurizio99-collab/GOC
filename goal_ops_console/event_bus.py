@@ -4,6 +4,7 @@ from typing import Any
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, PROCESSING_TIMEOUT_SECONDS
 from goal_ops_console.database import Database, Transaction, new_id, now_utc
+from goal_ops_console.models import BackpressureError
 
 
 def make_payload(data: dict[str, Any] | None = None) -> str:
@@ -11,9 +12,26 @@ def make_payload(data: dict[str, Any] | None = None) -> str:
 
 
 class EventBus:
-    def __init__(self, db: Database, processing_timeout_seconds: int = PROCESSING_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        db: Database,
+        processing_timeout_seconds: int = PROCESSING_TIMEOUT_SECONDS,
+        *,
+        default_consumer_id: str,
+        max_pending_events: int,
+        backpressure_retry_after_seconds: int,
+        events_retention_days: int,
+        event_processing_retention_days: int,
+        failure_log_retention_days: int,
+    ):
         self.db = db
         self.processing_timeout_seconds = processing_timeout_seconds
+        self.default_consumer_id = default_consumer_id
+        self.max_pending_events = max_pending_events
+        self.backpressure_retry_after_seconds = backpressure_retry_after_seconds
+        self.events_retention_days = events_retention_days
+        self.event_processing_retention_days = event_processing_retention_days
+        self.failure_log_retention_days = failure_log_retention_days
 
     def record_event(
         self,
@@ -25,6 +43,7 @@ class EventBus:
         event_id: str | None = None,
         tx: Transaction | None = None,
     ) -> str:
+        self.ensure_within_backpressure(tx=tx)
         identifier = event_id or new_id()
         runner = tx or self.db
         runner.execute(
@@ -39,6 +58,83 @@ class EventBus:
             now_utc(),
         )
         return identifier
+
+    def pending_backlog_count(
+        self,
+        consumer_id: str | None = None,
+        *,
+        tx: Transaction | None = None,
+    ) -> int:
+        consumer = consumer_id or self.default_consumer_id
+        runner = tx or self.db
+        value = runner.fetch_scalar(
+            """SELECT COUNT(*)
+               FROM events e
+               LEFT JOIN event_processing ep
+                 ON e.event_id = ep.event_id AND ep.consumer_id = ?
+               WHERE ep.event_id IS NULL
+                  OR ep.status IN ('pending', 'failed', 'processing')""",
+            consumer,
+        )
+        return int(value or 0)
+
+    def backpressure_snapshot(self, consumer_id: str | None = None) -> dict[str, Any]:
+        consumer = consumer_id or self.default_consumer_id
+        pending = self.pending_backlog_count(consumer)
+        return {
+            "consumer_id": consumer,
+            "pending_events": pending,
+            "max_pending_events": self.max_pending_events,
+            "is_throttled": pending >= self.max_pending_events,
+            "retry_after_seconds": self.backpressure_retry_after_seconds,
+        }
+
+    def ensure_within_backpressure(
+        self,
+        consumer_id: str | None = None,
+        *,
+        tx: Transaction | None = None,
+    ) -> int:
+        consumer = consumer_id or self.default_consumer_id
+        pending = self.pending_backlog_count(consumer, tx=tx)
+        if pending >= self.max_pending_events:
+            raise BackpressureError(
+                (
+                    f"Event backlog limit reached for consumer '{consumer}' "
+                    f"({pending}/{self.max_pending_events}). Drain events and retry."
+                ),
+                retry_after_seconds=self.backpressure_retry_after_seconds,
+            )
+        return pending
+
+    def run_retention_cleanup(self) -> dict[str, int]:
+        with self.db.transaction() as tx:
+            event_processing_deleted = tx.execute(
+                """DELETE FROM event_processing
+                   WHERE status = 'processed'
+                   AND processed_at IS NOT NULL
+                   AND processed_at < datetime('now', ? || ' days')""",
+                f"-{self.event_processing_retention_days}",
+            )
+            events_deleted = tx.execute(
+                """DELETE FROM events
+                   WHERE emitted_at < datetime('now', ? || ' days')
+                   AND NOT EXISTS (
+                       SELECT 1 FROM event_processing ep
+                       WHERE ep.event_id = events.event_id
+                   )""",
+                f"-{self.events_retention_days}",
+            )
+            failures_deleted = tx.execute(
+                """DELETE FROM failure_log
+                   WHERE created_at < datetime('now', ? || ' days')""",
+                f"-{self.failure_log_retention_days}",
+            )
+        return {
+            "events_deleted": events_deleted,
+            "event_processing_deleted": event_processing_deleted,
+            "failure_log_deleted": failures_deleted,
+        }
 
     def list_events(
         self,

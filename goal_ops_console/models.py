@@ -54,6 +54,14 @@ class RetryBudgetExceeded(DomainError):
     status_code = 429
 
 
+class BackpressureError(DomainError):
+    status_code = 429
+
+    def __init__(self, message: str, *, retry_after_seconds: int):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class GoalCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=1_000)

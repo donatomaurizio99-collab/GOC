@@ -225,6 +225,15 @@
       min-height: 1.2rem;
       font-size: 0.9rem;
     }
+    #system-feedback {
+      color: var(--muted);
+      min-height: 1.2rem;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    #system-feedback.error-state {
+      color: var(--bad);
+    }
     .inline-link {
       color: var(--info);
       cursor: pointer;
@@ -293,6 +302,12 @@
             </div>
           </form>
         </div>
+        <div class="card">
+          <span class="meta">Maintenance</span>
+          <div class="actions" style="margin-top:0.75rem;">
+            <button type="button" data-operator-action="retention">Run Retention Cleanup</button>
+          </div>
+        </div>
       </div>
       <div class="error" id="system-feedback"></div>
       <div id="queue-table"></div>
@@ -313,6 +328,10 @@
     <section>
       <h2>System Health</h2>
       <div id="health-cards" class="grid-two"></div>
+      <h3>Backpressure</h3>
+      <div id="backpressure-status"></div>
+      <h3>Retention Policy</h3>
+      <div id="retention-policy"></div>
       <h3>Consumer Stats</h3>
       <div id="consumer-stats"></div>
       <h3>Stuck Events</h3>

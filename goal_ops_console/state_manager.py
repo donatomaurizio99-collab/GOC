@@ -1,17 +1,26 @@
 from typing import Any
 
-from goal_ops_console.config import SPEC_VERSION
+from goal_ops_console.config import BACKPRESSURE_RETRY_AFTER_SECONDS, MAX_GOAL_QUEUE_ENTRIES, SPEC_VERSION
 from goal_ops_console.database import Database, Transaction, new_id, now_utc
 from goal_ops_console.event_bus import EventBus
-from goal_ops_console.models import ConflictError, NotFoundError, OptimisticLockError
+from goal_ops_console.models import BackpressureError, ConflictError, NotFoundError, OptimisticLockError
 from goal_ops_console.scheduler import base_priority
 from goal_ops_console.transition_rules import queue_status_for_goal_state, validate_transition
 
 
 class StateManager:
-    def __init__(self, db: Database, event_bus: EventBus):
+    def __init__(
+        self,
+        db: Database,
+        event_bus: EventBus,
+        *,
+        max_goal_queue_entries: int = MAX_GOAL_QUEUE_ENTRIES,
+        backpressure_retry_after_seconds: int = BACKPRESSURE_RETRY_AFTER_SECONDS,
+    ):
         self.db = db
         self.event_bus = event_bus
+        self.max_goal_queue_entries = max_goal_queue_entries
+        self.backpressure_retry_after_seconds = backpressure_retry_after_seconds
 
     def create_goal(
         self,
@@ -22,6 +31,15 @@ class StateManager:
         value: float,
         deadline_score: float,
     ) -> dict[str, Any]:
+        queue_size = int(self.db.fetch_scalar("SELECT COUNT(*) FROM goal_queue") or 0)
+        if queue_size >= self.max_goal_queue_entries:
+            raise BackpressureError(
+                (
+                    f"Goal queue limit reached ({queue_size}/{self.max_goal_queue_entries}). "
+                    "Archive or complete existing goals and retry."
+                ),
+                retry_after_seconds=self.backpressure_retry_after_seconds,
+            )
         goal_id = new_id()
         timestamp = now_utc()
         priority = base_priority(urgency, value, deadline_score)

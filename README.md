@@ -142,12 +142,26 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Manually runs one consumer batch and marks pending events as processed for the given consumer id.
 - `Reclaim Stuck`
   Resets timed-out `processing` entries back to `pending` for the given consumer id.
+- `Run Retention Cleanup`
+  Removes old `events`, `event_processing` and `failure_log` rows based on retention policy.
 
 The queue table in this section shows:
 - goal state
 - queue status
 - wait cycles
 - base vs. effective priority
+
+Backpressure behavior:
+
+- Event writes are throttled when pending backlog reaches the configured cap.
+- Goal creation is throttled when the goal queue reaches its entry limit.
+- API returns `429` with `Retry-After` and `retry_after_seconds` for throttled operations.
+- Scheduler operations (`/system/scheduler/age` and `/system/scheduler/pick`) are also protected by backlog checks.
+
+Retention + backpressure endpoints:
+
+- `GET /system/backpressure`
+- `POST /system/maintenance/retention`
 
 ## Run The Test Suite
 
@@ -159,7 +173,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-24 passed
+30 passed
 ```
 
 ## CI And PR Guardrails

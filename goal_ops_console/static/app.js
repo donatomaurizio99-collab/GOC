@@ -11,14 +11,28 @@ async function api(path, options = {}) {
   const isJson = response.headers.get("content-type")?.includes("application/json");
   const payload = isJson ? await response.json() : await response.text();
   if (!response.ok) {
-    const message = typeof payload === "object" && payload ? payload.detail || JSON.stringify(payload) : payload;
-    throw new Error(message || `Request failed: ${response.status}`);
+    let message = typeof payload === "object" && payload ? payload.detail || JSON.stringify(payload) : payload;
+    if (typeof payload === "object" && payload && typeof payload.retry_after_seconds === "number") {
+      message = `${message} Retry after ${payload.retry_after_seconds}s.`;
+    }
+    const error = new Error(`[${response.status}] ${message || "Request failed"}`);
+    error.status = response.status;
+    error.retryAfterSeconds = payload?.retry_after_seconds;
+    throw error;
   }
   return payload;
 }
 
 function showError(id, error) {
-  document.getElementById(id).textContent = error?.message || "";
+  const target = document.getElementById(id);
+  target.textContent = error?.message || "";
+  if (id === "system-feedback") {
+    if (error) {
+      target.classList.add("error-state");
+    } else {
+      target.classList.remove("error-state");
+    }
+  }
 }
 
 function renderGoalButtons(goal) {
@@ -175,11 +189,25 @@ function renderHealth(health) {
   if (consumerInput && !consumerInput.value.trim()) {
     consumerInput.value = defaultConsumerId;
   }
+  const backpressure = health.backpressure || {};
+  const retention = health.retention || {};
   document.getElementById("health-cards").innerHTML = `
     <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
     <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
     <div class="card"><span class="meta">Tasks</span><strong>${health.totals.tasks}</strong></div>
-    <div class="card"><span class="meta">Retry Budget</span><strong>${health.retry_budget_per_cycle}</strong></div>`;
+    <div class="card"><span class="meta">Retry Budget</span><strong>${health.retry_budget_per_cycle}</strong></div>
+    <div class="card"><span class="meta">Pending Events</span><strong>${backpressure.pending_events || 0}</strong></div>
+    <div class="card"><span class="meta">Backpressure</span><strong>${backpressure.is_throttled ? "ON" : "OFF"}</strong></div>`;
+
+  document.getElementById("backpressure-status").innerHTML = `
+    <div class="meta">Consumer: ${backpressure.consumer_id || "-"}</div>
+    <div class="meta">Pending: ${backpressure.pending_events || 0} / ${backpressure.max_pending_events || 0}</div>
+    <div class="meta">Retry-After: ${backpressure.retry_after_seconds || 0}s</div>`;
+
+  document.getElementById("retention-policy").innerHTML = `
+    <div class="meta">Events: ${retention.events_days || 0} days</div>
+    <div class="meta">Event Processing: ${retention.event_processing_days || 0} days</div>
+    <div class="meta">Failure Log: ${retention.failure_log_days || 0} days</div>`;
 
   document.getElementById("consumer-stats").innerHTML = health.consumer_stats.length
     ? `<table><thead><tr><th>Consumer</th><th>Status</th><th>Count</th></tr></thead><tbody>${
@@ -276,6 +304,7 @@ async function runOperatorAction(action) {
   const consumerId = document.getElementById("consumer-id").value.trim() || defaultConsumerId;
   const batchSize = Number(document.getElementById("consumer-batch-size").value || 50);
   let result;
+  showError("system-feedback", null);
   if (action === "age") {
     result = await api("/system/scheduler/age", { method: "POST" });
     document.getElementById("system-feedback").textContent = `Aged ${result.aged_count} queue entries.`;
@@ -293,6 +322,13 @@ async function runOperatorAction(action) {
   } else if (action === "reclaim") {
     result = await api(`/system/consumers/${encodeURIComponent(consumerId)}/reclaim`, { method: "POST" });
     document.getElementById("system-feedback").textContent = `Consumer ${consumerId} reclaimed ${result.reclaimed_count} stuck events.`;
+  } else if (action === "retention") {
+    result = await api("/system/maintenance/retention", { method: "POST" });
+    document.getElementById("system-feedback").textContent = (
+      `Retention cleanup deleted events=${result.events_deleted}, `
+      + `event_processing=${result.event_processing_deleted}, `
+      + `failure_log=${result.failure_log_deleted}.`
+    );
   }
   await refreshAll();
 }
@@ -419,4 +455,5 @@ setInterval(() => {
   refreshTasks().catch(() => {});
   refreshEvents().catch(() => {});
   refreshHealth().catch(() => {});
+  refreshQueue().catch(() => {});
 }, 5000);
