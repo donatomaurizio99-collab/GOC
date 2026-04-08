@@ -130,6 +130,25 @@ Flow:
    Expected events:
    `goal.created`, `goal.activated`, `task.created`, `task.started`, `task.failed`, `task.retried`, `task.failed`, `task.poison.detected`, `goal.escalation_pending`, `goal.hitl_approved`
 
+## Operator Controls
+
+The dashboard now includes an `Operator Controls` section for supervised Phase 2 operations.
+
+- `Age Queue`
+  Ages every queued or active queue entry once and updates `wait_cycles` and effective priority.
+- `Pick Next Goal`
+  Runs the scheduler pick logic and activates the highest-priority queued goal.
+- `Drain Events`
+  Manually runs one consumer batch and marks pending events as processed for the given consumer id.
+- `Reclaim Stuck`
+  Resets timed-out `processing` entries back to `pending` for the given consumer id.
+
+The queue table in this section shows:
+- goal state
+- queue status
+- wait cycles
+- base vs. effective priority
+
 ## Run The Test Suite
 
 ```powershell
@@ -140,7 +159,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-19 passed
+24 passed
 ```
 
 ## Troubleshooting

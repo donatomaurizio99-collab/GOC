@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
-from goal_ops_console.config import MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
+from goal_ops_console.config import CONSUMER_BATCH_SIZE, MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(tags=["system"])
@@ -24,6 +24,7 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
     total_tasks = services.db.fetch_scalar("SELECT COUNT(*) FROM task_state") or 0
     return {
         "spec_version": SPEC_VERSION,
+        "default_consumer_id": services.settings.consumer_id,
         "totals": {
             "events": int(total_events),
             "goals": int(total_goals),
@@ -34,3 +35,61 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
         "stuck_events": services.event_bus.stuck_events(),
         "invariant_violations": services.state_manager.find_invariant_violations(),
     }
+
+
+@router.get("/system/queue")
+def queue_snapshot(services: AppServices = Depends(get_services)) -> list[dict]:
+    rows = services.db.fetch_all(
+        """SELECT g.goal_id,
+                  g.title,
+                  g.state,
+                  q.status AS queue_status,
+                  q.base_priority,
+                  q.priority,
+                  q.wait_cycles,
+                  q.force_promoted,
+                  q.created_at,
+                  q.updated_at
+           FROM goal_queue q
+           JOIN goals g ON g.goal_id = q.goal_id
+           ORDER BY q.priority DESC, q.created_at ASC"""
+    )
+    return [dict(row) for row in rows]
+
+
+@router.post("/system/scheduler/age")
+def age_scheduler_queue(services: AppServices = Depends(get_services)) -> dict:
+    aged = [goal for goal in services.scheduler.age_queue() if goal]
+    return {"aged_count": len(aged), "goals": aged}
+
+
+@router.post("/system/scheduler/pick")
+def pick_next_goal(services: AppServices = Depends(get_services)) -> dict:
+    picked = services.scheduler.pick_next_goal()
+    return {"picked_goal": picked}
+
+
+@router.post("/system/consumers/{consumer_id}/drain")
+def drain_consumer(
+    consumer_id: str,
+    batch_size: int = CONSUMER_BATCH_SIZE,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    handled: list[str] = []
+    processed = services.event_bus.consume_batch(
+        consumer_id,
+        lambda event: handled.append(event["event_id"]),
+        batch_size=batch_size,
+    )
+    return {
+        "consumer_id": consumer_id,
+        "batch_size": batch_size,
+        "processed_count": processed,
+        "processed_event_ids": handled,
+    }
+
+
+@router.post("/system/consumers/{consumer_id}/reclaim")
+def reclaim_consumer(consumer_id: str, services: AppServices = Depends(get_services)) -> dict:
+    reclaimed = services.event_bus.reclaim_stuck_processing(consumer_id)
+    return {"consumer_id": consumer_id, "reclaimed_count": reclaimed}
