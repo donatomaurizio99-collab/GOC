@@ -634,3 +634,74 @@ def test_36_flow_trace_empty_when_goal_has_no_events(client):
     assert trace["event_count"] == 0
     assert trace["attempt_count"] == 0
     assert trace["attempts"] == []
+
+
+def test_37_fault_explorer_dead_letter_filter_returns_poison_task(client):
+    goal = create_active_goal(client, title="Fault Goal")
+    task = create_task(client, goal["goal_id"], title="Fault Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Persistent issue"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Persistent issue"},
+    )
+
+    response = client.get("/system/faults?dead_letter_only=true")
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert any(item["task_id"] == task["task_id"] for item in entries)
+    assert any(item["task_status"] == "poison" for item in entries)
+
+
+def test_38_fault_explorer_filters_by_failure_type_and_hash(client):
+    goal = create_active_goal(client, title="Filter Goal")
+    task_a = create_task(client, goal["goal_id"], title="Exec Task")
+    task_b = create_task(client, goal["goal_id"], title="Skill Task")
+
+    exec_message = "Execution exploded"
+    client.post(
+        f"/tasks/{task_a['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": exec_message},
+    )
+    client.post(
+        f"/tasks/{task_b['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Skill exploded"},
+    )
+
+    exec_hash = compute_error_hash("ExecutionFailure", exec_message)
+    response = client.get(
+        f"/system/faults?failure_type=ExecutionFailure&error_hash={exec_hash}&dead_letter_only=false"
+    )
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert entries
+    assert all(item["failure_type"] == "ExecutionFailure" for item in entries)
+    assert all(item["error_hash"] == exec_hash for item in entries)
+
+
+def test_39_health_and_fault_summary_include_fault_snapshot(client):
+    goal = create_active_goal(client, title="Snapshot Goal")
+    task = create_task(client, goal["goal_id"], title="Snapshot Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Snapshot issue"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Snapshot issue"},
+    )
+
+    summary = client.get("/system/faults/summary?dead_letter_only=true")
+    health = client.get("/system/health")
+    assert summary.status_code == 200
+    assert health.status_code == 200
+
+    summary_payload = summary.json()
+    health_payload = health.json()
+    assert summary_payload["dead_letter_tasks"] >= 1
+    assert summary_payload["poison_tasks"] >= 1
+    assert "systemic_external_failures_last_window" in summary_payload
+    assert "faults" in health_payload
+    assert health_payload["faults"]["dead_letter_tasks"] >= 1

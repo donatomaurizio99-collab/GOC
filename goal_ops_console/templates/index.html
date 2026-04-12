@@ -346,6 +346,38 @@
       <div id="audit-table"></div>
     </section>
 
+    <section class="wide">
+      <h2><span>Dead-Letter / Fault Explorer</span><button class="secondary" id="refresh-faults">Refresh</button></h2>
+      <form id="fault-filter-form">
+        <div class="split">
+          <select id="fault-failure-type">
+            <option value="">All failure types</option>
+            <option value="SkillFailure">SkillFailure</option>
+            <option value="ExecutionFailure">ExecutionFailure</option>
+            <option value="ExternalFailure">ExternalFailure</option>
+            <option value="PlanFailure">PlanFailure</option>
+          </select>
+          <select id="fault-task-status">
+            <option value="">All task statuses</option>
+            <option value="pending">pending</option>
+            <option value="running">running</option>
+            <option value="failed">failed</option>
+            <option value="succeeded">succeeded</option>
+            <option value="exhausted">exhausted</option>
+            <option value="poison">poison</option>
+          </select>
+        </div>
+        <div class="split">
+          <input id="fault-goal-id" placeholder="Optional goal id">
+          <input id="fault-error-hash" placeholder="Optional error hash">
+        </div>
+        <label class="meta"><input type="checkbox" id="fault-dead-letter-only" checked> Dead-letter only (`poison` + `exhausted`)</label>
+        <button type="submit">Apply Filter</button>
+      </form>
+      <div id="fault-summary"></div>
+      <div id="fault-table"></div>
+    </section>
+
     <section>
       <h2>System Health</h2>
       <div id="health-cards" class="grid-two"></div>
@@ -355,6 +387,8 @@
       <div id="retention-policy"></div>
       <h3>Metrics Hooks</h3>
       <div id="metrics-hooks"></div>
+      <h3>Fault Snapshot</h3>
+      <div id="fault-snapshot"></div>
       <h3>Consumer Stats</h3>
       <div id="consumer-stats"></div>
       <h3>Stuck Events</h3>

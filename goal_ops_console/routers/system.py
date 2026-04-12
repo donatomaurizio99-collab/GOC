@@ -24,6 +24,10 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
     total_goals = services.db.fetch_scalar("SELECT COUNT(*) FROM goals") or 0
     total_tasks = services.db.fetch_scalar("SELECT COUNT(*) FROM task_state") or 0
     backpressure = services.event_bus.backpressure_snapshot()
+    faults = services.failure_intelligence.fault_summary(limit=5, dead_letter_only=True)
+    faults["systemic_external_failures_last_window"] = (
+        services.failure_intelligence.systemic_external_failure_count()
+    )
     return {
         "spec_version": SPEC_VERSION,
         "default_consumer_id": services.settings.consumer_id,
@@ -42,6 +46,7 @@ def system_health(services: AppServices = Depends(get_services)) -> dict:
         "audit": {
             "entries_last_24h": services.observability.recent_audit_count(hours=24),
         },
+        "faults": faults,
         "retry_budget_per_cycle": MAX_TOTAL_RETRIES_PER_CYCLE,
         "consumer_stats": services.event_bus.consumer_stats(),
         "stuck_events": services.event_bus.stuck_events(),
@@ -148,6 +153,52 @@ def audit_log(
             status=status,
         )
     }
+
+
+@router.get("/system/faults")
+def fault_explorer(
+    limit: int = 200,
+    failure_type: str | None = None,
+    task_status: str | None = None,
+    goal_id: str | None = None,
+    error_hash: str | None = None,
+    dead_letter_only: bool = False,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return {
+        "entries": services.failure_intelligence.list_faults(
+            limit=limit,
+            failure_type=failure_type,
+            task_status=task_status,
+            goal_id=goal_id,
+            error_hash=error_hash,
+            dead_letter_only=dead_letter_only,
+        )
+    }
+
+
+@router.get("/system/faults/summary")
+def fault_summary(
+    limit: int = 20,
+    failure_type: str | None = None,
+    task_status: str | None = None,
+    goal_id: str | None = None,
+    error_hash: str | None = None,
+    dead_letter_only: bool = False,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    summary = services.failure_intelligence.fault_summary(
+        limit=limit,
+        failure_type=failure_type,
+        task_status=task_status,
+        goal_id=goal_id,
+        error_hash=error_hash,
+        dead_letter_only=dead_letter_only,
+    )
+    summary["systemic_external_failures_last_window"] = (
+        services.failure_intelligence.systemic_external_failure_count()
+    )
+    return summary
 
 
 @router.post("/system/maintenance/retention")
