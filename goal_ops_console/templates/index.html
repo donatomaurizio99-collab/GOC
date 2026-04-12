@@ -6,6 +6,8 @@
   <title>Goal Ops Console</title>
   <style>
     :root {
+      --font-display: "Trebuchet MS", "Gill Sans MT", "Segoe UI", sans-serif;
+      --font-body: "Candara", "Segoe UI", sans-serif;
       --bg: #f4efe7;
       --panel: #fffaf2;
       --ink: #1f1b17;
@@ -22,12 +24,14 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", sans-serif;
+      font-family: var(--font-body);
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, #f7d8bf 0, transparent 30%),
-        linear-gradient(160deg, #f4efe7 0%, #efe3d4 100%);
+        radial-gradient(circle at top left, #f8dcc4 0, transparent 32%),
+        radial-gradient(circle at 90% 12%, #f2e4ce 0, transparent 28%),
+        linear-gradient(160deg, #f4efe7 0%, #eee1d0 100%);
       min-height: 100vh;
+      line-height: 1.35;
     }
     header {
       padding: 1.5rem 2rem 1rem;
@@ -38,13 +42,21 @@
       top: 0;
       z-index: 10;
     }
-    header h1 { margin: 0; font-size: 1.9rem; }
+    header h1 {
+      margin: 0;
+      font-size: 2rem;
+      font-family: var(--font-display);
+      letter-spacing: 0.01em;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
     header p { margin: 0.35rem 0 0; color: var(--muted); }
     main {
       padding: 1.5rem;
       display: grid;
       gap: 1rem;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      max-width: 1680px;
+      margin: 0 auto;
     }
     section {
       background: rgba(255, 250, 242, 0.88);
@@ -53,6 +65,13 @@
       padding: 1rem;
       box-shadow: 0 20px 40px rgba(68, 50, 33, 0.08);
       min-width: 0;
+      animation: fade-rise 320ms ease both;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+    section:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 22px 42px rgba(68, 50, 33, 0.11);
+      border-color: rgba(196, 106, 45, 0.25);
     }
     section h2 {
       margin: 0 0 0.75rem;
@@ -75,25 +94,38 @@
       padding: 0.65rem 0.8rem;
       background: white;
       color: var(--ink);
+      transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
     }
     textarea { min-height: 84px; resize: vertical; }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: rgba(196, 106, 45, 0.65);
+      box-shadow: 0 0 0 3px rgba(196, 106, 45, 0.18);
+    }
     button {
       cursor: pointer;
-      background: var(--accent);
+      background: linear-gradient(180deg, #cd783d 0%, var(--accent) 100%);
       color: white;
       border: none;
+      box-shadow: 0 6px 14px rgba(196, 106, 45, 0.25);
       transition: transform 120ms ease, opacity 120ms ease;
     }
     button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
     button.secondary {
       background: #fff;
       color: var(--ink);
       border: 1px solid var(--line);
+      box-shadow: none;
+    }
+    button.secondary:hover {
+      background: #fff6eb;
     }
     button.ghost {
       background: transparent;
       color: var(--info);
       padding: 0;
+      box-shadow: none;
     }
     table {
       width: 100%;
@@ -113,6 +145,12 @@
       vertical-align: top;
     }
     th { color: var(--muted); font-weight: 600; }
+    tbody tr:nth-child(even) td {
+      background: rgba(255, 255, 255, 0.45);
+    }
+    tbody tr:hover td {
+      background: rgba(244, 215, 195, 0.35);
+    }
     .meta {
       color: var(--muted);
       font-size: 0.9rem;
@@ -176,6 +214,7 @@
       padding: 0.85rem;
       display: grid;
       gap: 0.7rem;
+      animation: fade-rise 300ms ease both;
     }
     .entity-card.selected {
       border-color: rgba(196, 106, 45, 0.45);
@@ -239,9 +278,60 @@
       cursor: pointer;
       text-decoration: underline;
     }
+    h3 {
+      margin-bottom: 0.35rem;
+      color: #3b322a;
+      font-size: 0.95rem;
+      letter-spacing: 0.01em;
+    }
+    .status-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin: 0.35rem 0 0.75rem;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+      color: #5f5449;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(31, 27, 23, 0.08);
+      border-radius: 999px;
+      padding: 0.2rem 0.5rem;
+    }
+    .legend-dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 999px;
+    }
+    .dot-good { background: #2f855a; }
+    .dot-warn { background: #b7791f; }
+    .dot-bad { background: #c53030; }
+    .dot-info { background: #2b6cb0; }
+    .toolbar-note {
+      margin: -0.2rem 0 0.6rem;
+      font-size: 0.85rem;
+      color: #6f655b;
+    }
+    @keyframes fade-rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      section, .entity-card {
+        animation: none;
+        transition: none;
+      }
+      button, input, textarea, select {
+        transition: none;
+      }
+    }
     @media (max-width: 900px) {
       .split { grid-template-columns: 1fr; }
       .entity-header { flex-direction: column; }
+      main { padding: 1rem; }
     }
   </style>
 </head>
@@ -348,6 +438,7 @@
 
     <section class="wide">
       <h2><span>Dead-Letter / Fault Explorer</span><button class="secondary" id="refresh-faults">Refresh</button></h2>
+      <div class="toolbar-note">Use filters first, then run single-item remediation or the supervised batch action.</div>
       <form id="fault-filter-form">
         <div class="split">
           <select id="fault-failure-type">
@@ -391,6 +482,7 @@
           <button type="button" class="secondary" id="bulk-resolve-faults">Resolve Filtered</button>
         </div>
       </form>
+      <div class="meta" id="fault-filter-summary">Current filter: none</div>
       <div id="fault-summary"></div>
       <div id="fault-table"></div>
     </section>
@@ -416,6 +508,12 @@
 
     <section>
       <h2>State Machines</h2>
+      <div class="status-legend">
+        <span class="legend-item"><span class="legend-dot dot-info"></span>queued / pending</span>
+        <span class="legend-item"><span class="legend-dot dot-good"></span>active / succeeded</span>
+        <span class="legend-item"><span class="legend-dot dot-warn"></span>failed / blocked</span>
+        <span class="legend-item"><span class="legend-dot dot-bad"></span>poison / escalation</span>
+      </div>
       <pre>Goal: draft -> active -> completed -> archived
                 \-> blocked -> active|completed|archived
                 \-> escalation_pending -> active|archived
