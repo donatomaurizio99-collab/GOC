@@ -1,0 +1,104 @@
+name: Desktop Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build mode to run
+        required: true
+        type: choice
+        default: both
+        options:
+          - onedir
+          - onefile
+          - both
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: desktop-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Windows Desktop Artifact
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install desktop build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[desktop,desktop-build]"
+
+      - name: Resolve build modes
+        id: modes
+        shell: pwsh
+        run: |
+          $modeInput = "${{ github.event.inputs.mode }}"
+          if ([string]::IsNullOrWhiteSpace($modeInput)) {
+            $modeInput = "both"
+          }
+          if ($modeInput -eq "both") {
+            "modes=onedir,onefile" >> $env:GITHUB_OUTPUT
+          } else {
+            "modes=$modeInput" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build desktop onedir
+        if: contains(steps.modes.outputs.modes, 'onedir')
+        shell: pwsh
+        run: |
+          .\scripts\build-desktop.ps1 -Mode onedir -Name GoalOpsConsole -Clean
+
+      - name: Build desktop onefile
+        if: contains(steps.modes.outputs.modes, 'onefile')
+        shell: pwsh
+        run: |
+          .\scripts\build-desktop.ps1 -Mode onefile -Name GoalOpsConsole -Clean
+
+      - name: Stage desktop artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+
+          if (Test-Path -LiteralPath "dist/GoalOpsConsole/GoalOpsConsole.exe") {
+            Compress-Archive -Path "dist/GoalOpsConsole/*" -DestinationPath "artifacts/GoalOpsConsole-onedir.zip" -Force
+          }
+
+          if (Test-Path -LiteralPath "dist/GoalOpsConsole.exe") {
+            Copy-Item -LiteralPath "dist/GoalOpsConsole.exe" -Destination "artifacts/GoalOpsConsole-onefile.exe" -Force
+          }
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -LiteralPath artifacts -File
+          if (-not $files) {
+            throw "No desktop artifacts were produced."
+          }
+          $lines = @()
+          foreach ($file in $files) {
+            $hash = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256
+            $lines += "$($hash.Hash)  $($file.Name)"
+          }
+          $lines | Set-Content -LiteralPath "artifacts/SHA256SUMS.txt"
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ github.run_number }}
+          path: artifacts/*
+          if-no-files-found: error
