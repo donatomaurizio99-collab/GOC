@@ -20,6 +20,16 @@
       --bad: #bf2f2f;
       --info: #2366ad;
       --focus: rgba(203, 107, 46, 0.32);
+      --bg-glow-1: rgba(255, 175, 120, 0.42);
+      --bg-glow-2: rgba(147, 199, 245, 0.32);
+      --bg-glow-3: rgba(255, 212, 166, 0.38);
+      --bg-tone-1: #f7f1e8;
+      --bg-tone-2: #efe3d4;
+      --bg-tone-3: #e9dccd;
+      --header-glow-1: rgba(255, 249, 241, 0.9);
+      --header-glow-2: rgba(255, 242, 228, 0.86);
+      --header-glow-3: rgba(242, 249, 255, 0.82);
+      --grid-overlay: rgba(255, 255, 255, 0.06);
     }
 
     * { box-sizing: border-box; }
@@ -57,13 +67,38 @@
       font-family: var(--font-body);
       color: var(--ink);
       background:
-        radial-gradient(circle at 8% 12%, rgba(255, 175, 120, 0.42) 0, transparent 28%),
-        radial-gradient(circle at 88% 8%, rgba(147, 199, 245, 0.32) 0, transparent 24%),
-        radial-gradient(circle at 92% 78%, rgba(255, 212, 166, 0.38) 0, transparent 26%),
-        linear-gradient(165deg, #f7f1e8 0%, #efe3d4 48%, #e9dccd 100%);
+        radial-gradient(circle at 8% 12%, var(--bg-glow-1) 0, transparent 28%),
+        radial-gradient(circle at 88% 8%, var(--bg-glow-2) 0, transparent 24%),
+        radial-gradient(circle at 92% 78%, var(--bg-glow-3) 0, transparent 26%),
+        linear-gradient(165deg, var(--bg-tone-1) 0%, var(--bg-tone-2) 48%, var(--bg-tone-3) 100%);
       min-height: 100vh;
       line-height: 1.35;
       position: relative;
+      transition: background 280ms ease, color 220ms ease;
+    }
+    body.visual-graphite {
+      --bg: #edf4fb;
+      --panel: #f7fbff;
+      --ink: #162538;
+      --muted: #4e667d;
+      --line: #bfd2e2;
+      --accent: #2d7ca8;
+      --accent-soft: #dbeefa;
+      --good: #1f7a53;
+      --warn: #b9771c;
+      --bad: #ba3d3d;
+      --info: #2a6e96;
+      --focus: rgba(45, 124, 168, 0.28);
+      --bg-glow-1: rgba(82, 151, 201, 0.32);
+      --bg-glow-2: rgba(95, 185, 156, 0.26);
+      --bg-glow-3: rgba(250, 188, 124, 0.25);
+      --bg-tone-1: #ebf3fa;
+      --bg-tone-2: #dce8f2;
+      --bg-tone-3: #d3dfec;
+      --header-glow-1: rgba(245, 251, 255, 0.94);
+      --header-glow-2: rgba(228, 241, 251, 0.88);
+      --header-glow-3: rgba(236, 249, 241, 0.84);
+      --grid-overlay: rgba(255, 255, 255, 0.16);
     }
     body::before {
       content: "";
@@ -72,8 +107,8 @@
       pointer-events: none;
       background-image: repeating-linear-gradient(
         120deg,
-        rgba(255, 255, 255, 0.06) 0,
-        rgba(255, 255, 255, 0.06) 1px,
+        var(--grid-overlay) 0,
+        var(--grid-overlay) 1px,
         transparent 1px,
         transparent 26px
       );
@@ -85,7 +120,7 @@
       padding: 1.2rem 1.5rem 1rem;
       border-bottom: 1px solid rgba(29, 26, 22, 0.1);
       background:
-        linear-gradient(120deg, rgba(255, 249, 241, 0.9) 0%, rgba(255, 242, 228, 0.86) 55%, rgba(242, 249, 255, 0.82) 100%);
+        linear-gradient(120deg, var(--header-glow-1) 0%, var(--header-glow-2) 55%, var(--header-glow-3) 100%);
       backdrop-filter: blur(14px);
       position: sticky;
       top: 0;
@@ -177,9 +212,12 @@
     }
     .command-row {
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto auto;
+      grid-template-columns: minmax(260px, 1fr) auto auto auto;
       gap: 0.5rem;
       align-items: center;
+    }
+    .command-row button {
+      white-space: nowrap;
     }
     #global-filter {
       min-width: 0;
@@ -206,6 +244,29 @@
       border-color: rgba(203, 107, 46, 0.8);
       background: linear-gradient(180deg, #d98951 0%, #c96d33 100%);
       box-shadow: 0 5px 12px rgba(203, 107, 46, 0.24);
+    }
+    body.visual-graphite .eyebrow {
+      color: #265d7e;
+      border-color: rgba(38, 93, 126, 0.28);
+      background: rgba(245, 251, 255, 0.86);
+    }
+    body.visual-graphite header p {
+      color: #4f6277;
+    }
+    body.visual-graphite .jump-btn:hover {
+      background: #e8f2fb;
+    }
+    body.visual-graphite .jump-btn.active {
+      border-color: rgba(45, 124, 168, 0.8);
+      background: linear-gradient(180deg, #4f9bc4 0%, #2d7ca8 100%);
+      box-shadow: 0 6px 14px rgba(45, 124, 168, 0.24);
+    }
+    body.visual-graphite .priority-fill {
+      background: linear-gradient(90deg, #86b8d6 0%, #2d7ca8 100%);
+    }
+    body.visual-graphite pre {
+      background: #edf5fb;
+      color: #2a3f51;
     }
     .toolbar-status {
       margin: 0;
@@ -606,14 +667,18 @@
         <input id="global-filter" placeholder="Global filter across goals, tasks, events, faults and queue (press /)">
         <button type="button" class="secondary" id="toggle-refresh">Auto-refresh: On</button>
         <button type="button" class="secondary" id="toggle-density">Density: Comfy</button>
+        <button type="button" class="secondary" id="toggle-visual-mode">Visual: Warm</button>
       </div>
       <nav class="section-jump" aria-label="Quick jump">
         <button type="button" class="jump-btn active" data-jump-target="goals-section">Goals</button>
         <button type="button" class="jump-btn" data-jump-target="tasks-section">Tasks</button>
         <button type="button" class="jump-btn" data-jump-target="operator-section">Operator</button>
         <button type="button" class="jump-btn" data-jump-target="events-section">Events</button>
+        <button type="button" class="jump-btn" data-jump-target="trace-section">Trace</button>
+        <button type="button" class="jump-btn" data-jump-target="audit-section">Audit</button>
         <button type="button" class="jump-btn" data-jump-target="faults-section">Faults</button>
         <button type="button" class="jump-btn" data-jump-target="health-section">Health</button>
+        <button type="button" class="jump-btn" data-jump-target="states-section">States</button>
       </nav>
       <p class="meta toolbar-status" id="toolbar-status" role="status" aria-live="polite">Global filter inactive. Auto-refresh every 5s.</p>
     </div>

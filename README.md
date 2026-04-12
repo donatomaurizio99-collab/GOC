@@ -259,6 +259,10 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Shows recent mutating API operations with status and request details.
 - `Metrics Hooks` (in System Health)
   Shows live instrumentation counters for HTTP traffic, transitions, events and throttling.
+- `Visual Mode` (new toggle in command bar)
+  Switches UI styling between `Warm` and `Graphite` while keeping all workflows identical.
+- `Quick Jump` (extended)
+  Includes direct jumps for `Trace`, `Audit`, and `States` sections.
 
 The queue table in this section shows:
 - goal state
