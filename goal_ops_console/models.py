@@ -85,6 +85,18 @@ class FaultRemediationRequest(BaseModel):
     dry_run: bool = False
 
 
+class FaultBulkResolveRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+    dry_run: bool = False
+    failure_type: FailureType | None = None
+    failure_status: str | None = Field(default=None, max_length=64)
+    task_status: TaskState | None = None
+    goal_id: str | None = Field(default=None, max_length=200)
+    error_hash: str | None = Field(default=None, max_length=128)
+    dead_letter_only: bool = True
+    limit: int = Field(default=50, ge=1, le=500)
+
+
 class EventResponse(BaseModel):
     seq: int
     event_id: str

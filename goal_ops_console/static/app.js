@@ -481,20 +481,33 @@ async function refreshAudit() {
   renderAudit(payload.entries || []);
 }
 
-async function refreshFaults() {
+function collectFaultFilters() {
   const failureType = document.getElementById("fault-failure-type").value.trim();
   const failureStatus = document.getElementById("fault-failure-status").value.trim();
   const taskStatus = document.getElementById("fault-task-status").value.trim();
   const goalId = document.getElementById("fault-goal-id").value.trim();
   const errorHash = document.getElementById("fault-error-hash").value.trim();
   const deadLetterOnly = document.getElementById("fault-dead-letter-only").checked;
+  const filters = {
+    dead_letter_only: deadLetterOnly,
+  };
+  if (failureType) filters.failure_type = failureType;
+  if (failureStatus) filters.failure_status = failureStatus;
+  if (taskStatus) filters.task_status = taskStatus;
+  if (goalId) filters.goal_id = goalId;
+  if (errorHash) filters.error_hash = errorHash;
+  return filters;
+}
+
+async function refreshFaults() {
+  const filters = collectFaultFilters();
   const params = new URLSearchParams();
-  if (failureType) params.set("failure_type", failureType);
-  if (failureStatus) params.set("failure_status", failureStatus);
-  if (taskStatus) params.set("task_status", taskStatus);
-  if (goalId) params.set("goal_id", goalId);
-  if (errorHash) params.set("error_hash", errorHash);
-  params.set("dead_letter_only", deadLetterOnly ? "true" : "false");
+  if (filters.failure_type) params.set("failure_type", filters.failure_type);
+  if (filters.failure_status) params.set("failure_status", filters.failure_status);
+  if (filters.task_status) params.set("task_status", filters.task_status);
+  if (filters.goal_id) params.set("goal_id", filters.goal_id);
+  if (filters.error_hash) params.set("error_hash", filters.error_hash);
+  params.set("dead_letter_only", filters.dead_letter_only ? "true" : "false");
   const suffix = `?${params.toString()}`;
   const [entryPayload, summaryPayload] = await Promise.all([
     api(`/system/faults${suffix}`),
@@ -610,6 +623,46 @@ async function runFaultAction(action, failureId) {
   await refreshAll();
 }
 
+async function runFaultBulkResolve() {
+  const reasonInput = document.getElementById("fault-remediation-reason");
+  const dryRunInput = document.getElementById("fault-remediation-dry-run");
+  const limitInput = document.getElementById("fault-bulk-limit");
+  const reason = (reasonInput?.value || "").trim();
+  const dryRun = Boolean(dryRunInput?.checked);
+  const parsedLimit = Number(limitInput?.value || 50);
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.max(1, Math.min(500, Math.trunc(parsedLimit)))
+    : 50;
+  if (!reason) {
+    throw new Error("Remediation reason is required.");
+  }
+
+  const payload = {
+    reason,
+    dry_run: dryRun,
+    ...collectFaultFilters(),
+    limit,
+  };
+  const result = await api("/system/faults/resolve_bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const feedback = document.getElementById("system-feedback");
+  if (dryRun) {
+    feedback.textContent = (
+      `Dry run: ${result.will_resolve_count} filtered faults would be resolved `
+      + `(${result.skipped_already_resolved_count} already resolved skipped).`
+    );
+    await Promise.all([refreshFaults(), refreshHealth()]);
+    return;
+  }
+  feedback.textContent = (
+    `Bulk resolve completed: ${result.resolved_count} failures resolved `
+    + `(${result.skipped_already_resolved_count} already resolved skipped).`
+  );
+  await refreshAll();
+}
+
 document.getElementById("goal-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   showError("goal-error", null);
@@ -673,6 +726,15 @@ document.getElementById("audit-filter-form").addEventListener("submit", async (e
 document.getElementById("fault-filter-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   await refreshFaults();
+});
+
+document.getElementById("bulk-resolve-faults").addEventListener("click", async () => {
+  try {
+    showError("system-feedback", null);
+    await runFaultBulkResolve();
+  } catch (error) {
+    showError("system-feedback", error);
+  }
 });
 
 document.getElementById("flow-trace-form").addEventListener("submit", async (event) => {

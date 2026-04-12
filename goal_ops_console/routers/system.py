@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
-from goal_ops_console.models import BackpressureError, FaultRemediationRequest
+from goal_ops_console.models import BackpressureError, FaultBulkResolveRequest, FaultRemediationRequest
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(tags=["system"])
@@ -203,6 +203,24 @@ def fault_summary(
         services.failure_intelligence.systemic_external_failure_count()
     )
     return summary
+
+
+@router.post("/system/faults/resolve_bulk")
+def resolve_faults_bulk(
+    request: FaultBulkResolveRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.execution_layer.resolve_faults_bulk(
+        reason=request.reason,
+        dry_run=request.dry_run,
+        failure_type=request.failure_type,
+        failure_status=request.failure_status,
+        task_status=request.task_status,
+        goal_id=request.goal_id,
+        error_hash=request.error_hash,
+        dead_letter_only=request.dead_letter_only,
+        limit=request.limit,
+    )
 
 
 @router.post("/system/faults/{failure_id}/retry")

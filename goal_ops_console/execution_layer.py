@@ -584,6 +584,93 @@ class ExecutionLayer:
             "task_id": context.get("task_id"),
         }
 
+    def resolve_faults_bulk(
+        self,
+        *,
+        reason: str,
+        dry_run: bool = False,
+        failure_type: str | None = None,
+        failure_status: str | None = None,
+        task_status: str | None = None,
+        goal_id: str | None = None,
+        error_hash: str | None = None,
+        dead_letter_only: bool = True,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        matched_faults = self.failure_intelligence.list_faults(
+            limit=limit,
+            failure_type=failure_type,
+            failure_status=failure_status,
+            task_status=task_status,
+            goal_id=goal_id,
+            error_hash=error_hash,
+            dead_letter_only=dead_letter_only,
+        )
+        unresolved = [item for item in matched_faults if item.get("failure_status") != "resolved"]
+        skipped_resolved = [item for item in matched_faults if item.get("failure_status") == "resolved"]
+        unresolved_ids = [str(item["failure_id"]) for item in unresolved]
+        skipped_ids = [str(item["failure_id"]) for item in skipped_resolved]
+        filters = {
+            "failure_type": failure_type,
+            "failure_status": failure_status,
+            "task_status": task_status,
+            "goal_id": goal_id,
+            "error_hash": error_hash,
+            "dead_letter_only": dead_letter_only,
+            "limit": limit,
+        }
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "allowed": len(unresolved_ids) > 0,
+                "reason": reason,
+                "matched_count": len(matched_faults),
+                "will_resolve_count": len(unresolved_ids),
+                "candidate_failure_ids": unresolved_ids,
+                "skipped_already_resolved_count": len(skipped_ids),
+                "skipped_failure_ids": skipped_ids,
+                "filters": filters,
+            }
+
+        resolved_ids: list[str] = []
+        for failure_id in unresolved_ids:
+            self.resolve_fault(
+                failure_id=failure_id,
+                reason=reason,
+                dry_run=False,
+            )
+            resolved_ids.append(failure_id)
+
+        self._metric("faults.remediation.bulk_resolved", delta=len(resolved_ids))
+        if self.observability is not None:
+            self.observability.record_audit(
+                action="fault.remediation.resolve_bulk",
+                actor="supervisor",
+                status="success",
+                entity_type="failure_batch",
+                entity_id=None,
+                correlation_id=None,
+                details={
+                    "resolved_count": len(resolved_ids),
+                    "matched_count": len(matched_faults),
+                    "skipped_already_resolved_count": len(skipped_ids),
+                    "reason": reason,
+                    "filters": filters,
+                },
+            )
+
+        return {
+            "dry_run": False,
+            "reason": reason,
+            "matched_count": len(matched_faults),
+            "resolved_count": len(resolved_ids),
+            "resolved_failure_ids": resolved_ids,
+            "skipped_already_resolved_count": len(skipped_ids),
+            "skipped_failure_ids": skipped_ids,
+            "filters": filters,
+        }
+
     def _retry_plan(self, fault: dict[str, Any]) -> dict[str, Any]:
         blockers: list[str] = []
         task_status = fault.get("task_status")

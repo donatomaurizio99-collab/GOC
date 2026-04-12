@@ -152,6 +152,7 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   - `Retry Task` creates a new pending retry task for a dead-letter failure.
   - `Requeue Goal` transitions `blocked` / `escalation_pending` goals back to `active`.
   - `Resolve` marks a failure as operator-resolved without changing task/goal state.
+  - `Resolve Filtered` applies `Resolve` to all currently filtered fault rows (bounded by a limit).
   - `Dry run` previews remediation without writing state.
   Supports filtering by `failure_status` (`recorded`, `retry_queued`, `goal_requeued`, `resolved`) in addition to existing filters.
 - `Audit Log` (new section)
@@ -183,6 +184,7 @@ Observability endpoints:
 - `GET /system/audit`
 - `GET /system/faults`
 - `GET /system/faults/summary`
+- `POST /system/faults/resolve_bulk`
 - `POST /system/faults/{failure_id}/retry`
 - `POST /system/faults/{failure_id}/requeue_goal`
 - `POST /system/faults/{failure_id}/resolve`
