@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 pytest-cache-files-*/
+build/
+dist/
 goal_ops.db
 goal_ops.db-journal
 probe.db

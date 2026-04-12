@@ -9,6 +9,7 @@ Stack:
 - SQLite
 - Pytest
 - pywebview (optional, desktop shell)
+- PyInstaller (optional, desktop packaging)
 
 ## Project Path
 
@@ -74,6 +75,43 @@ Behavior:
 - starts an embedded local FastAPI server (`127.0.0.1`)
 - opens the same dashboard UI in a native window via `pywebview`
 - shuts down the embedded server when the desktop window closes
+
+## Build Windows Desktop EXE (Preview)
+
+Install desktop runtime + build tooling:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python -m pip install -e ".[desktop,desktop-build]"
+```
+
+Build `onedir` (recommended for first packaging pass):
+
+```powershell
+.\scripts\build-desktop.ps1 -Mode onedir
+```
+
+Build `onefile`:
+
+```powershell
+.\scripts\build-desktop.ps1 -Mode onefile
+```
+
+Optional:
+
+```powershell
+.\scripts\build-desktop.ps1 -Mode onedir -Name "GoalOpsConsole"
+.\scripts\build-desktop.ps1 -Mode onefile -IconPath ".\assets\goal-ops.ico"
+.\scripts\build-desktop.ps1 -DryRun
+```
+
+Output paths:
+- `onedir`: `dist\GoalOpsConsole\GoalOpsConsole.exe`
+- `onefile`: `dist\GoalOpsConsole.exe`
+
+Note:
+- `pywebview` on Windows requires WebView2 runtime.
+- In `onefile` mode startup can be slower because the executable self-extracts before launch.
 
 ## Stop And Restart
 
@@ -298,6 +336,15 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 python -m pip install -e ".[desktop]"
 ```
 
+### `No module named PyInstaller`
+
+If desktop packaging fails with this error, install the optional build extra:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python -m pip install -e ".[desktop,desktop-build]"
+```
+
 ### `ModuleNotFoundError: No module named 'goal_ops_console'`
 
 This means `uvicorn` was started from the wrong directory or without the app dir.
@@ -370,6 +417,7 @@ If a value is rejected:
 - [index.html](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/templates/index.html)
 - [start-server.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-server.ps1)
 - [start-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-desktop.ps1)
+- [build-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/build-desktop.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
