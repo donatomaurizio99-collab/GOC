@@ -179,6 +179,57 @@ class EventBus:
         )
         return [self._row_to_event(row) for row in rows]
 
+    def flow_trace(self, goal_id: str, *, limit: int = 500) -> dict[str, Any]:
+        events = self.list_events(correlation_id=goal_id, limit=limit)
+        prefix = f"{goal_id}:"
+        goal_level_events: list[dict[str, Any]] = []
+        attempt_buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
+
+        for event in events:
+            correlation = event["correlation_id"]
+            if correlation == goal_id:
+                goal_level_events.append(event)
+                continue
+            if not correlation.startswith(prefix):
+                continue
+
+            suffix = correlation[len(prefix):]
+            parts = suffix.split(":")
+            if len(parts) < 2:
+                continue
+            task_id = parts[0]
+            try:
+                attempt = int(parts[1])
+            except ValueError:
+                continue
+
+            attempt_buckets.setdefault((task_id, attempt), []).append(event)
+
+        attempts: list[dict[str, Any]] = []
+        for (task_id, attempt), grouped_events in attempt_buckets.items():
+            seqs = [item["seq"] for item in grouped_events]
+            attempts.append(
+                {
+                    "task_id": task_id,
+                    "attempt": attempt,
+                    "event_count": len(grouped_events),
+                    "first_seq": min(seqs),
+                    "last_seq": max(seqs),
+                    "event_types": [item["event_type"] for item in grouped_events],
+                }
+            )
+
+        attempts.sort(key=lambda item: (item["first_seq"], item["task_id"], item["attempt"]))
+        return {
+            "goal_id": goal_id,
+            "event_count": len(events),
+            "goal_level_count": len(goal_level_events),
+            "attempt_count": len(attempts),
+            "goal_level_events": goal_level_events,
+            "attempts": attempts,
+            "events": events,
+        }
+
     def reclaim_stuck_processing(self, consumer_id: str) -> int:
         reclaimed = self.db.execute(
             """UPDATE event_processing

@@ -144,6 +144,8 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Resets timed-out `processing` entries back to `pending` for the given consumer id.
 - `Run Retention Cleanup`
   Removes old `events`, `event_processing` and `failure_log` rows based on retention policy.
+- `Flow Trace` (new section)
+  Loads the full goal event chain and groups retry attempts per task.
 - `Audit Log` (new section)
   Shows recent mutating API operations with status and request details.
 - `Metrics Hooks` (in System Health)
@@ -171,6 +173,7 @@ Observability endpoints:
 
 - `GET /system/metrics`
 - `GET /system/audit`
+- `GET /events/trace/{goal_id}`
 
 ## Run The Test Suite
 
@@ -182,7 +185,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-34 passed
+36 passed
 ```
 
 ## CI And PR Guardrails

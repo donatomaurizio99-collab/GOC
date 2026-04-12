@@ -598,3 +598,39 @@ def test_34_health_includes_metrics_and_audit_summaries(client):
     assert "audit" in payload
     assert payload["metrics"]["goals.created"] >= 1
     assert payload["audit"]["entries_last_24h"] >= 1
+
+
+def test_35_flow_trace_endpoint_groups_attempts(client):
+    goal = create_active_goal(client)
+    task = create_task(client, goal["goal_id"])
+
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Trace error"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Trace error"},
+    )
+
+    response = client.get(f"/events/trace/{goal['goal_id']}")
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["goal_id"] == goal["goal_id"]
+    assert trace["event_count"] >= 9
+
+    attempts = {(item["task_id"], item["attempt"]) for item in trace["attempts"]}
+    assert (task["task_id"], 0) in attempts
+    assert (task["task_id"], 1) in attempts
+
+    seqs = [event["seq"] for event in trace["events"]]
+    assert seqs == sorted(seqs)
+
+
+def test_36_flow_trace_empty_when_goal_has_no_events(client):
+    response = client.get("/events/trace/non-existing-goal-id")
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["event_count"] == 0
+    assert trace["attempt_count"] == 0
+    assert trace["attempts"] == []
