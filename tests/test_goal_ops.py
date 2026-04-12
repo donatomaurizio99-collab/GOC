@@ -253,6 +253,7 @@ def test_15_consumer_race_has_single_winner(services):
     event_id = services.event_bus.record_event("probe.event", "entity-1", "goal-1")
     barrier = threading.Barrier(2)
     handled: list[str] = []
+    errors: list[Exception] = []
     lock = threading.Lock()
 
     def handler(event):
@@ -261,7 +262,11 @@ def test_15_consumer_race_has_single_winner(services):
 
     def worker():
         barrier.wait()
-        services.event_bus.process_event(event_id, "race-consumer", handler)
+        try:
+            services.event_bus.process_event(event_id, "race-consumer", handler)
+        except Exception as exc:  # pragma: no cover - only used for thread diagnostics
+            with lock:
+                errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(2)]
     for thread in threads:
@@ -269,6 +274,7 @@ def test_15_consumer_race_has_single_winner(services):
     for thread in threads:
         thread.join()
 
+    assert errors == []
     row = services.db.fetch_one(
         "SELECT status FROM event_processing WHERE event_id = ? AND consumer_id = ?",
         event_id,
