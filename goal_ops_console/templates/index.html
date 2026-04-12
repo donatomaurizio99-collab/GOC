@@ -164,6 +164,53 @@
       border-color: rgba(32, 117, 90, 0.28);
       background: rgba(232, 248, 242, 0.82);
     }
+    .command-bar {
+      max-width: 1680px;
+      margin: 0.95rem auto 0;
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.68rem 0.75rem;
+      border-radius: 14px;
+      border: 1px solid rgba(29, 26, 22, 0.1);
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+    }
+    .command-row {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto auto;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    #global-filter {
+      min-width: 0;
+    }
+    .section-jump {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+    .jump-btn {
+      border: 1px solid rgba(29, 26, 22, 0.12);
+      background: rgba(255, 255, 255, 0.9);
+      color: #4c4034;
+      box-shadow: none;
+      padding: 0.35rem 0.62rem;
+      font-size: 0.82rem;
+    }
+    .jump-btn:hover {
+      background: #fff4e7;
+      transform: translateY(0);
+    }
+    .jump-btn.active {
+      color: #fff;
+      border-color: rgba(203, 107, 46, 0.8);
+      background: linear-gradient(180deg, #d98951 0%, #c96d33 100%);
+      box-shadow: 0 5px 12px rgba(203, 107, 46, 0.24);
+    }
+    .toolbar-status {
+      margin: 0;
+      font-size: 0.84rem;
+    }
     main {
       padding: 1.3rem;
       display: grid;
@@ -216,6 +263,9 @@
     section:nth-of-type(5) { animation-delay: 160ms; }
     section:nth-of-type(6) { animation-delay: 200ms; }
     .wide { grid-column: 1 / -1; }
+    section[data-section-anchor] {
+      scroll-margin-top: 230px;
+    }
     form {
       display: grid;
       gap: 0.6rem;
@@ -471,6 +521,40 @@
       font-size: 0.85rem;
       color: #6f655b;
     }
+    body.density-compact main {
+      gap: 0.75rem;
+    }
+    body.density-compact section {
+      padding: 0.78rem;
+      border-radius: 16px;
+    }
+    body.density-compact section h2 {
+      margin-bottom: 0.5rem;
+      font-size: 0.98rem;
+    }
+    body.density-compact .entity-card {
+      padding: 0.62rem;
+      gap: 0.45rem;
+      border-radius: 12px;
+    }
+    body.density-compact .grid-two {
+      gap: 0.55rem;
+    }
+    body.density-compact th,
+    body.density-compact td {
+      padding: 0.42rem 0.38rem;
+      font-size: 0.88rem;
+    }
+    body.density-compact input,
+    body.density-compact textarea,
+    body.density-compact select,
+    body.density-compact button {
+      padding: 0.5rem 0.64rem;
+    }
+    body.density-compact .kpi-chip {
+      min-height: 54px;
+      padding: 0.42rem 0.56rem;
+    }
     @keyframes fade-rise {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -490,6 +574,9 @@
       }
       .kpi-strip {
         grid-template-columns: 1fr 1fr;
+      }
+      .command-row {
+        grid-template-columns: 1fr;
       }
       .split { grid-template-columns: 1fr; }
       .entity-header { flex-direction: column; }
@@ -513,9 +600,26 @@
         <div class="kpi-chip"><span class="meta">Audit 24h</span><strong>...</strong></div>
       </div>
     </div>
+    <div class="command-bar" aria-label="Operator command bar">
+      <div class="command-row">
+        <label class="sr-only" for="global-filter">Global filter</label>
+        <input id="global-filter" placeholder="Global filter across goals, tasks, events, faults and queue (press /)">
+        <button type="button" class="secondary" id="toggle-refresh">Auto-refresh: On</button>
+        <button type="button" class="secondary" id="toggle-density">Density: Comfy</button>
+      </div>
+      <nav class="section-jump" aria-label="Quick jump">
+        <button type="button" class="jump-btn active" data-jump-target="goals-section">Goals</button>
+        <button type="button" class="jump-btn" data-jump-target="tasks-section">Tasks</button>
+        <button type="button" class="jump-btn" data-jump-target="operator-section">Operator</button>
+        <button type="button" class="jump-btn" data-jump-target="events-section">Events</button>
+        <button type="button" class="jump-btn" data-jump-target="faults-section">Faults</button>
+        <button type="button" class="jump-btn" data-jump-target="health-section">Health</button>
+      </nav>
+      <p class="meta toolbar-status" id="toolbar-status" role="status" aria-live="polite">Global filter inactive. Auto-refresh every 5s.</p>
+    </div>
   </header>
   <main id="main-content" tabindex="-1">
-    <section>
+    <section id="goals-section" data-section-anchor="goals">
       <h2><span>Goals Dashboard</span><button class="secondary" id="refresh-goals">Refresh</button></h2>
       <form id="goal-form">
         <label class="sr-only" for="goal-title">Goal title</label>
@@ -537,7 +641,7 @@
       <div id="goals-table"></div>
     </section>
 
-    <section>
+    <section id="tasks-section" data-section-anchor="tasks">
       <h2><span>Task View</span><button class="secondary" id="refresh-tasks">Refresh</button></h2>
       <form id="task-form">
         <label class="sr-only" for="task-goal-id">Goal ID</label>
@@ -550,7 +654,7 @@
       <div id="tasks-table"></div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="operator-section" data-section-anchor="operator">
       <h2><span>Operator Controls</span><button class="secondary" id="refresh-queue">Refresh Queue</button></h2>
       <div class="grid-two">
         <div class="card">
@@ -584,7 +688,7 @@
       <div id="queue-table"></div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="events-section" data-section-anchor="events">
       <h2><span>Event Log</span><button class="secondary" id="refresh-events">Refresh</button></h2>
       <form id="event-filter-form">
         <div class="split">
@@ -598,7 +702,7 @@
       <div id="events-table"></div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="trace-section" data-section-anchor="trace">
       <h2><span>Flow Trace</span><button class="secondary" id="refresh-flow-trace">Refresh</button></h2>
       <form id="flow-trace-form">
         <label class="sr-only" for="trace-goal-id">Goal ID for flow trace</label>
@@ -608,7 +712,7 @@
       <div id="flow-trace"></div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="audit-section" data-section-anchor="audit">
       <h2><span>Audit Log</span><button class="secondary" id="refresh-audit">Refresh</button></h2>
       <form id="audit-filter-form">
         <div class="split">
@@ -622,7 +726,7 @@
       <div id="audit-table"></div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="faults-section" data-section-anchor="faults">
       <h2><span>Dead-Letter / Fault Explorer</span><button class="secondary" id="refresh-faults">Refresh</button></h2>
       <div class="toolbar-note">Use filters first, then run single-item remediation or the supervised batch action.</div>
       <form id="fault-filter-form">
@@ -680,7 +784,7 @@
       <div id="fault-table"></div>
     </section>
 
-    <section>
+    <section id="health-section" data-section-anchor="health">
       <h2>System Health</h2>
       <div id="health-cards" class="grid-two"></div>
       <h3>Backpressure</h3>
@@ -699,7 +803,7 @@
       <div id="invariant-violations"></div>
     </section>
 
-    <section>
+    <section id="states-section" data-section-anchor="states">
       <h2>State Machines</h2>
       <div class="status-legend">
         <span class="legend-item"><span class="legend-dot dot-info"></span>queued / pending</span>

@@ -76,6 +76,16 @@ Behavior:
 - opens the same dashboard UI in a native window via `pywebview`
 - shuts down the embedded server when the desktop window closes
 
+## Operator Command Bar (UI)
+
+The dashboard header now includes a command bar for faster operator workflows:
+
+- `Global filter` searches across goals, tasks, events, audit, faults and queue rows.
+- Keyboard shortcut `/` focuses the global filter input.
+- `Auto-refresh` toggle pauses or resumes the 5-second refresh loop.
+- `Density` toggle switches between `Comfy` and `Compact` layout.
+- `Quick jump` buttons scroll directly to major panels (`Goals`, `Tasks`, `Operator`, `Events`, `Faults`, `Health`).
+
 ## Build Windows Desktop EXE (Preview)
 
 Install desktop runtime + build tooling:
