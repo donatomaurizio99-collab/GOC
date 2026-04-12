@@ -8,6 +8,7 @@ Stack:
 - Jinja2
 - SQLite
 - Pytest
+- pywebview (optional, desktop shell)
 
 ## Project Path
 
@@ -29,6 +30,12 @@ Install dependencies if needed:
 python -m pip install fastapi jinja2 uvicorn pytest
 ```
 
+Or install from project metadata (recommended):
+
+```powershell
+python -m pip install -e ".[test]"
+```
+
 Start the server:
 
 ```powershell
@@ -38,6 +45,35 @@ Start the server:
 Open the dashboard:
 
 [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+## Desktop Shell (Preview)
+
+Use this if you prefer a desktop window over a browser tab.
+
+Install the optional desktop dependency:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python -m pip install -e ".[desktop]"
+```
+
+Start the desktop shell:
+
+```powershell
+.\scripts\start-desktop.ps1
+```
+
+Optional startup parameters:
+
+```powershell
+.\scripts\start-desktop.ps1 -DatabaseUrl "goal_ops.db" -Width 1600 -Height 1000
+.\scripts\start-desktop.ps1 -Port 8010
+```
+
+Behavior:
+- starts an embedded local FastAPI server (`127.0.0.1`)
+- opens the same dashboard UI in a native window via `pywebview`
+- shuts down the embedded server when the desktop window closes
 
 ## Stop And Restart
 
@@ -200,7 +236,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-39 passed
+run `.\scripts\run-tests.ps1` (latest local count may change as features are added)
 ```
 
 ## CI And PR Guardrails
@@ -252,6 +288,15 @@ If the smoke test says the server is not reachable:
 - make sure `uvicorn` is already running
 - keep the server terminal open
 - check that the URL is `http://127.0.0.1:8000`
+
+### `pywebview is required for desktop mode`
+
+If desktop mode fails with this message, install the optional extra:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python -m pip install -e ".[desktop]"
+```
 
 ### `ModuleNotFoundError: No module named 'goal_ops_console'`
 
@@ -320,9 +365,12 @@ If a value is rejected:
 ## Key Files
 
 - [main.py](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/main.py)
+- [desktop.py](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/desktop.py)
 - [app.js](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/static/app.js)
 - [index.html](/C:/Users/raffa/OneDrive/Documents/New%20project/goal_ops_console/templates/index.html)
 - [start-server.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-server.ps1)
+- [start-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-desktop.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
+- [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)
