@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 pytest-cache-files-*/
 build/
 dist/
+.tmp/
 goal_ops.db
 goal_ops.db-journal
 probe.db

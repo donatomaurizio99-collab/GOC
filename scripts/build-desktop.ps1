@@ -13,9 +13,18 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
-if ($InstallDependencies) {
-    Write-Host "Installing desktop build dependencies..." -ForegroundColor Cyan
-    python -m pip install -e ".[desktop,desktop-build]"
+function Invoke-PythonCommand {
+    param(
+        [string[]]$PythonArgs,
+        [string]$Description
+    )
+
+    Write-Host "Running: python $($PythonArgs -join ' ')" -ForegroundColor DarkGray
+    & python @PythonArgs
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "$Description failed (exit code $exitCode)."
+    }
 }
 
 $pyInstallerArgs = @(
@@ -60,12 +69,28 @@ if ($DryRun) {
     exit 0
 }
 
-python @pyInstallerArgs
+if ($InstallDependencies) {
+    $LocalPipTemp = Join-Path $ProjectRoot ".tmp/pip"
+    New-Item -ItemType Directory -Force -Path $LocalPipTemp | Out-Null
+    $env:TMP = $LocalPipTemp
+    $env:TEMP = $LocalPipTemp
+
+    Write-Host "Installing desktop build dependencies..." -ForegroundColor Cyan
+    Write-Host "Using temp dir: $LocalPipTemp" -ForegroundColor DarkGray
+    Invoke-PythonCommand -PythonArgs @("-m", "pip", "install", "-e", ".[desktop,desktop-build]") -Description "Dependency installation"
+}
+
+Invoke-PythonCommand -PythonArgs @("-m", "PyInstaller", "--version") -Description "PyInstaller availability check"
+Invoke-PythonCommand -PythonArgs $pyInstallerArgs -Description "Desktop packaging"
 
 $outputPath = if ($Mode -eq "onefile") {
     Join-Path $ProjectRoot "dist/$Name.exe"
 } else {
     Join-Path $ProjectRoot "dist/$Name/$Name.exe"
+}
+
+if (-not (Test-Path -LiteralPath $outputPath)) {
+    throw "Desktop packaging completed but executable was not found at: $outputPath"
 }
 
 Write-Host "Build complete." -ForegroundColor Green

@@ -100,6 +100,7 @@ Build `onefile`:
 Optional:
 
 ```powershell
+.\scripts\build-desktop.ps1 -Mode onedir -InstallDependencies
 .\scripts\build-desktop.ps1 -Mode onedir -Name "GoalOpsConsole"
 .\scripts\build-desktop.ps1 -Mode onefile -IconPath ".\assets\goal-ops.ico"
 .\scripts\build-desktop.ps1 -DryRun
