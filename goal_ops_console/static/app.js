@@ -257,6 +257,7 @@ function renderFaults(summary, entries) {
         <th>Goal</th>
         <th>Correlation</th>
         <th>Error</th>
+        <th>Remediation</th>
       </tr>
     </thead>
     <tbody>
@@ -282,9 +283,28 @@ function renderFaults(summary, entries) {
             <div>${item.error_hash || "-"}</div>
             <div class="meta">${item.last_error || ""}</div>
           </td>
+          <td>${renderFaultRemediationButtons(item)}</td>
         </tr>`).join("")}
     </tbody>
   </table></div>`;
+}
+
+function renderFaultRemediationButtons(item) {
+  const buttons = [];
+  if (["failed", "exhausted", "poison"].includes(item.task_status)) {
+    buttons.push(
+      `<button class="secondary" data-fault-action="retry" data-failure-id="${item.failure_id}">Retry Task</button>`,
+    );
+  }
+  if (["blocked", "escalation_pending"].includes(item.goal_state)) {
+    buttons.push(
+      `<button class="secondary" data-fault-action="requeue_goal" data-failure-id="${item.failure_id}">Requeue Goal</button>`,
+    );
+  }
+  if (!buttons.length) {
+    return `<div class="meta">No remediation needed</div>`;
+  }
+  return `<div class="actions">${buttons.join("")}</div>`;
 }
 
 function renderFlowTrace(trace) {
@@ -538,6 +558,41 @@ async function runOperatorAction(action) {
   await refreshAll();
 }
 
+async function runFaultAction(action, failureId) {
+  const reasonInput = document.getElementById("fault-remediation-reason");
+  const dryRunInput = document.getElementById("fault-remediation-dry-run");
+  const reason = (reasonInput?.value || "").trim();
+  const dryRun = Boolean(dryRunInput?.checked);
+  if (!reason) {
+    throw new Error("Remediation reason is required.");
+  }
+
+  const actionPath = action === "retry" ? "retry" : "requeue_goal";
+  const payload = await api(`/system/faults/${encodeURIComponent(failureId)}/${actionPath}`, {
+    method: "POST",
+    body: JSON.stringify({ reason, dry_run: dryRun }),
+  });
+
+  const feedback = document.getElementById("system-feedback");
+  if (dryRun) {
+    const blockers = payload.blockers?.length ? ` Blockers: ${payload.blockers.join(" | ")}` : "";
+    feedback.textContent = payload.allowed
+      ? `Dry run passed for ${actionPath} on failure ${failureId}.`
+      : `Dry run blocked for ${actionPath} on failure ${failureId}.${blockers}`;
+    await Promise.all([refreshFaults(), refreshHealth()]);
+    return;
+  }
+
+  if (action === "retry") {
+    feedback.textContent = (
+      `Retry task ${payload.retry_task.task_id} queued for source task ${payload.source_task_id}.`
+    );
+  } else {
+    feedback.textContent = `Goal ${payload.goal.goal_id} requeued to state ${payload.goal.state}.`;
+  }
+  await refreshAll();
+}
+
 document.getElementById("goal-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   showError("goal-error", null);
@@ -621,6 +676,8 @@ document.addEventListener("click", async (event) => {
   const goalId = event.target.dataset.goalId;
   const taskAction = event.target.dataset.taskAction;
   const taskId = event.target.dataset.taskId;
+  const faultAction = event.target.dataset.faultAction;
+  const failureId = event.target.dataset.failureId;
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
   const operatorAction = event.target.dataset.operatorAction;
@@ -628,6 +685,10 @@ document.addEventListener("click", async (event) => {
   try {
     if (operatorAction) {
       await runOperatorAction(operatorAction);
+    }
+
+    if (faultAction && failureId) {
+      await runFaultAction(faultAction, failureId);
     }
 
     if (goalAction && goalId) {
@@ -679,7 +740,7 @@ document.addEventListener("click", async (event) => {
       document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
     }
   } catch (error) {
-    const target = operatorAction ? "system-feedback" : goalAction ? "goal-error" : "task-error";
+    const target = operatorAction || faultAction ? "system-feedback" : goalAction ? "goal-error" : "task-error";
     showError(target, error);
   }
 });

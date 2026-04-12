@@ -371,6 +371,10 @@
           <input id="fault-goal-id" placeholder="Optional goal id">
           <input id="fault-error-hash" placeholder="Optional error hash">
         </div>
+        <div class="split">
+          <input id="fault-remediation-reason" value="Supervisor remediation from dashboard" placeholder="Remediation reason (required)">
+          <label class="meta"><input type="checkbox" id="fault-remediation-dry-run"> Dry run only (no writes)</label>
+        </div>
         <label class="meta"><input type="checkbox" id="fault-dead-letter-only" checked> Dead-letter only (`poison` + `exhausted`)</label>
         <button type="submit">Apply Filter</button>
       </form>

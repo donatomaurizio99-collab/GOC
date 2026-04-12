@@ -705,3 +705,122 @@ def test_39_health_and_fault_summary_include_fault_snapshot(client):
     assert "systemic_external_failures_last_window" in summary_payload
     assert "faults" in health_payload
     assert health_payload["faults"]["dead_letter_tasks"] >= 1
+
+
+def test_40_fault_retry_endpoint_creates_pending_retry_task_and_requeues_goal(client):
+    goal = create_active_goal(client, title="Retry Goal")
+    task = create_task(client, goal["goal_id"], title="Retry Source Task")
+
+    for idx in range(3):
+        client.post(
+            f"/tasks/{task['task_id']}/fail",
+            json={"failure_type": "ExecutionFailure", "error_message": f"Execution issue {idx}"},
+        )
+
+    source_task = client.get(f"/tasks/{task['task_id']}").json()
+    goal_before = client.get(f"/goals/{goal['goal_id']}").json()
+    faults = client.get("/system/faults?dead_letter_only=true").json()["entries"]
+    failure_id = next(item["failure_id"] for item in faults if item["task_id"] == task["task_id"])
+
+    response = client.post(
+        f"/system/faults/{failure_id}/retry",
+        json={"reason": "Manual remediation after dependency fix", "dry_run": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert source_task["status"] == "exhausted"
+    assert goal_before["state"] == "blocked"
+    assert payload["goal_requeued"] is True
+    assert payload["source_task_id"] == task["task_id"]
+    assert payload["retry_task"]["status"] == "pending"
+    assert payload["retry_task"]["task_id"] != task["task_id"]
+
+    goal_after = client.get(f"/goals/{goal['goal_id']}").json()
+    assert goal_after["state"] == "active"
+
+    failure_row = client.app.state.services.db.fetch_one(
+        "SELECT status FROM failure_log WHERE id = ?",
+        failure_id,
+    )
+    assert failure_row["status"] == "retry_queued"
+
+
+def test_41_fault_retry_dry_run_keeps_state_unchanged(client):
+    goal = create_active_goal(client, title="Dry run goal")
+    task = create_task(client, goal["goal_id"], title="Dry run task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "persistent skill issue"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "persistent skill issue"},
+    )
+
+    services = client.app.state.services
+    task_count_before = services.db.fetch_scalar("SELECT COUNT(*) FROM task_state")
+    fault = client.get("/system/faults?dead_letter_only=true").json()["entries"][0]
+    failure_id = fault["failure_id"]
+
+    response = client.post(
+        f"/system/faults/{failure_id}/retry",
+        json={"reason": "Preview remediation only", "dry_run": True},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dry_run"] is True
+    assert payload["allowed"] is True
+    assert payload["will_requeue_goal"] is True
+
+    task_count_after = services.db.fetch_scalar("SELECT COUNT(*) FROM task_state")
+    failure_status = services.db.fetch_scalar("SELECT status FROM failure_log WHERE id = ?", failure_id)
+    assert task_count_after == task_count_before
+    assert failure_status == "recorded"
+
+
+def test_42_fault_requeue_goal_endpoint_reactivates_escalation_pending_goal(client):
+    goal = create_active_goal(client, title="Requeue Goal")
+    task = create_task(client, goal["goal_id"], title="Requeue Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "requeue me"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "requeue me"},
+    )
+
+    fault = client.get("/system/faults?dead_letter_only=true").json()["entries"][0]
+    failure_id = fault["failure_id"]
+
+    response = client.post(
+        f"/system/faults/{failure_id}/requeue_goal",
+        json={"reason": "Supervisor approved unblock", "dry_run": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["goal"]["state"] == "active"
+
+    failure_status = client.app.state.services.db.fetch_scalar(
+        "SELECT status FROM failure_log WHERE id = ?",
+        failure_id,
+    )
+    assert failure_status == "goal_requeued"
+
+
+def test_43_fault_requeue_goal_rejects_when_goal_is_not_blocked_or_escalated(client):
+    goal = create_active_goal(client, title="Active Goal")
+    task = create_task(client, goal["goal_id"], title="Active Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "single failure"},
+    )
+    fault = client.get("/system/faults?dead_letter_only=false").json()["entries"][0]
+
+    response = client.post(
+        f"/system/faults/{fault['failure_id']}/requeue_goal",
+        json={"reason": "Should not be needed", "dry_run": False},
+    )
+    assert response.status_code == 409
+    assert "cannot be requeued" in response.json()["detail"]

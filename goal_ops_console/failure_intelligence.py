@@ -6,6 +6,7 @@ from goal_ops_console.config import (
     SYSTEMIC_FAILURE_WINDOW_SECONDS,
 )
 from goal_ops_console.database import Database, Transaction, new_id, now_utc
+from goal_ops_console.models import OptimisticLockError
 
 
 def compute_error_hash(error_type: str, error_message: str) -> str:
@@ -93,6 +94,59 @@ class FailureIntelligence:
         if retry_count < max_retries:
             return False
         return self.count_errors_in_window(error_hash, tx=tx) >= 2
+
+    def get_fault_by_id(
+        self,
+        failure_id: str,
+        *,
+        tx: Transaction | None = None,
+    ) -> dict | None:
+        runner = tx or self.db
+        row = runner.fetch_one(
+            """SELECT fl.id AS failure_id,
+                      fl.version AS failure_version,
+                      fl.created_at,
+                      fl.failure_type,
+                      fl.fingerprint AS error_hash,
+                      fl.retry_count,
+                      fl.last_error,
+                      fl.status AS failure_status,
+                      fl.task_id,
+                      t.title AS task_title,
+                      ts.status AS task_status,
+                      ts.correlation_id AS task_correlation_id,
+                      fl.goal_id,
+                      g.title AS goal_title,
+                      g.state AS goal_state,
+                      fl.correlation_id
+               FROM failure_log fl
+               LEFT JOIN task_state ts ON ts.task_id = fl.task_id
+               LEFT JOIN tasks t ON t.task_id = fl.task_id
+               LEFT JOIN goals g ON g.goal_id = fl.goal_id
+               WHERE fl.id = ?""",
+            failure_id,
+        )
+        return dict(row) if row else None
+
+    def update_failure_status(
+        self,
+        tx: Transaction,
+        *,
+        failure_id: str,
+        expected_version: int,
+        status: str,
+    ) -> None:
+        updated = tx.execute(
+            """UPDATE failure_log
+               SET status = ?, updated_at = ?, version = version + 1
+               WHERE id = ? AND version = ?""",
+            status,
+            now_utc(),
+            failure_id,
+            expected_version,
+        )
+        if updated == 0:
+            raise OptimisticLockError(f"Failure {failure_id} version conflict")
 
     def list_faults(
         self,

@@ -313,6 +313,251 @@ class ExecutionLayer:
 
         return self.get_task(task_id)
 
+    def retry_fault(
+        self,
+        *,
+        failure_id: str,
+        reason: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        context = self.failure_intelligence.get_fault_by_id(failure_id)
+        if context is None:
+            raise NotFoundError(f"Failure {failure_id} not found")
+
+        plan = self._retry_plan(context)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "failure_id": failure_id,
+                **plan,
+            }
+        if not plan["allowed"]:
+            raise ConflictError("; ".join(plan["blockers"]))
+
+        with self.db.transaction() as tx:
+            current = self.failure_intelligence.get_fault_by_id(failure_id, tx=tx)
+            if current is None:
+                raise NotFoundError(f"Failure {failure_id} not found")
+
+            plan = self._retry_plan(current)
+            if not plan["allowed"]:
+                raise ConflictError("; ".join(plan["blockers"]))
+
+            correlation_id = self._remediation_correlation_id(current)
+            if plan["will_requeue_goal"]:
+                self.state_manager.transition_goal(
+                    current["goal_id"],
+                    to_state="active",
+                    owner="state_manager",
+                    event_type="goal.remediation_requeued",
+                    correlation_id=correlation_id,
+                    reason=reason,
+                    payload={
+                        "failure_id": failure_id,
+                        "failure_type": current["failure_type"],
+                        "error_hash": current["error_hash"],
+                        "reason": reason,
+                    },
+                    tx=tx,
+                )
+                self._metric("faults.remediation.goal_requeued", tx=tx)
+
+            retry_task_id = new_id()
+            retry_correlation_id = f"{current['goal_id']}:{retry_task_id}:0"
+            retry_title = current["task_title"] or f"Retry for {current['task_id']}"
+            timestamp = now_utc()
+
+            tx.execute(
+                "INSERT INTO tasks (task_id, goal_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                retry_task_id,
+                current["goal_id"],
+                retry_title,
+                timestamp,
+                timestamp,
+            )
+            tx.execute(
+                "INSERT INTO task_state "
+                "(task_id, goal_id, correlation_id, status, retry_count, version, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', 0, 1, ?, ?)",
+                retry_task_id,
+                current["goal_id"],
+                retry_correlation_id,
+                timestamp,
+                timestamp,
+            )
+            self.event_bus.record_event(
+                "task.remediation_retry_queued",
+                retry_task_id,
+                retry_correlation_id,
+                {
+                    "failure_id": failure_id,
+                    "source_task_id": current["task_id"],
+                    "source_error_hash": current["error_hash"],
+                    "reason": reason,
+                },
+                tx=tx,
+            )
+            self.failure_intelligence.update_failure_status(
+                tx,
+                failure_id=failure_id,
+                expected_version=int(current["failure_version"]),
+                status="retry_queued",
+            )
+            self._metric("faults.remediation.retry", tx=tx)
+            self._metric("tasks.created", tx=tx)
+            if self.observability is not None:
+                self.observability.record_audit(
+                    action="fault.remediation.retry",
+                    actor="supervisor",
+                    status="success",
+                    entity_type="failure",
+                    entity_id=failure_id,
+                    correlation_id=retry_correlation_id,
+                    details={
+                        "goal_id": current["goal_id"],
+                        "source_task_id": current["task_id"],
+                        "retry_task_id": retry_task_id,
+                        "goal_requeued": plan["will_requeue_goal"],
+                        "reason": reason,
+                    },
+                    tx=tx,
+                )
+
+        return {
+            "dry_run": False,
+            "failure_id": failure_id,
+            "goal_id": context["goal_id"],
+            "source_task_id": context["task_id"],
+            "retry_task": self.get_task(retry_task_id),
+            "goal_requeued": plan["will_requeue_goal"],
+        }
+
+    def requeue_goal_from_fault(
+        self,
+        *,
+        failure_id: str,
+        reason: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        context = self.failure_intelligence.get_fault_by_id(failure_id)
+        if context is None:
+            raise NotFoundError(f"Failure {failure_id} not found")
+
+        plan = self._requeue_goal_plan(context)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "failure_id": failure_id,
+                **plan,
+            }
+        if not plan["allowed"]:
+            raise ConflictError("; ".join(plan["blockers"]))
+
+        with self.db.transaction() as tx:
+            current = self.failure_intelligence.get_fault_by_id(failure_id, tx=tx)
+            if current is None:
+                raise NotFoundError(f"Failure {failure_id} not found")
+            plan = self._requeue_goal_plan(current)
+            if not plan["allowed"]:
+                raise ConflictError("; ".join(plan["blockers"]))
+
+            correlation_id = self._remediation_correlation_id(current)
+            goal = self.state_manager.transition_goal(
+                current["goal_id"],
+                to_state="active",
+                owner="state_manager",
+                event_type="goal.remediation_requeued",
+                correlation_id=correlation_id,
+                reason=reason,
+                payload={
+                    "failure_id": failure_id,
+                    "failure_type": current["failure_type"],
+                    "error_hash": current["error_hash"],
+                    "reason": reason,
+                },
+                tx=tx,
+            )
+            self.failure_intelligence.update_failure_status(
+                tx,
+                failure_id=failure_id,
+                expected_version=int(current["failure_version"]),
+                status="goal_requeued",
+            )
+            self._metric("faults.remediation.goal_requeued", tx=tx)
+            if self.observability is not None:
+                self.observability.record_audit(
+                    action="fault.remediation.requeue_goal",
+                    actor="supervisor",
+                    status="success",
+                    entity_type="failure",
+                    entity_id=failure_id,
+                    correlation_id=correlation_id,
+                    details={
+                        "goal_id": current["goal_id"],
+                        "source_task_id": current["task_id"],
+                        "reason": reason,
+                    },
+                    tx=tx,
+                )
+
+        return {
+            "dry_run": False,
+            "failure_id": failure_id,
+            "goal": goal,
+        }
+
+    def _retry_plan(self, fault: dict[str, Any]) -> dict[str, Any]:
+        blockers: list[str] = []
+        task_status = fault.get("task_status")
+        goal_state = fault.get("goal_state")
+        failure_status = fault.get("failure_status")
+
+        if task_status not in {"failed", "exhausted", "poison"}:
+            blockers.append(
+                f"Task {fault.get('task_id')} has status '{task_status}' and cannot be retried."
+            )
+        if goal_state not in {"active", "blocked", "escalation_pending"}:
+            blockers.append(
+                f"Goal {fault.get('goal_id')} is '{goal_state}' and cannot receive remediated retries."
+            )
+        if failure_status == "retry_queued":
+            blockers.append(f"Failure {fault.get('failure_id')} already has a queued retry task.")
+
+        return {
+            "allowed": len(blockers) == 0,
+            "blockers": blockers,
+            "will_requeue_goal": goal_state in {"blocked", "escalation_pending"},
+            "create_retry_task": True,
+            "task_status": task_status,
+            "goal_state": goal_state,
+            "failure_status": failure_status,
+        }
+
+    def _requeue_goal_plan(self, fault: dict[str, Any]) -> dict[str, Any]:
+        blockers: list[str] = []
+        goal_state = fault.get("goal_state")
+        if goal_state not in {"blocked", "escalation_pending"}:
+            blockers.append(
+                f"Goal {fault.get('goal_id')} is '{goal_state}' and cannot be requeued to active."
+            )
+        return {
+            "allowed": len(blockers) == 0,
+            "blockers": blockers,
+            "goal_state": goal_state,
+            "will_requeue_goal": True,
+        }
+
+    def _remediation_correlation_id(self, fault: dict[str, Any]) -> str:
+        goal_id = fault.get("goal_id")
+        task_id = fault.get("task_id")
+        retry_count = fault.get("retry_count")
+        correlation_id = fault.get("correlation_id") or fault.get("task_correlation_id")
+        if isinstance(correlation_id, str) and correlation_id.startswith(f"{goal_id}:"):
+            return correlation_id
+        if goal_id and task_id is not None and retry_count is not None:
+            return f"{goal_id}:{task_id}:{retry_count}"
+        return str(goal_id or "")
+
     def _get_task_state(self, tx: Transaction, task_id: str) -> dict[str, Any]:
         row = tx.fetch_one("SELECT * FROM task_state WHERE task_id = ?", task_id)
         if row is None:
