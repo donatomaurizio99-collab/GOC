@@ -343,7 +343,40 @@ function renderFlowTrace(trace) {
   `;
 }
 
+function renderTopKpis(health) {
+  const target = document.getElementById("top-kpis");
+  if (!target) {
+    return;
+  }
+  const totals = health.totals || {};
+  const backpressure = health.backpressure || {};
+  const faults = health.faults || {};
+  const audit = health.audit || {};
+  const throttled = Boolean(backpressure.is_throttled);
+  const deadLetterTasks = faults.dead_letter_tasks || 0;
+
+  target.innerHTML = `
+    <div class="kpi-chip">
+      <span class="meta">Goals</span>
+      <strong>${totals.goals || 0}</strong>
+    </div>
+    <div class="kpi-chip ${throttled ? "alert" : "good"}">
+      <span class="meta">Backpressure</span>
+      <strong>${throttled ? "ON" : "OFF"}</strong>
+    </div>
+    <div class="kpi-chip ${deadLetterTasks > 0 ? "alert" : ""}">
+      <span class="meta">Dead-Letter</span>
+      <strong>${deadLetterTasks}</strong>
+    </div>
+    <div class="kpi-chip">
+      <span class="meta">Audit 24h</span>
+      <strong>${audit.entries_last_24h || 0}</strong>
+    </div>
+  `;
+}
+
 function renderHealth(health) {
+  renderTopKpis(health);
   defaultConsumerId = health.default_consumer_id || defaultConsumerId;
   const consumerInput = document.getElementById("consumer-id");
   if (consumerInput && !consumerInput.value.trim()) {
