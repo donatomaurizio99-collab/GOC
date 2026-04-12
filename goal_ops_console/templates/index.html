@@ -357,6 +357,15 @@
             <option value="ExternalFailure">ExternalFailure</option>
             <option value="PlanFailure">PlanFailure</option>
           </select>
+          <select id="fault-failure-status">
+            <option value="">All failure statuses</option>
+            <option value="recorded">recorded</option>
+            <option value="retry_queued">retry_queued</option>
+            <option value="goal_requeued">goal_requeued</option>
+            <option value="resolved">resolved</option>
+          </select>
+        </div>
+        <div class="split">
           <select id="fault-task-status">
             <option value="">All task statuses</option>
             <option value="pending">pending</option>
@@ -366,13 +375,13 @@
             <option value="exhausted">exhausted</option>
             <option value="poison">poison</option>
           </select>
-        </div>
-        <div class="split">
           <input id="fault-goal-id" placeholder="Optional goal id">
-          <input id="fault-error-hash" placeholder="Optional error hash">
         </div>
         <div class="split">
+          <input id="fault-error-hash" placeholder="Optional error hash">
           <input id="fault-remediation-reason" value="Supervisor remediation from dashboard" placeholder="Remediation reason (required)">
+        </div>
+        <div class="split">
           <label class="meta"><input type="checkbox" id="fault-remediation-dry-run"> Dry run only (no writes)</label>
         </div>
         <label class="meta"><input type="checkbox" id="fault-dead-letter-only" checked> Dead-letter only (`poison` + `exhausted`)</label>

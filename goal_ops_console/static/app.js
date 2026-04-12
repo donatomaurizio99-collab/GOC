@@ -301,6 +301,11 @@ function renderFaultRemediationButtons(item) {
       `<button class="secondary" data-fault-action="requeue_goal" data-failure-id="${item.failure_id}">Requeue Goal</button>`,
     );
   }
+  if (item.failure_status !== "resolved") {
+    buttons.push(
+      `<button class="secondary" data-fault-action="resolve" data-failure-id="${item.failure_id}">Resolve</button>`,
+    );
+  }
   if (!buttons.length) {
     return `<div class="meta">No remediation needed</div>`;
   }
@@ -478,12 +483,14 @@ async function refreshAudit() {
 
 async function refreshFaults() {
   const failureType = document.getElementById("fault-failure-type").value.trim();
+  const failureStatus = document.getElementById("fault-failure-status").value.trim();
   const taskStatus = document.getElementById("fault-task-status").value.trim();
   const goalId = document.getElementById("fault-goal-id").value.trim();
   const errorHash = document.getElementById("fault-error-hash").value.trim();
   const deadLetterOnly = document.getElementById("fault-dead-letter-only").checked;
   const params = new URLSearchParams();
   if (failureType) params.set("failure_type", failureType);
+  if (failureStatus) params.set("failure_status", failureStatus);
   if (taskStatus) params.set("task_status", taskStatus);
   if (goalId) params.set("goal_id", goalId);
   if (errorHash) params.set("error_hash", errorHash);
@@ -567,7 +574,15 @@ async function runFaultAction(action, failureId) {
     throw new Error("Remediation reason is required.");
   }
 
-  const actionPath = action === "retry" ? "retry" : "requeue_goal";
+  const actionMap = {
+    retry: "retry",
+    requeue_goal: "requeue_goal",
+    resolve: "resolve",
+  };
+  const actionPath = actionMap[action];
+  if (!actionPath) {
+    throw new Error(`Unsupported fault action: ${action}`);
+  }
   const payload = await api(`/system/faults/${encodeURIComponent(failureId)}/${actionPath}`, {
     method: "POST",
     body: JSON.stringify({ reason, dry_run: dryRun }),
@@ -587,6 +602,8 @@ async function runFaultAction(action, failureId) {
     feedback.textContent = (
       `Retry task ${payload.retry_task.task_id} queued for source task ${payload.source_task_id}.`
     );
+  } else if (action === "resolve") {
+    feedback.textContent = `Failure ${payload.failure_id} marked as resolved.`;
   } else {
     feedback.textContent = `Goal ${payload.goal.goal_id} requeued to state ${payload.goal.state}.`;
   }

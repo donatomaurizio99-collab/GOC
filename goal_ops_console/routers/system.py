@@ -159,6 +159,7 @@ def audit_log(
 def fault_explorer(
     limit: int = 200,
     failure_type: str | None = None,
+    failure_status: str | None = None,
     task_status: str | None = None,
     goal_id: str | None = None,
     error_hash: str | None = None,
@@ -169,6 +170,7 @@ def fault_explorer(
         "entries": services.failure_intelligence.list_faults(
             limit=limit,
             failure_type=failure_type,
+            failure_status=failure_status,
             task_status=task_status,
             goal_id=goal_id,
             error_hash=error_hash,
@@ -181,6 +183,7 @@ def fault_explorer(
 def fault_summary(
     limit: int = 20,
     failure_type: str | None = None,
+    failure_status: str | None = None,
     task_status: str | None = None,
     goal_id: str | None = None,
     error_hash: str | None = None,
@@ -190,6 +193,7 @@ def fault_summary(
     summary = services.failure_intelligence.fault_summary(
         limit=limit,
         failure_type=failure_type,
+        failure_status=failure_status,
         task_status=task_status,
         goal_id=goal_id,
         error_hash=error_hash,
@@ -221,6 +225,19 @@ def requeue_fault_goal(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return services.execution_layer.requeue_goal_from_fault(
+        failure_id=failure_id,
+        reason=request.reason,
+        dry_run=request.dry_run,
+    )
+
+
+@router.post("/system/faults/{failure_id}/resolve")
+def resolve_fault(
+    failure_id: str,
+    request: FaultRemediationRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.execution_layer.resolve_fault(
         failure_id=failure_id,
         reason=request.reason,
         dry_run=request.dry_run,

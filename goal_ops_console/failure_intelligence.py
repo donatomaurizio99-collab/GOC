@@ -153,6 +153,7 @@ class FailureIntelligence:
         *,
         limit: int = 200,
         failure_type: str | None = None,
+        failure_status: str | None = None,
         task_status: str | None = None,
         goal_id: str | None = None,
         error_hash: str | None = None,
@@ -160,6 +161,7 @@ class FailureIntelligence:
     ) -> list[dict]:
         clauses, params = self._fault_filters(
             failure_type=failure_type,
+            failure_status=failure_status,
             task_status=task_status,
             goal_id=goal_id,
             error_hash=error_hash,
@@ -198,6 +200,7 @@ class FailureIntelligence:
         *,
         limit: int = 20,
         failure_type: str | None = None,
+        failure_status: str | None = None,
         task_status: str | None = None,
         goal_id: str | None = None,
         error_hash: str | None = None,
@@ -205,6 +208,7 @@ class FailureIntelligence:
     ) -> dict:
         clauses, params = self._fault_filters(
             failure_type=failure_type,
+            failure_status=failure_status,
             task_status=task_status,
             goal_id=goal_id,
             error_hash=error_hash,
@@ -251,6 +255,7 @@ class FailureIntelligence:
         self,
         *,
         failure_type: str | None,
+        failure_status: str | None,
         task_status: str | None,
         goal_id: str | None,
         error_hash: str | None,
@@ -261,6 +266,9 @@ class FailureIntelligence:
         if failure_type:
             clauses.append("fl.failure_type = ?")
             params.append(failure_type)
+        if failure_status:
+            clauses.append("fl.status = ?")
+            params.append(failure_status)
         if task_status:
             clauses.append("ts.status = ?")
             params.append(task_status)
