@@ -6,8 +6,11 @@ const SECTION_IDS = [
   "tasks-section",
   "operator-section",
   "events-section",
+  "trace-section",
+  "audit-section",
   "faults-section",
   "health-section",
+  "states-section",
 ];
 
 let selectedGoalId = "";
@@ -15,6 +18,7 @@ let defaultConsumerId = "goal_ops_console";
 let autoRefreshEnabled = true;
 let autoRefreshHandle = null;
 let densityMode = "comfy";
+let visualMode = "warm";
 let globalFilterTerm = "";
 let jumpScrollScheduled = false;
 
@@ -146,7 +150,8 @@ function updateToolbarStatus() {
     ? `Auto-refresh every ${AUTO_REFRESH_MS / 1000}s.`
     : "Auto-refresh paused.";
   const densityPart = `Density: ${densityMode}.`;
-  status.textContent = `${filterPart} ${refreshPart} ${densityPart}`;
+  const visualPart = `Visual: ${visualMode}.`;
+  status.textContent = `${filterPart} ${refreshPart} ${densityPart} ${visualPart}`;
 }
 
 function setDensityMode(mode) {
@@ -166,6 +171,25 @@ function setDensityMode(mode) {
 
 function toggleDensityMode() {
   setDensityMode(densityMode === "compact" ? "comfy" : "compact");
+}
+
+function setVisualMode(mode) {
+  visualMode = mode === "graphite" ? "graphite" : "warm";
+  document.body.classList.toggle("visual-graphite", visualMode === "graphite");
+  const toggleButton = document.getElementById("toggle-visual-mode");
+  if (toggleButton) {
+    toggleButton.textContent = `Visual: ${visualMode === "graphite" ? "Graphite" : "Warm"}`;
+  }
+  try {
+    localStorage.setItem("goal_ops_visual_mode", visualMode);
+  } catch {
+    // Ignore localStorage write failures in restricted contexts.
+  }
+  updateToolbarStatus();
+}
+
+function toggleVisualMode() {
+  setVisualMode(visualMode === "graphite" ? "warm" : "graphite");
 }
 
 function setAutoRefresh(enabled) {
@@ -1042,6 +1066,9 @@ document.getElementById("toggle-refresh").addEventListener("click", async () => 
 document.getElementById("toggle-density").addEventListener("click", () => {
   toggleDensityMode();
 });
+document.getElementById("toggle-visual-mode").addEventListener("click", () => {
+  toggleVisualMode();
+});
 
 window.addEventListener("scroll", () => {
   if (jumpScrollScheduled) {
@@ -1159,6 +1186,12 @@ try {
   setDensityMode(storedDensity === "compact" ? "compact" : "comfy");
 } catch {
   setDensityMode("comfy");
+}
+try {
+  const storedVisualMode = localStorage.getItem("goal_ops_visual_mode");
+  setVisualMode(storedVisualMode === "graphite" ? "graphite" : "warm");
+} catch {
+  setVisualMode("warm");
 }
 setAutoRefresh(true);
 setActiveJump("goals-section");
