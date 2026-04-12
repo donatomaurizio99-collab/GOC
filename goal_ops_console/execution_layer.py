@@ -506,6 +506,84 @@ class ExecutionLayer:
             "goal": goal,
         }
 
+    def resolve_fault(
+        self,
+        *,
+        failure_id: str,
+        reason: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        context = self.failure_intelligence.get_fault_by_id(failure_id)
+        if context is None:
+            raise NotFoundError(f"Failure {failure_id} not found")
+
+        plan = self._resolve_plan(context)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "failure_id": failure_id,
+                **plan,
+            }
+        if not plan["allowed"]:
+            raise ConflictError("; ".join(plan["blockers"]))
+
+        with self.db.transaction() as tx:
+            current = self.failure_intelligence.get_fault_by_id(failure_id, tx=tx)
+            if current is None:
+                raise NotFoundError(f"Failure {failure_id} not found")
+
+            plan = self._resolve_plan(current)
+            if not plan["allowed"]:
+                raise ConflictError("; ".join(plan["blockers"]))
+
+            previous_status = str(current.get("failure_status") or "")
+            correlation_id = self._remediation_correlation_id(current)
+            self.failure_intelligence.update_failure_status(
+                tx,
+                failure_id=failure_id,
+                expected_version=int(current["failure_version"]),
+                status="resolved",
+            )
+            self.event_bus.record_event(
+                "fault.resolved",
+                failure_id,
+                correlation_id,
+                {
+                    "failure_id": failure_id,
+                    "goal_id": current.get("goal_id"),
+                    "task_id": current.get("task_id"),
+                    "previous_status": previous_status,
+                    "reason": reason,
+                },
+                tx=tx,
+            )
+            self._metric("faults.remediation.resolved", tx=tx)
+            if self.observability is not None:
+                self.observability.record_audit(
+                    action="fault.remediation.resolve",
+                    actor="supervisor",
+                    status="success",
+                    entity_type="failure",
+                    entity_id=failure_id,
+                    correlation_id=correlation_id,
+                    details={
+                        "goal_id": current.get("goal_id"),
+                        "source_task_id": current.get("task_id"),
+                        "previous_status": previous_status,
+                        "reason": reason,
+                    },
+                    tx=tx,
+                )
+
+        return {
+            "dry_run": False,
+            "failure_id": failure_id,
+            "status": "resolved",
+            "previous_status": context.get("failure_status"),
+            "goal_id": context.get("goal_id"),
+            "task_id": context.get("task_id"),
+        }
+
     def _retry_plan(self, fault: dict[str, Any]) -> dict[str, Any]:
         blockers: list[str] = []
         task_status = fault.get("task_status")
@@ -545,6 +623,20 @@ class ExecutionLayer:
             "blockers": blockers,
             "goal_state": goal_state,
             "will_requeue_goal": True,
+        }
+
+    def _resolve_plan(self, fault: dict[str, Any]) -> dict[str, Any]:
+        blockers: list[str] = []
+        failure_status = fault.get("failure_status")
+        if failure_status == "resolved":
+            blockers.append(
+                f"Failure {fault.get('failure_id')} is already resolved."
+            )
+        return {
+            "allowed": len(blockers) == 0,
+            "blockers": blockers,
+            "failure_status": failure_status,
+            "target_status": "resolved",
         }
 
     def _remediation_correlation_id(self, fault: dict[str, Any]) -> str:

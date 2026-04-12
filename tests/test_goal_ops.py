@@ -824,3 +824,87 @@ def test_43_fault_requeue_goal_rejects_when_goal_is_not_blocked_or_escalated(cli
     )
     assert response.status_code == 409
     assert "cannot be requeued" in response.json()["detail"]
+
+
+def test_44_fault_resolve_endpoint_marks_failure_resolved_and_records_audit(client):
+    goal = create_active_goal(client, title="Resolve Goal")
+    task = create_task(client, goal["goal_id"], title="Resolve Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "resolve me"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "resolve me"},
+    )
+
+    fault = client.get("/system/faults?dead_letter_only=true").json()["entries"][0]
+    failure_id = fault["failure_id"]
+
+    response = client.post(
+        f"/system/faults/{failure_id}/resolve",
+        json={"reason": "Supervisor accepted residual risk", "dry_run": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "resolved"
+    assert payload["failure_id"] == failure_id
+
+    status = client.app.state.services.db.fetch_scalar(
+        "SELECT status FROM failure_log WHERE id = ?",
+        failure_id,
+    )
+    assert status == "resolved"
+
+    metrics = client.get("/system/metrics?prefix=faults.remediation").json()["metrics"]
+    metric_map = {item["metric_name"]: item["value"] for item in metrics}
+    assert metric_map["faults.remediation.resolved"] >= 1
+
+    audit_entries = client.get("/system/audit?action=fault.remediation.resolve").json()["entries"]
+    assert any(item["entity_id"] == failure_id and item["status"] == "success" for item in audit_entries)
+
+    resolved_faults = client.get("/system/faults?failure_status=resolved&dead_letter_only=false").json()["entries"]
+    assert any(item["failure_id"] == failure_id for item in resolved_faults)
+
+
+def test_45_fault_resolve_dry_run_and_conflict_when_already_resolved(client):
+    goal = create_active_goal(client, title="Resolve Dry Run Goal")
+    task = create_task(client, goal["goal_id"], title="Resolve Dry Run Task")
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": "resolve dry run"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": "resolve dry run 2"},
+    )
+    client.post(
+        f"/tasks/{task['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": "resolve dry run 3"},
+    )
+
+    fault = client.get("/system/faults?dead_letter_only=true").json()["entries"][0]
+    failure_id = fault["failure_id"]
+
+    dry_run = client.post(
+        f"/system/faults/{failure_id}/resolve",
+        json={"reason": "Preview close action", "dry_run": True},
+    )
+    assert dry_run.status_code == 200
+    dry_payload = dry_run.json()
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["allowed"] is True
+    assert dry_payload["target_status"] == "resolved"
+
+    apply_response = client.post(
+        f"/system/faults/{failure_id}/resolve",
+        json={"reason": "Apply close action", "dry_run": False},
+    )
+    assert apply_response.status_code == 200
+
+    conflict = client.post(
+        f"/system/faults/{failure_id}/resolve",
+        json={"reason": "Second close attempt", "dry_run": False},
+    )
+    assert conflict.status_code == 409
+    assert "already resolved" in conflict.json()["detail"]
