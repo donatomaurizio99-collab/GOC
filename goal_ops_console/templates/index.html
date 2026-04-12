@@ -382,10 +382,14 @@
           <input id="fault-remediation-reason" value="Supervisor remediation from dashboard" placeholder="Remediation reason (required)">
         </div>
         <div class="split">
+          <input id="fault-bulk-limit" type="number" min="1" max="500" value="50" placeholder="Bulk resolve limit">
           <label class="meta"><input type="checkbox" id="fault-remediation-dry-run"> Dry run only (no writes)</label>
         </div>
         <label class="meta"><input type="checkbox" id="fault-dead-letter-only" checked> Dead-letter only (`poison` + `exhausted`)</label>
-        <button type="submit">Apply Filter</button>
+        <div class="actions">
+          <button type="submit">Apply Filter</button>
+          <button type="button" class="secondary" id="bulk-resolve-faults">Resolve Filtered</button>
+        </div>
       </form>
       <div id="fault-summary"></div>
       <div id="fault-table"></div>

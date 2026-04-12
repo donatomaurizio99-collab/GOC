@@ -908,3 +908,105 @@ def test_45_fault_resolve_dry_run_and_conflict_when_already_resolved(client):
     )
     assert conflict.status_code == 409
     assert "already resolved" in conflict.json()["detail"]
+
+
+def test_46_fault_resolve_bulk_dry_run_reports_candidates_without_writes(client):
+    goal_a = create_active_goal(client, title="Bulk Dry Goal A")
+    goal_b = create_active_goal(client, title="Bulk Dry Goal B")
+    task_a = create_task(client, goal_a["goal_id"], title="Bulk Dry Task A")
+    task_b = create_task(client, goal_b["goal_id"], title="Bulk Dry Task B")
+
+    client.post(
+        f"/tasks/{task_a['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "bulk dry issue a"},
+    )
+    client.post(
+        f"/tasks/{task_b['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "bulk dry issue b"},
+    )
+
+    response = client.post(
+        "/system/faults/resolve_bulk",
+        json={
+            "reason": "Preview bulk resolution",
+            "dry_run": True,
+            "failure_type": "SkillFailure",
+            "task_status": "failed",
+            "dead_letter_only": False,
+            "limit": 10,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dry_run"] is True
+    assert payload["allowed"] is True
+    assert payload["matched_count"] == 2
+    assert payload["will_resolve_count"] == 2
+    assert len(payload["candidate_failure_ids"]) == 2
+    assert payload["skipped_already_resolved_count"] == 0
+
+    recorded_count = client.app.state.services.db.fetch_scalar(
+        "SELECT COUNT(*) FROM failure_log WHERE status = 'recorded'"
+    )
+    assert recorded_count == 2
+
+
+def test_47_fault_resolve_bulk_applies_filtered_resolution_and_tracks_skip(client):
+    goal_a = create_active_goal(client, title="Bulk Apply Goal A")
+    goal_b = create_active_goal(client, title="Bulk Apply Goal B")
+    task_a = create_task(client, goal_a["goal_id"], title="Bulk Apply Task A")
+    task_b = create_task(client, goal_b["goal_id"], title="Bulk Apply Task B")
+
+    client.post(
+        f"/tasks/{task_a['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": "bulk apply issue a"},
+    )
+    client.post(
+        f"/tasks/{task_b['task_id']}/fail",
+        json={"failure_type": "ExecutionFailure", "error_message": "bulk apply issue b"},
+    )
+
+    faults = client.get(
+        "/system/faults?failure_type=ExecutionFailure&task_status=failed&dead_letter_only=false"
+    ).json()["entries"]
+    assert len(faults) == 2
+    first_failure_id = faults[0]["failure_id"]
+    second_failure_id = faults[1]["failure_id"]
+
+    single_resolve = client.post(
+        f"/system/faults/{first_failure_id}/resolve",
+        json={"reason": "Resolve one before bulk", "dry_run": False},
+    )
+    assert single_resolve.status_code == 200
+
+    bulk_response = client.post(
+        "/system/faults/resolve_bulk",
+        json={
+            "reason": "Resolve filtered execution failures",
+            "dry_run": False,
+            "failure_type": "ExecutionFailure",
+            "task_status": "failed",
+            "dead_letter_only": False,
+            "limit": 10,
+        },
+    )
+    assert bulk_response.status_code == 200
+    payload = bulk_response.json()
+    assert payload["dry_run"] is False
+    assert payload["matched_count"] == 2
+    assert payload["resolved_count"] == 1
+    assert payload["skipped_already_resolved_count"] == 1
+    assert set(payload["resolved_failure_ids"]) == {second_failure_id}
+    assert set(payload["skipped_failure_ids"]) == {first_failure_id}
+
+    unresolved_after = client.app.state.services.db.fetch_scalar(
+        "SELECT COUNT(*) FROM failure_log WHERE status <> 'resolved'"
+    )
+    assert unresolved_after == 0
+
+    metrics = client.get("/system/metrics?prefix=faults.remediation.bulk_resolved").json()["metrics"]
+    assert metrics
+    assert metrics[0]["value"] >= 1
+
+    audit_entries = client.get("/system/audit?action=fault.remediation.resolve_bulk").json()["entries"]
+    assert any(item["status"] == "success" for item in audit_entries)
