@@ -77,6 +77,8 @@
       transition: background 280ms ease, color 220ms ease;
     }
     body.visual-graphite {
+      --font-display: "Segoe UI Variable Display", "Segoe UI Semibold", "Trebuchet MS", sans-serif;
+      --font-body: "Segoe UI Variable", "Segoe UI", "Candara", sans-serif;
       --bg: #edf4fb;
       --panel: #f7fbff;
       --ink: #162538;
@@ -99,6 +101,32 @@
       --header-glow-2: rgba(228, 241, 251, 0.88);
       --header-glow-3: rgba(236, 249, 241, 0.84);
       --grid-overlay: rgba(255, 255, 255, 0.16);
+    }
+    body.visual-signal {
+      --font-display: "Rockwell", "Cambria", "Bahnschrift", sans-serif;
+      --font-body: "Franklin Gothic Book", "Gill Sans MT", "Segoe UI", sans-serif;
+      --bg: #f6f4f1;
+      --panel: #faf8f6;
+      --ink: #1f2329;
+      --muted: #5b626d;
+      --line: #c9ced6;
+      --accent: #b64f2e;
+      --accent-soft: #f3ddd4;
+      --good: #1f6f54;
+      --warn: #b56d17;
+      --bad: #bb3838;
+      --info: #2f6389;
+      --focus: rgba(182, 79, 46, 0.24);
+      --bg-glow-1: rgba(170, 115, 84, 0.24);
+      --bg-glow-2: rgba(95, 145, 188, 0.2);
+      --bg-glow-3: rgba(250, 205, 146, 0.22);
+      --bg-tone-1: #f4f2ef;
+      --bg-tone-2: #e5e8ed;
+      --bg-tone-3: #d9dee5;
+      --header-glow-1: rgba(251, 249, 247, 0.96);
+      --header-glow-2: rgba(240, 244, 249, 0.9);
+      --header-glow-3: rgba(234, 240, 248, 0.86);
+      --grid-overlay: rgba(255, 255, 255, 0.14);
     }
     body::before {
       content: "";
@@ -267,6 +295,44 @@
     body.visual-graphite pre {
       background: #edf5fb;
       color: #2a3f51;
+    }
+    body.visual-signal .eyebrow {
+      color: #783f2d;
+      border-color: rgba(120, 63, 45, 0.28);
+      background: rgba(255, 248, 243, 0.88);
+      letter-spacing: 0.1em;
+    }
+    body.visual-signal .jump-btn:hover {
+      background: #f7e8e1;
+    }
+    body.visual-signal .jump-btn.active {
+      border-color: rgba(182, 79, 46, 0.85);
+      background: linear-gradient(180deg, #c97652 0%, #b64f2e 100%);
+      box-shadow: 0 6px 14px rgba(182, 79, 46, 0.24);
+    }
+    body.visual-signal main {
+      gap: 1.2rem;
+      padding-top: 1.5rem;
+    }
+    body.visual-signal section {
+      border-radius: 14px;
+      border-top-width: 3px;
+      box-shadow: 0 22px 34px rgba(53, 59, 69, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+    }
+    body.visual-signal section h2 {
+      letter-spacing: 0.03em;
+      font-size: 1rem;
+    }
+    body.visual-signal button {
+      border-radius: 9px;
+    }
+    body.visual-signal .entity-card,
+    body.visual-signal .card,
+    body.visual-signal .kpi-chip {
+      border-radius: 11px;
+    }
+    body.visual-signal .priority-fill {
+      background: linear-gradient(90deg, #d59d79 0%, #b64f2e 100%);
     }
     .toolbar-status {
       margin: 0;

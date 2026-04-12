@@ -12,6 +12,23 @@ const SECTION_IDS = [
   "health-section",
   "states-section",
 ];
+const VISUAL_PRESETS = [
+  {
+    id: "warm",
+    label: "Warm",
+    className: "",
+  },
+  {
+    id: "graphite",
+    label: "Graphite",
+    className: "visual-graphite",
+  },
+  {
+    id: "signal",
+    label: "Signal",
+    className: "visual-signal",
+  },
+];
 
 let selectedGoalId = "";
 let defaultConsumerId = "goal_ops_console";
@@ -150,7 +167,8 @@ function updateToolbarStatus() {
     ? `Auto-refresh every ${AUTO_REFRESH_MS / 1000}s.`
     : "Auto-refresh paused.";
   const densityPart = `Density: ${densityMode}.`;
-  const visualPart = `Visual: ${visualMode}.`;
+  const activeVisualPreset = VISUAL_PRESETS.find((preset) => preset.id === visualMode) || VISUAL_PRESETS[0];
+  const visualPart = `Visual: ${activeVisualPreset.label}.`;
   status.textContent = `${filterPart} ${refreshPart} ${densityPart} ${visualPart}`;
 }
 
@@ -174,11 +192,19 @@ function toggleDensityMode() {
 }
 
 function setVisualMode(mode) {
-  visualMode = mode === "graphite" ? "graphite" : "warm";
-  document.body.classList.toggle("visual-graphite", visualMode === "graphite");
+  const preset = VISUAL_PRESETS.find((item) => item.id === mode) || VISUAL_PRESETS[0];
+  visualMode = preset.id;
+  VISUAL_PRESETS.forEach((item) => {
+    if (item.className) {
+      document.body.classList.remove(item.className);
+    }
+  });
+  if (preset.className) {
+    document.body.classList.add(preset.className);
+  }
   const toggleButton = document.getElementById("toggle-visual-mode");
   if (toggleButton) {
-    toggleButton.textContent = `Visual: ${visualMode === "graphite" ? "Graphite" : "Warm"}`;
+    toggleButton.textContent = `Visual: ${preset.label}`;
   }
   try {
     localStorage.setItem("goal_ops_visual_mode", visualMode);
@@ -189,7 +215,11 @@ function setVisualMode(mode) {
 }
 
 function toggleVisualMode() {
-  setVisualMode(visualMode === "graphite" ? "warm" : "graphite");
+  const currentIndex = VISUAL_PRESETS.findIndex((preset) => preset.id === visualMode);
+  const nextIndex = currentIndex >= 0
+    ? (currentIndex + 1) % VISUAL_PRESETS.length
+    : 0;
+  setVisualMode(VISUAL_PRESETS[nextIndex].id);
 }
 
 function setAutoRefresh(enabled) {
@@ -1189,7 +1219,7 @@ try {
 }
 try {
   const storedVisualMode = localStorage.getItem("goal_ops_visual_mode");
-  setVisualMode(storedVisualMode === "graphite" ? "graphite" : "warm");
+  setVisualMode(storedVisualMode);
 } catch {
   setVisualMode("warm");
 }
