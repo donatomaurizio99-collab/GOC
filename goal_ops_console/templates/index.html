@@ -22,6 +22,35 @@
     }
 
     * { box-sizing: border-box; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .skip-link {
+      position: absolute;
+      left: 0.75rem;
+      top: -120px;
+      z-index: 50;
+      background: #111;
+      color: #fff;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+    }
+    .skip-link:focus {
+      top: 0.75rem;
+      outline: 2px solid #fff;
+      outline-offset: 2px;
+    }
     body {
       margin: 0;
       font-family: var(--font-body);
@@ -278,6 +307,26 @@
       cursor: pointer;
       text-decoration: underline;
     }
+    .inline-link-button {
+      font: inherit;
+      color: var(--info);
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      text-decoration: underline;
+      cursor: pointer;
+      border-radius: 4px;
+      box-shadow: none;
+    }
+    .inline-link-button:hover {
+      color: #1e4f84;
+      transform: none;
+    }
+    .inline-link-button:focus-visible {
+      outline: 2px solid rgba(43, 108, 176, 0.7);
+      outline-offset: 2px;
+    }
     h3 {
       margin-bottom: 0.35rem;
       color: #3b322a;
@@ -336,23 +385,29 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header>
     <h1>Goal Ops Console</h1>
     <p>Spec {{ spec_version }}. SQLite-authoritative supervised MVP with atomic state writes and append-only events.</p>
   </header>
-  <main>
+  <main id="main-content" tabindex="-1">
     <section>
       <h2><span>Goals Dashboard</span><button class="secondary" id="refresh-goals">Refresh</button></h2>
       <form id="goal-form">
-        <input name="title" placeholder="Goal title" required>
-        <textarea name="description" placeholder="Optional description"></textarea>
+        <label class="sr-only" for="goal-title">Goal title</label>
+        <input id="goal-title" name="title" placeholder="Goal title" required>
+        <label class="sr-only" for="goal-description">Goal description</label>
+        <textarea id="goal-description" name="description" placeholder="Optional description"></textarea>
         <div class="split">
-          <input name="urgency" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Urgency">
-          <input name="value" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Value">
+          <label class="sr-only" for="goal-urgency">Urgency</label>
+          <input id="goal-urgency" name="urgency" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Urgency">
+          <label class="sr-only" for="goal-value">Value</label>
+          <input id="goal-value" name="value" type="number" step="0.1" min="0" max="1" value="0.5" placeholder="Value">
         </div>
-        <input name="deadline_score" type="number" step="0.1" min="0" max="1" value="0.0" placeholder="Deadline score">
+        <label class="sr-only" for="goal-deadline-score">Deadline score</label>
+        <input id="goal-deadline-score" name="deadline_score" type="number" step="0.1" min="0" max="1" value="0.0" placeholder="Deadline score">
         <button type="submit">Create Goal</button>
-        <div class="error" id="goal-error"></div>
+        <div class="error" id="goal-error" role="status" aria-live="polite"></div>
       </form>
       <div class="meta" id="selected-goal-label">No goal selected.</div>
       <div id="goals-table"></div>
@@ -361,10 +416,12 @@
     <section>
       <h2><span>Task View</span><button class="secondary" id="refresh-tasks">Refresh</button></h2>
       <form id="task-form">
+        <label class="sr-only" for="task-goal-id">Goal ID</label>
         <input name="goal_id" id="task-goal-id" placeholder="Goal ID" required>
-        <input name="title" placeholder="Task title" required>
+        <label class="sr-only" for="task-title">Task title</label>
+        <input id="task-title" name="title" placeholder="Task title" required>
         <button type="submit">Create Task</button>
-        <div class="error" id="task-error"></div>
+        <div class="error" id="task-error" role="status" aria-live="polite"></div>
       </form>
       <div id="tasks-table"></div>
     </section>
@@ -399,7 +456,7 @@
           </div>
         </div>
       </div>
-      <div class="error" id="system-feedback"></div>
+      <div class="error" id="system-feedback" role="status" aria-live="polite"></div>
       <div id="queue-table"></div>
     </section>
 
@@ -407,7 +464,9 @@
       <h2><span>Event Log</span><button class="secondary" id="refresh-events">Refresh</button></h2>
       <form id="event-filter-form">
         <div class="split">
+          <label class="sr-only" for="event-correlation-id">Correlation filter</label>
           <input name="correlation_id" id="event-correlation-id" placeholder="Filter by correlation prefix">
+          <label class="sr-only" for="event-entity-id">Entity filter</label>
           <input name="entity_id" id="event-entity-id" placeholder="Optional entity id">
         </div>
         <button type="submit">Apply Filter</button>
@@ -418,6 +477,7 @@
     <section class="wide">
       <h2><span>Flow Trace</span><button class="secondary" id="refresh-flow-trace">Refresh</button></h2>
       <form id="flow-trace-form">
+        <label class="sr-only" for="trace-goal-id">Goal ID for flow trace</label>
         <input name="goal_id" id="trace-goal-id" placeholder="Goal ID for full flow trace">
         <button type="submit">Load Trace</button>
       </form>
@@ -428,7 +488,9 @@
       <h2><span>Audit Log</span><button class="secondary" id="refresh-audit">Refresh</button></h2>
       <form id="audit-filter-form">
         <div class="split">
+          <label class="sr-only" for="audit-action">Audit action filter</label>
           <input name="action" id="audit-action" placeholder="Optional action (e.g. http.mutation)">
+          <label class="sr-only" for="audit-status">Audit status filter</label>
           <input name="status" id="audit-status" placeholder="Optional status (success|error)">
         </div>
         <button type="submit">Apply Filter</button>
@@ -441,6 +503,7 @@
       <div class="toolbar-note">Use filters first, then run single-item remediation or the supervised batch action.</div>
       <form id="fault-filter-form">
         <div class="split">
+          <label class="sr-only" for="fault-failure-type">Failure type filter</label>
           <select id="fault-failure-type">
             <option value="">All failure types</option>
             <option value="SkillFailure">SkillFailure</option>
@@ -448,6 +511,7 @@
             <option value="ExternalFailure">ExternalFailure</option>
             <option value="PlanFailure">PlanFailure</option>
           </select>
+          <label class="sr-only" for="fault-failure-status">Failure status filter</label>
           <select id="fault-failure-status">
             <option value="">All failure statuses</option>
             <option value="recorded">recorded</option>
@@ -457,6 +521,7 @@
           </select>
         </div>
         <div class="split">
+          <label class="sr-only" for="fault-task-status">Task status filter</label>
           <select id="fault-task-status">
             <option value="">All task statuses</option>
             <option value="pending">pending</option>
@@ -466,13 +531,17 @@
             <option value="exhausted">exhausted</option>
             <option value="poison">poison</option>
           </select>
+          <label class="sr-only" for="fault-goal-id">Goal ID filter</label>
           <input id="fault-goal-id" placeholder="Optional goal id">
         </div>
         <div class="split">
+          <label class="sr-only" for="fault-error-hash">Error hash filter</label>
           <input id="fault-error-hash" placeholder="Optional error hash">
+          <label class="sr-only" for="fault-remediation-reason">Remediation reason</label>
           <input id="fault-remediation-reason" value="Supervisor remediation from dashboard" placeholder="Remediation reason (required)">
         </div>
         <div class="split">
+          <label class="sr-only" for="fault-bulk-limit">Bulk resolve limit</label>
           <input id="fault-bulk-limit" type="number" min="1" max="500" value="50" placeholder="Bulk resolve limit">
           <label class="meta"><input type="checkbox" id="fault-remediation-dry-run"> Dry run only (no writes)</label>
         </div>
@@ -482,7 +551,7 @@
           <button type="button" class="secondary" id="bulk-resolve-faults">Resolve Filtered</button>
         </div>
       </form>
-      <div class="meta" id="fault-filter-summary">Current filter: none</div>
+      <div class="meta" id="fault-filter-summary" role="status" aria-live="polite">Current filter: none</div>
       <div id="fault-summary"></div>
       <div id="fault-table"></div>
     </section>

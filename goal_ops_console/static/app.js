@@ -25,7 +25,9 @@ async function api(path, options = {}) {
 
 function showError(id, error) {
   const target = document.getElementById(id);
+  if (!target) return;
   target.textContent = error?.message || "";
+  target.setAttribute("aria-live", error ? "assertive" : "polite");
   if (id === "system-feedback") {
     if (error) {
       target.classList.add("error-state");
@@ -94,7 +96,7 @@ function renderGoals(goals) {
           <article class="entity-card ${selectedGoalId === goal.goal_id ? "selected" : ""}">
             <div class="entity-header">
               <div>
-                <div><span class="inline-link entity-title" data-select-goal="${goal.goal_id}">${goal.title}</span></div>
+                <div><button type="button" class="inline-link-button entity-title" data-select-goal="${goal.goal_id}" aria-label="Select goal ${goal.title}">${goal.title}</button></div>
                 <div class="meta">${goal.goal_id}</div>
               </div>
               <span class="pill ${stateClass(goal.state)}">${goal.state}</span>
@@ -176,7 +178,7 @@ function renderEvents(events) {
           <td>${event.seq}</td>
           <td>${event.event_type}<div class="meta">${event.emitted_at}</div></td>
           <td>${event.entity_id}</td>
-          <td><span class="inline-link" data-correlation="${event.correlation_id}">${event.correlation_id}</span></td>
+          <td><button type="button" class="inline-link-button" data-correlation="${event.correlation_id}" aria-label="Filter by correlation ${event.correlation_id}">${event.correlation_id}</button></td>
           <td><pre>${JSON.stringify(event.payload || {}, null, 2)}</pre></td>
         </tr>`).join("")}
       </tbody>
@@ -278,7 +280,7 @@ function renderFaults(summary, entries) {
             <div class="meta">${item.goal_id}</div>
             <div><span class="pill ${stateClass(item.goal_state)}">${item.goal_state || "-"}</span></div>
           </td>
-          <td><span class="inline-link" data-correlation="${item.correlation_id}">${item.correlation_id}</span></td>
+          <td><button type="button" class="inline-link-button" data-correlation="${item.correlation_id}" aria-label="Filter by correlation ${item.correlation_id}">${item.correlation_id}</button></td>
           <td>
             <div>${item.error_hash || "-"}</div>
             <div class="meta">${item.last_error || ""}</div>
@@ -425,7 +427,7 @@ function renderQueue(goals) {
       ${goals.map((goal) => `
         <tr>
           <td>
-            <div><span class="inline-link" data-select-goal="${goal.goal_id}">${goal.title}</span></div>
+            <div><button type="button" class="inline-link-button" data-select-goal="${goal.goal_id}" aria-label="Select goal ${goal.title}">${goal.title}</button></div>
             <div class="meta">${goal.goal_id}</div>
           </td>
           <td><span class="pill ${stateClass(goal.state)}">${goal.state}</span></td>
