@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
-from goal_ops_console.models import BackpressureError
+from goal_ops_console.models import BackpressureError, FaultRemediationRequest
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(tags=["system"])
@@ -199,6 +199,32 @@ def fault_summary(
         services.failure_intelligence.systemic_external_failure_count()
     )
     return summary
+
+
+@router.post("/system/faults/{failure_id}/retry")
+def retry_fault(
+    failure_id: str,
+    request: FaultRemediationRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.execution_layer.retry_fault(
+        failure_id=failure_id,
+        reason=request.reason,
+        dry_run=request.dry_run,
+    )
+
+
+@router.post("/system/faults/{failure_id}/requeue_goal")
+def requeue_fault_goal(
+    failure_id: str,
+    request: FaultRemediationRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.execution_layer.requeue_goal_from_fault(
+        failure_id=failure_id,
+        reason=request.reason,
+        dry_run=request.dry_run,
+    )
 
 
 @router.post("/system/maintenance/retention")

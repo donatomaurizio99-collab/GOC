@@ -148,6 +148,10 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Loads the full goal event chain and groups retry attempts per task.
 - `Dead-Letter / Fault Explorer` (new section)
   Lists failure records with filters (`failure_type`, `task_status`, `goal_id`, `error_hash`) and a dead-letter toggle.
+  Includes supervised remediation actions:
+  - `Retry Task` creates a new pending retry task for a dead-letter failure.
+  - `Requeue Goal` transitions `blocked` / `escalation_pending` goals back to `active`.
+  - `Dry run` previews remediation without writing state.
 - `Audit Log` (new section)
   Shows recent mutating API operations with status and request details.
 - `Metrics Hooks` (in System Health)
@@ -177,6 +181,8 @@ Observability endpoints:
 - `GET /system/audit`
 - `GET /system/faults`
 - `GET /system/faults/summary`
+- `POST /system/faults/{failure_id}/retry`
+- `POST /system/faults/{failure_id}/requeue_goal`
 - `GET /events/trace/{goal_id}`
 
 ## Run The Test Suite

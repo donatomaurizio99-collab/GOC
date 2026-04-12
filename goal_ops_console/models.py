@@ -80,6 +80,11 @@ class TaskFailureRequest(BaseModel):
     error_message: str = Field(default="Simulated failure", min_length=1, max_length=500)
 
 
+class FaultRemediationRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+    dry_run: bool = False
+
+
 class EventResponse(BaseModel):
     seq: int
     event_id: str
