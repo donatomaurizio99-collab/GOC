@@ -1,7 +1,33 @@
 const stateClass = (value) => `state-${String(value || "").replaceAll(" ", "_")}`;
 
+const AUTO_REFRESH_MS = 5000;
+const SECTION_IDS = [
+  "goals-section",
+  "tasks-section",
+  "operator-section",
+  "events-section",
+  "faults-section",
+  "health-section",
+];
+
 let selectedGoalId = "";
 let defaultConsumerId = "goal_ops_console";
+let autoRefreshEnabled = true;
+let autoRefreshHandle = null;
+let densityMode = "comfy";
+let globalFilterTerm = "";
+let jumpScrollScheduled = false;
+
+const viewCache = {
+  goals: [],
+  tasks: [],
+  events: [],
+  auditEntries: [],
+  faultSummary: {},
+  faultEntries: [],
+  queue: [],
+  health: null,
+};
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -35,6 +61,130 @@ function showError(id, error) {
       target.classList.remove("error-state");
     }
   }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function normalizeFilterToken(value) {
+  return String(value ?? "").toLowerCase();
+}
+
+function matchesGlobalFilter(values) {
+  if (!globalFilterTerm) {
+    return true;
+  }
+  return values.some((value) => normalizeFilterToken(value).includes(globalFilterTerm));
+}
+
+function filterRows(rows, valueMapper) {
+  if (!globalFilterTerm) {
+    return rows;
+  }
+  return rows.filter((row) => matchesGlobalFilter(valueMapper(row)));
+}
+
+function filteredEmptyMessage(defaultMessage) {
+  if (!globalFilterTerm) {
+    return defaultMessage;
+  }
+  return `No entries match "${escapeHtml(globalFilterTerm)}".`;
+}
+
+function updateSelectedGoalLabel() {
+  const selectedLabel = selectedGoalId ? `Selected goal: ${selectedGoalId}` : "No goal selected.";
+  document.getElementById("selected-goal-label").textContent = selectedLabel;
+}
+
+function setActiveJump(sectionId) {
+  document.querySelectorAll(".jump-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.jumpTarget === sectionId);
+  });
+}
+
+function jumpToSection(sectionId) {
+  const target = document.getElementById(sectionId);
+  if (!target) {
+    return;
+  }
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  setActiveJump(sectionId);
+}
+
+function updateActiveJumpByScroll() {
+  let nearestId = SECTION_IDS[0];
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const sectionId of SECTION_IDS) {
+    const target = document.getElementById(sectionId);
+    if (!target) {
+      continue;
+    }
+    const distance = Math.abs(target.getBoundingClientRect().top - 220);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestId = sectionId;
+    }
+  }
+  setActiveJump(nearestId);
+}
+
+function updateToolbarStatus() {
+  const status = document.getElementById("toolbar-status");
+  if (!status) {
+    return;
+  }
+  const filterPart = globalFilterTerm
+    ? `Filter active: "${globalFilterTerm}".`
+    : "Global filter inactive.";
+  const refreshPart = autoRefreshEnabled
+    ? `Auto-refresh every ${AUTO_REFRESH_MS / 1000}s.`
+    : "Auto-refresh paused.";
+  const densityPart = `Density: ${densityMode}.`;
+  status.textContent = `${filterPart} ${refreshPart} ${densityPart}`;
+}
+
+function setDensityMode(mode) {
+  densityMode = mode === "compact" ? "compact" : "comfy";
+  document.body.classList.toggle("density-compact", densityMode === "compact");
+  const toggleButton = document.getElementById("toggle-density");
+  if (toggleButton) {
+    toggleButton.textContent = `Density: ${densityMode === "compact" ? "Compact" : "Comfy"}`;
+  }
+  try {
+    localStorage.setItem("goal_ops_density", densityMode);
+  } catch {
+    // Ignore localStorage write failures in restricted contexts.
+  }
+  updateToolbarStatus();
+}
+
+function toggleDensityMode() {
+  setDensityMode(densityMode === "compact" ? "comfy" : "compact");
+}
+
+function setAutoRefresh(enabled) {
+  autoRefreshEnabled = Boolean(enabled);
+  const toggleButton = document.getElementById("toggle-refresh");
+  if (toggleButton) {
+    toggleButton.textContent = `Auto-refresh: ${autoRefreshEnabled ? "On" : "Off"}`;
+  }
+  updateToolbarStatus();
+}
+
+function rerenderFilteredViews() {
+  renderGoals(viewCache.goals);
+  renderTasks(viewCache.tasks);
+  renderEvents(viewCache.events);
+  renderAudit(viewCache.auditEntries);
+  renderFaults(viewCache.faultSummary, viewCache.faultEntries);
+  renderQueue(viewCache.queue);
+  updateSelectedGoalLabel();
 }
 
 function renderGoalButtons(goal) {
@@ -90,9 +240,16 @@ function renderTaskButtons(task) {
 }
 
 function renderGoals(goals) {
-  const content = goals.length
+  const filteredGoals = filterRows(goals, (goal) => [
+    goal.goal_id,
+    goal.title,
+    goal.state,
+    goal.blocked_reason,
+    goal.escalation_reason,
+  ]);
+  const content = filteredGoals.length
     ? `<div class="stack-list">
-        ${goals.map((goal) => `
+        ${filteredGoals.map((goal) => `
           <article class="entity-card ${selectedGoalId === goal.goal_id ? "selected" : ""}">
             <div class="entity-header">
               <div>
@@ -118,18 +275,27 @@ function renderGoals(goals) {
             <div class="actions">${renderGoalButtons(goal)}</div>
           </article>`).join("")}
       </div>`
-    : `<div class="meta">No goals yet.</div>`;
+    : `<div class="meta">${filteredEmptyMessage("No goals yet.")}</div>`;
   document.getElementById("goals-table").innerHTML = content;
 }
 
 function renderTasks(tasks) {
   const container = document.getElementById("tasks-table");
-  if (!tasks.length) {
-    container.innerHTML = `<div class="meta">No tasks for the current selection.</div>`;
+  const filteredTasks = filterRows(tasks, (task) => [
+    task.task_id,
+    task.goal_id,
+    task.title,
+    task.status,
+    task.failure_type,
+    task.error_hash,
+    task.correlation_id,
+  ]);
+  if (!filteredTasks.length) {
+    container.innerHTML = `<div class="meta">${filteredEmptyMessage("No tasks for the current selection.")}</div>`;
     return;
   }
   container.innerHTML = `<div class="stack-list">
-    ${tasks.map((task) => `
+    ${filteredTasks.map((task) => `
       <article class="entity-card">
         <div class="entity-header">
           <div>
@@ -158,8 +324,16 @@ function renderTasks(tasks) {
 
 function renderEvents(events) {
   const container = document.getElementById("events-table");
-  if (!events.length) {
-    container.innerHTML = `<div class="meta">No events match the current filter.</div>`;
+  const filteredEvents = filterRows(events, (event) => [
+    event.seq,
+    event.event_type,
+    event.entity_id,
+    event.correlation_id,
+    event.emitted_at,
+    JSON.stringify(event.payload || {}),
+  ]);
+  if (!filteredEvents.length) {
+    container.innerHTML = `<div class="meta">${filteredEmptyMessage("No events match the current filter.")}</div>`;
     return;
   }
   container.innerHTML = `<div class="table-scroll"><table>
@@ -173,7 +347,7 @@ function renderEvents(events) {
       </tr>
     </thead>
     <tbody>
-      ${events.map((event) => `
+      ${filteredEvents.map((event) => `
         <tr>
           <td>${event.seq}</td>
           <td>${event.event_type}<div class="meta">${event.emitted_at}</div></td>
@@ -187,8 +361,17 @@ function renderEvents(events) {
 
 function renderAudit(entries) {
   const container = document.getElementById("audit-table");
-  if (!entries.length) {
-    container.innerHTML = `<div class="meta">No audit entries yet.</div>`;
+  const filteredEntries = filterRows(entries, (entry) => [
+    entry.created_at,
+    entry.action,
+    entry.actor,
+    entry.status,
+    entry.entity_type,
+    entry.entity_id,
+    JSON.stringify(entry.details || {}),
+  ]);
+  if (!filteredEntries.length) {
+    container.innerHTML = `<div class="meta">${filteredEmptyMessage("No audit entries yet.")}</div>`;
     return;
   }
   container.innerHTML = `<div class="table-scroll"><table>
@@ -202,7 +385,7 @@ function renderAudit(entries) {
       </tr>
     </thead>
     <tbody>
-      ${entries.map((entry) => `
+      ${filteredEntries.map((entry) => `
         <tr>
           <td>${entry.created_at}</td>
           <td>${entry.action}<div class="meta">${entry.actor}</div></td>
@@ -246,8 +429,23 @@ function renderFaults(summary, entries) {
     </table></div>` : `<div class="meta">No fault buckets for current filter.</div>`}
   `;
 
-  if (!entries.length) {
-    tableTarget.innerHTML = `<div class="meta">No fault records for current filter.</div>`;
+  const filteredEntries = filterRows(entries, (item) => [
+    item.failure_id,
+    item.created_at,
+    item.failure_type,
+    item.failure_status,
+    item.task_id,
+    item.task_title,
+    item.task_status,
+    item.goal_id,
+    item.goal_title,
+    item.goal_state,
+    item.correlation_id,
+    item.error_hash,
+    item.last_error,
+  ]);
+  if (!filteredEntries.length) {
+    tableTarget.innerHTML = `<div class="meta">${filteredEmptyMessage("No fault records for current filter.")}</div>`;
     return;
   }
   tableTarget.innerHTML = `<div class="table-scroll"><table>
@@ -263,7 +461,7 @@ function renderFaults(summary, entries) {
       </tr>
     </thead>
     <tbody>
-      ${entries.map((item) => `
+      ${filteredEntries.map((item) => `
         <tr>
           <td>${item.created_at}</td>
           <td>
@@ -442,8 +640,14 @@ function renderHealth(health) {
 
 function renderQueue(goals) {
   const container = document.getElementById("queue-table");
-  if (!goals.length) {
-    container.innerHTML = `<div class="meta">No queue entries yet.</div>`;
+  const filteredGoals = filterRows(goals, (goal) => [
+    goal.goal_id,
+    goal.title,
+    goal.state,
+    goal.queue_status,
+  ]);
+  if (!filteredGoals.length) {
+    container.innerHTML = `<div class="meta">${filteredEmptyMessage("No queue entries yet.")}</div>`;
     return;
   }
   container.innerHTML = `<div class="table-scroll"><table>
@@ -457,7 +661,7 @@ function renderQueue(goals) {
       </tr>
     </thead>
     <tbody>
-      ${goals.map((goal) => `
+      ${filteredGoals.map((goal) => `
         <tr>
           <td>
             <div><button type="button" class="inline-link-button" data-select-goal="${goal.goal_id}" aria-label="Select goal ${goal.title}">${goal.title}</button></div>
@@ -477,21 +681,23 @@ function renderQueue(goals) {
 
 async function refreshGoals() {
   const goals = await api("/goals");
-  renderGoals(goals);
-  const selectedLabel = selectedGoalId ? `Selected goal: ${selectedGoalId}` : "No goal selected.";
-  document.getElementById("selected-goal-label").textContent = selectedLabel;
+  viewCache.goals = goals;
+  renderGoals(viewCache.goals);
+  updateSelectedGoalLabel();
 }
 
 async function refreshQueue() {
   const queue = await api("/system/queue");
-  renderQueue(queue);
+  viewCache.queue = queue;
+  renderQueue(viewCache.queue);
 }
 
 async function refreshTasks() {
   const goalId = document.getElementById("task-goal-id").value.trim();
   const path = goalId ? `/tasks?goal_id=${encodeURIComponent(goalId)}` : "/tasks";
   const tasks = await api(path);
-  renderTasks(tasks);
+  viewCache.tasks = tasks;
+  renderTasks(viewCache.tasks);
 }
 
 async function refreshEvents() {
@@ -502,7 +708,8 @@ async function refreshEvents() {
   if (entityId) params.set("entity_id", entityId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const events = await api(`/events${suffix}`);
-  renderEvents(events);
+  viewCache.events = events;
+  renderEvents(viewCache.events);
 }
 
 async function refreshAudit() {
@@ -513,7 +720,8 @@ async function refreshAudit() {
   if (status) params.set("status", status);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const payload = await api(`/system/audit${suffix}`);
-  renderAudit(payload.entries || []);
+  viewCache.auditEntries = payload.entries || [];
+  renderAudit(viewCache.auditEntries);
 }
 
 function collectFaultFilters() {
@@ -562,7 +770,9 @@ async function refreshFaults() {
     api(`/system/faults${suffix}`),
     api(`/system/faults/summary${suffix}`),
   ]);
-  renderFaults(summaryPayload, entryPayload.entries || []);
+  viewCache.faultSummary = summaryPayload || {};
+  viewCache.faultEntries = entryPayload.entries || [];
+  renderFaults(viewCache.faultSummary, viewCache.faultEntries);
 }
 
 async function refreshFlowTrace() {
@@ -578,7 +788,8 @@ async function refreshFlowTrace() {
 
 async function refreshHealth() {
   const health = await api("/system/health");
-  renderHealth(health);
+  viewCache.health = health;
+  renderHealth(viewCache.health);
 }
 
 async function refreshAll() {
@@ -592,6 +803,25 @@ async function refreshAll() {
     refreshHealth(),
     refreshQueue(),
   ]);
+}
+
+function startAutoRefreshLoop() {
+  if (autoRefreshHandle) {
+    clearInterval(autoRefreshHandle);
+  }
+  autoRefreshHandle = setInterval(() => {
+    if (!autoRefreshEnabled) {
+      return;
+    }
+    refreshGoals().catch(() => {});
+    refreshTasks().catch(() => {});
+    refreshEvents().catch(() => {});
+    refreshFlowTrace().catch(() => {});
+    refreshAudit().catch(() => {});
+    refreshFaults().catch(() => {});
+    refreshHealth().catch(() => {});
+    refreshQueue().catch(() => {});
+  }, AUTO_REFRESH_MS);
 }
 
 async function runOperatorAction(action) {
@@ -798,6 +1028,49 @@ document.getElementById("refresh-flow-trace").addEventListener("click", refreshF
 document.getElementById("refresh-audit").addEventListener("click", refreshAudit);
 document.getElementById("refresh-faults").addEventListener("click", refreshFaults);
 document.getElementById("refresh-queue").addEventListener("click", refreshQueue);
+document.getElementById("global-filter").addEventListener("input", (event) => {
+  globalFilterTerm = String(event.target.value || "").trim().toLowerCase();
+  rerenderFilteredViews();
+  updateToolbarStatus();
+});
+document.getElementById("toggle-refresh").addEventListener("click", async () => {
+  setAutoRefresh(!autoRefreshEnabled);
+  if (autoRefreshEnabled) {
+    await refreshAll();
+  }
+});
+document.getElementById("toggle-density").addEventListener("click", () => {
+  toggleDensityMode();
+});
+
+window.addEventListener("scroll", () => {
+  if (jumpScrollScheduled) {
+    return;
+  }
+  jumpScrollScheduled = true;
+  window.requestAnimationFrame(() => {
+    updateActiveJumpByScroll();
+    jumpScrollScheduled = false;
+  });
+}, { passive: true });
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "/") {
+    return;
+  }
+  const target = event.target;
+  const isTextInput = target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target?.isContentEditable;
+  if (isTextInput) {
+    return;
+  }
+  event.preventDefault();
+  const filterInput = document.getElementById("global-filter");
+  filterInput?.focus();
+  filterInput?.select();
+});
 
 document.addEventListener("click", async (event) => {
   const goalAction = event.target.dataset.goalAction;
@@ -809,8 +1082,14 @@ document.addEventListener("click", async (event) => {
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
   const operatorAction = event.target.dataset.operatorAction;
+  const jumpTarget = event.target.dataset.jumpTarget;
 
   try {
+    if (jumpTarget) {
+      jumpToSection(jumpTarget);
+      return;
+    }
+
     if (operatorAction) {
       await runOperatorAction(operatorAction);
     }
@@ -850,6 +1129,7 @@ document.addEventListener("click", async (event) => {
       document.getElementById("event-correlation-id").value = correlation;
       document.getElementById("trace-goal-id").value = correlation.split(":")[0];
       document.getElementById("fault-goal-id").value = correlation.split(":")[0];
+      setActiveJump("events-section");
       await refreshEvents();
       await refreshFlowTrace();
       await refreshFaults();
@@ -861,11 +1141,12 @@ document.addEventListener("click", async (event) => {
       document.getElementById("event-correlation-id").value = selectGoal;
       document.getElementById("trace-goal-id").value = selectGoal;
       document.getElementById("fault-goal-id").value = selectGoal;
+      setActiveJump("goals-section");
       await refreshTasks();
       await refreshEvents();
       await refreshFlowTrace();
       await refreshFaults();
-      document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
+      updateSelectedGoalLabel();
     }
   } catch (error) {
     const target = operatorAction || faultAction ? "system-feedback" : goalAction ? "goal-error" : "task-error";
@@ -873,14 +1154,14 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+try {
+  const storedDensity = localStorage.getItem("goal_ops_density");
+  setDensityMode(storedDensity === "compact" ? "compact" : "comfy");
+} catch {
+  setDensityMode("comfy");
+}
+setAutoRefresh(true);
+setActiveJump("goals-section");
+updateActiveJumpByScroll();
 refreshAll();
-setInterval(() => {
-  refreshGoals().catch(() => {});
-  refreshTasks().catch(() => {});
-  refreshEvents().catch(() => {});
-  refreshFlowTrace().catch(() => {});
-  refreshAudit().catch(() => {});
-  refreshFaults().catch(() => {});
-  refreshHealth().catch(() => {});
-  refreshQueue().catch(() => {});
-}, 5000);
+startAutoRefreshLoop();
