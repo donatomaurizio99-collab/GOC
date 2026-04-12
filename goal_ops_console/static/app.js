@@ -499,8 +499,22 @@ function collectFaultFilters() {
   return filters;
 }
 
+function renderFaultFilterSummary(filters) {
+  const target = document.getElementById("fault-filter-summary");
+  if (!target) return;
+  const parts = [];
+  if (filters.failure_type) parts.push(`type=${filters.failure_type}`);
+  if (filters.failure_status) parts.push(`status=${filters.failure_status}`);
+  if (filters.task_status) parts.push(`task=${filters.task_status}`);
+  if (filters.goal_id) parts.push(`goal=${filters.goal_id}`);
+  if (filters.error_hash) parts.push(`hash=${filters.error_hash}`);
+  parts.push(`dead_letter_only=${filters.dead_letter_only ? "true" : "false"}`);
+  target.textContent = `Current filter: ${parts.join(", ")}`;
+}
+
 async function refreshFaults() {
   const filters = collectFaultFilters();
+  renderFaultFilterSummary(filters);
   const params = new URLSearchParams();
   if (filters.failure_type) params.set("failure_type", filters.failure_type);
   if (filters.failure_status) params.set("failure_status", filters.failure_status);
