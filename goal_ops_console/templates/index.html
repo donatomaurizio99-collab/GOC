@@ -326,6 +326,15 @@
     </section>
 
     <section class="wide">
+      <h2><span>Flow Trace</span><button class="secondary" id="refresh-flow-trace">Refresh</button></h2>
+      <form id="flow-trace-form">
+        <input name="goal_id" id="trace-goal-id" placeholder="Goal ID for full flow trace">
+        <button type="submit">Load Trace</button>
+      </form>
+      <div id="flow-trace"></div>
+    </section>
+
+    <section class="wide">
       <h2><span>Audit Log</span><button class="secondary" id="refresh-audit">Refresh</button></h2>
       <form id="audit-filter-form">
         <div class="split">

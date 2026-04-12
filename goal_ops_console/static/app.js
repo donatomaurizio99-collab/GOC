@@ -215,6 +215,35 @@ function renderAudit(entries) {
     </table></div>`;
 }
 
+function renderFlowTrace(trace) {
+  const container = document.getElementById("flow-trace");
+  if (!trace || trace.event_count === 0) {
+    container.innerHTML = `<div class="meta">No trace events for this goal id.</div>`;
+    return;
+  }
+  const attempts = trace.attempts || [];
+  container.innerHTML = `
+    <div class="grid-two">
+      <div class="card"><span class="meta">Goal ID</span><div>${trace.goal_id}</div></div>
+      <div class="card"><span class="meta">Total Events</span><strong>${trace.event_count}</strong></div>
+      <div class="card"><span class="meta">Goal-Level Events</span><strong>${trace.goal_level_count}</strong></div>
+      <div class="card"><span class="meta">Attempt Groups</span><strong>${trace.attempt_count}</strong></div>
+    </div>
+    ${attempts.length ? `<div class="table-scroll" style="margin-top:0.75rem;"><table>
+      <thead><tr><th>Task</th><th>Attempt</th><th>Seq Range</th><th>Events</th></tr></thead>
+      <tbody>
+        ${attempts.map((item) => `
+          <tr>
+            <td><div>${item.task_id}</div></td>
+            <td>${item.attempt}</td>
+            <td>${item.first_seq} -> ${item.last_seq}</td>
+            <td>${item.event_types.join(", ")}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>` : `<div class="meta" style="margin-top:0.75rem;">No attempt-level events detected.</div>`}
+  `;
+}
+
 function renderHealth(health) {
   defaultConsumerId = health.default_consumer_id || defaultConsumerId;
   const consumerInput = document.getElementById("consumer-id");
@@ -345,6 +374,17 @@ async function refreshAudit() {
   renderAudit(payload.entries || []);
 }
 
+async function refreshFlowTrace() {
+  const goalId = document.getElementById("trace-goal-id").value.trim();
+  const container = document.getElementById("flow-trace");
+  if (!goalId) {
+    container.innerHTML = `<div class="meta">Enter a goal id to load flow trace.</div>`;
+    return;
+  }
+  const trace = await api(`/events/trace/${encodeURIComponent(goalId)}`);
+  renderFlowTrace(trace);
+}
+
 async function refreshHealth() {
   const health = await api("/system/health");
   renderHealth(health);
@@ -355,6 +395,7 @@ async function refreshAll() {
     refreshGoals(),
     refreshTasks(),
     refreshEvents(),
+    refreshFlowTrace(),
     refreshAudit(),
     refreshHealth(),
     refreshQueue(),
@@ -413,6 +454,7 @@ document.getElementById("goal-form").addEventListener("submit", async (event) =>
     selectedGoalId = goal.goal_id;
     document.getElementById("task-goal-id").value = goal.goal_id;
     document.getElementById("event-correlation-id").value = goal.goal_id;
+    document.getElementById("trace-goal-id").value = goal.goal_id;
     formElement.reset();
     await refreshAll();
   } catch (error) {
@@ -452,9 +494,15 @@ document.getElementById("audit-filter-form").addEventListener("submit", async (e
   await refreshAudit();
 });
 
+document.getElementById("flow-trace-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await refreshFlowTrace();
+});
+
 document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
+document.getElementById("refresh-flow-trace").addEventListener("click", refreshFlowTrace);
 document.getElementById("refresh-audit").addEventListener("click", refreshAudit);
 document.getElementById("refresh-queue").addEventListener("click", refreshQueue);
 
@@ -477,6 +525,7 @@ document.addEventListener("click", async (event) => {
       selectedGoalId = goalId;
       document.getElementById("task-goal-id").value = goalId;
       document.getElementById("event-correlation-id").value = goalId;
+      document.getElementById("trace-goal-id").value = goalId;
       await refreshAll();
     }
 
@@ -499,15 +548,19 @@ document.addEventListener("click", async (event) => {
 
     if (correlation) {
       document.getElementById("event-correlation-id").value = correlation;
+      document.getElementById("trace-goal-id").value = correlation.split(":")[0];
       await refreshEvents();
+      await refreshFlowTrace();
     }
 
     if (selectGoal) {
       selectedGoalId = selectGoal;
       document.getElementById("task-goal-id").value = selectGoal;
       document.getElementById("event-correlation-id").value = selectGoal;
+      document.getElementById("trace-goal-id").value = selectGoal;
       await refreshTasks();
       await refreshEvents();
+      await refreshFlowTrace();
       document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
     }
   } catch (error) {
@@ -521,6 +574,7 @@ setInterval(() => {
   refreshGoals().catch(() => {});
   refreshTasks().catch(() => {});
   refreshEvents().catch(() => {});
+  refreshFlowTrace().catch(() => {});
   refreshAudit().catch(() => {});
   refreshHealth().catch(() => {});
   refreshQueue().catch(() => {});

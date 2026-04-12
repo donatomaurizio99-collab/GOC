@@ -17,3 +17,12 @@ def list_events(
         entity_id=entity_id,
         limit=limit,
     )
+
+
+@router.get("/trace/{goal_id}")
+def flow_trace(
+    goal_id: str,
+    limit: int = 500,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.event_bus.flow_trace(goal_id, limit=limit)
