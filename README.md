@@ -124,6 +124,21 @@ Note:
 - `pywebview` on Windows requires WebView2 runtime.
 - In `onefile` mode startup can be slower because the executable self-extracts before launch.
 
+## Desktop Build In GitHub Actions
+
+Desktop artifacts can now be built in CI via workflow:
+
+- [desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)
+
+Triggers:
+- manual run (`workflow_dispatch`) with mode: `onedir`, `onefile`, or `both`
+- push of tags matching `v*` (for release-style builds)
+
+Published artifacts:
+- `GoalOpsConsole-onedir.zip` (if `onedir` was built)
+- `GoalOpsConsole-onefile.exe` (if `onefile` was built)
+- `SHA256SUMS.txt` (checksums for uploaded files)
+
 ## Stop And Restart
 
 Stop the server in the terminal where `uvicorn` is running:
@@ -298,6 +313,9 @@ GitHub Actions now runs `pytest` automatically for:
 
 Workflow file:
 [ci.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/ci.yml)
+
+Desktop workflow file:
+[desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)
 
 Recommended branch protection on `master`:
 
