@@ -84,7 +84,8 @@ The dashboard header now includes a command bar for faster operator workflows:
 - Keyboard shortcut `/` focuses the global filter input.
 - `Auto-refresh` toggle pauses or resumes the 5-second refresh loop.
 - `Density` toggle switches between `Comfy` and `Compact` layout.
-- `Quick jump` buttons scroll directly to major panels (`Goals`, `Tasks`, `Operator`, `Events`, `Faults`, `Health`).
+- `Visual` toggle cycles through `Warm`, `Graphite`, and `Signal` presets.
+- `Quick jump` buttons scroll directly to major panels (`Goals`, `Tasks`, `Operator`, `Events`, `Trace`, `Audit`, `Faults`, `Health`, `States`).
 
 ## Build Windows Desktop EXE (Preview)
 
@@ -260,7 +261,7 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
 - `Metrics Hooks` (in System Health)
   Shows live instrumentation counters for HTTP traffic, transitions, events and throttling.
 - `Visual Mode` (new toggle in command bar)
-  Switches UI styling between `Warm` and `Graphite` while keeping all workflows identical.
+  Cycles UI styling across `Warm`, `Graphite`, and `Signal` while keeping all workflows identical.
 - `Quick Jump` (extended)
   Includes direct jumps for `Trace`, `Audit`, and `States` sections.
 
