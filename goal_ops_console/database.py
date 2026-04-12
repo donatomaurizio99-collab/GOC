@@ -1,9 +1,12 @@
 import contextlib
 import sqlite3
+import time
 import uuid
 from collections.abc import Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
 
 def now_utc() -> str:
@@ -182,6 +185,11 @@ CREATE TABLE IF NOT EXISTS metrics_counters (
 CREATE INDEX IF NOT EXISTS idx_metrics_updated_at ON metrics_counters(updated_at DESC);
 """
 
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+LOCK_RETRY_ATTEMPTS = 8
+LOCK_RETRY_BASE_SECONDS = 0.01
+T = TypeVar("T")
+
 
 class Transaction:
     def __init__(self, conn: sqlite3.Connection):
@@ -227,7 +235,33 @@ class Database:
         )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
         return conn
+
+    def _is_lock_error(self, error: sqlite3.OperationalError) -> bool:
+        message = str(error).lower()
+        return (
+            "database is locked" in message
+            or "database table is locked" in message
+            or "database schema is locked" in message
+        )
+
+    def _run_with_retry(self, operation: Callable[[sqlite3.Connection], T]) -> T:
+        last_error: sqlite3.OperationalError | None = None
+        for attempt in range(LOCK_RETRY_ATTEMPTS):
+            conn = self._connect()
+            try:
+                return operation(conn)
+            except sqlite3.OperationalError as error:
+                if not self._is_lock_error(error) or attempt == LOCK_RETRY_ATTEMPTS - 1:
+                    raise
+                last_error = error
+            finally:
+                conn.close()
+            time.sleep(LOCK_RETRY_BASE_SECONDS * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("SQLite retry loop exited unexpectedly")
 
     def initialize(self) -> None:
         conn = self._keeper or self._connect()
@@ -238,26 +272,23 @@ class Database:
                 conn.close()
 
     def execute(self, sql: str, *params: object) -> int:
-        conn = self._connect()
-        try:
+        def _op(conn: sqlite3.Connection) -> int:
             cursor = conn.execute(sql, params)
             return cursor.rowcount
-        finally:
-            conn.close()
+
+        return self._run_with_retry(_op)
 
     def fetch_one(self, sql: str, *params: object) -> sqlite3.Row | None:
-        conn = self._connect()
-        try:
+        def _op(conn: sqlite3.Connection) -> sqlite3.Row | None:
             return conn.execute(sql, params).fetchone()
-        finally:
-            conn.close()
+
+        return self._run_with_retry(_op)
 
     def fetch_all(self, sql: str, *params: object) -> list[sqlite3.Row]:
-        conn = self._connect()
-        try:
+        def _op(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             return list(conn.execute(sql, params).fetchall())
-        finally:
-            conn.close()
+
+        return self._run_with_retry(_op)
 
     def fetch_scalar(self, sql: str, *params: object) -> object | None:
         row = self.fetch_one(sql, *params)
@@ -267,14 +298,28 @@ class Database:
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[Transaction]:
-        conn = self._connect()
+        conn: sqlite3.Connection | None = None
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            for attempt in range(LOCK_RETRY_ATTEMPTS):
+                trial = self._connect()
+                try:
+                    trial.execute("BEGIN IMMEDIATE")
+                    conn = trial
+                    break
+                except sqlite3.OperationalError as error:
+                    trial.close()
+                    if not self._is_lock_error(error) or attempt == LOCK_RETRY_ATTEMPTS - 1:
+                        raise
+                    time.sleep(LOCK_RETRY_BASE_SECONDS * (attempt + 1))
+            if conn is None:
+                raise RuntimeError("Failed to open SQLite transaction after retries")
             tx = Transaction(conn)
             yield tx
             conn.commit()
         except Exception:
-            conn.rollback()
+            if conn is not None:
+                conn.rollback()
             raise
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
