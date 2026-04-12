@@ -215,6 +215,78 @@ function renderAudit(entries) {
     </table></div>`;
 }
 
+function renderFaults(summary, entries) {
+  const summaryTarget = document.getElementById("fault-summary");
+  const tableTarget = document.getElementById("fault-table");
+  const top = summary?.top_error_hashes || [];
+
+  summaryTarget.innerHTML = `
+    <div class="grid-two" style="margin-bottom:0.75rem;">
+      <div class="card"><span class="meta">Failures (filtered)</span><strong>${summary?.total_failures || 0}</strong></div>
+      <div class="card"><span class="meta">Dead-Letter Tasks</span><strong>${summary?.dead_letter_tasks || 0}</strong></div>
+      <div class="card"><span class="meta">Poison Tasks</span><strong>${summary?.poison_tasks || 0}</strong></div>
+      <div class="card"><span class="meta">Exhausted Tasks</span><strong>${summary?.exhausted_tasks || 0}</strong></div>
+      <div class="card"><span class="meta">External Failures (window)</span><strong>${summary?.systemic_external_failures_last_window || 0}</strong></div>
+      <div class="card"><span class="meta">Top Hash Buckets</span><strong>${top.length}</strong></div>
+    </div>
+    ${top.length ? `<div class="table-scroll"><table>
+      <thead><tr><th>Type</th><th>Error Hash</th><th>Count</th><th>Tasks</th><th>Latest</th></tr></thead>
+      <tbody>
+        ${top.map((item) => `
+          <tr>
+            <td>${item.failure_type}</td>
+            <td>${item.error_hash || "-"}</td>
+            <td>${item.count}</td>
+            <td>${item.task_count}</td>
+            <td>${item.latest_at || "-"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>` : `<div class="meta">No fault buckets for current filter.</div>`}
+  `;
+
+  if (!entries.length) {
+    tableTarget.innerHTML = `<div class="meta">No fault records for current filter.</div>`;
+    return;
+  }
+  tableTarget.innerHTML = `<div class="table-scroll"><table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Failure</th>
+        <th>Task</th>
+        <th>Goal</th>
+        <th>Correlation</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${entries.map((item) => `
+        <tr>
+          <td>${item.created_at}</td>
+          <td>
+            <div>${item.failure_type}</div>
+            <div class="meta">retry=${item.retry_count} / ${item.failure_status}</div>
+          </td>
+          <td>
+            <div>${item.task_title || "-"}</div>
+            <div class="meta">${item.task_id}</div>
+            <div><span class="pill ${stateClass(item.task_status)}">${item.task_status || "-"}</span></div>
+          </td>
+          <td>
+            <div>${item.goal_title || "-"}</div>
+            <div class="meta">${item.goal_id}</div>
+            <div><span class="pill ${stateClass(item.goal_state)}">${item.goal_state || "-"}</span></div>
+          </td>
+          <td><span class="inline-link" data-correlation="${item.correlation_id}">${item.correlation_id}</span></td>
+          <td>
+            <div>${item.error_hash || "-"}</div>
+            <div class="meta">${item.last_error || ""}</div>
+          </td>
+        </tr>`).join("")}
+    </tbody>
+  </table></div>`;
+}
+
 function renderFlowTrace(trace) {
   const container = document.getElementById("flow-trace");
   if (!trace || trace.event_count === 0) {
@@ -254,6 +326,7 @@ function renderHealth(health) {
   const retention = health.retention || {};
   const metrics = health.metrics || {};
   const audit = health.audit || {};
+  const faults = health.faults || {};
   document.getElementById("health-cards").innerHTML = `
     <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
     <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
@@ -262,7 +335,9 @@ function renderHealth(health) {
     <div class="card"><span class="meta">Pending Events</span><strong>${backpressure.pending_events || 0}</strong></div>
     <div class="card"><span class="meta">Backpressure</span><strong>${backpressure.is_throttled ? "ON" : "OFF"}</strong></div>
     <div class="card"><span class="meta">429 Count</span><strong>${metrics["http.requests.status.429"] || 0}</strong></div>
-    <div class="card"><span class="meta">Audit (24h)</span><strong>${audit.entries_last_24h || 0}</strong></div>`;
+    <div class="card"><span class="meta">Audit (24h)</span><strong>${audit.entries_last_24h || 0}</strong></div>
+    <div class="card"><span class="meta">Failures</span><strong>${faults.total_failures || 0}</strong></div>
+    <div class="card"><span class="meta">Dead-Letter Tasks</span><strong>${faults.dead_letter_tasks || 0}</strong></div>`;
 
   document.getElementById("backpressure-status").innerHTML = `
     <div class="meta">Consumer: ${backpressure.consumer_id || "-"}</div>
@@ -296,6 +371,13 @@ function renderHealth(health) {
   document.getElementById("invariant-violations").innerHTML = health.invariant_violations.length
     ? `<ul>${health.invariant_violations.map((item) => `<li>${item}</li>`).join("")}</ul>`
     : `<div class="meta">No invariant violations detected.</div>`;
+
+  const topFaults = faults.top_error_hashes || [];
+  document.getElementById("fault-snapshot").innerHTML = topFaults.length
+    ? `<table><thead><tr><th>Type</th><th>Hash</th><th>Count</th></tr></thead><tbody>${
+        topFaults.map((item) => `<tr><td>${item.failure_type}</td><td>${item.error_hash || "-"}</td><td>${item.count}</td></tr>`).join("")
+      }</tbody></table>`
+    : `<div class="meta">No dead-letter faults in snapshot.</div>`;
 }
 
 function renderQueue(goals) {
@@ -374,6 +456,26 @@ async function refreshAudit() {
   renderAudit(payload.entries || []);
 }
 
+async function refreshFaults() {
+  const failureType = document.getElementById("fault-failure-type").value.trim();
+  const taskStatus = document.getElementById("fault-task-status").value.trim();
+  const goalId = document.getElementById("fault-goal-id").value.trim();
+  const errorHash = document.getElementById("fault-error-hash").value.trim();
+  const deadLetterOnly = document.getElementById("fault-dead-letter-only").checked;
+  const params = new URLSearchParams();
+  if (failureType) params.set("failure_type", failureType);
+  if (taskStatus) params.set("task_status", taskStatus);
+  if (goalId) params.set("goal_id", goalId);
+  if (errorHash) params.set("error_hash", errorHash);
+  params.set("dead_letter_only", deadLetterOnly ? "true" : "false");
+  const suffix = `?${params.toString()}`;
+  const [entryPayload, summaryPayload] = await Promise.all([
+    api(`/system/faults${suffix}`),
+    api(`/system/faults/summary${suffix}`),
+  ]);
+  renderFaults(summaryPayload, entryPayload.entries || []);
+}
+
 async function refreshFlowTrace() {
   const goalId = document.getElementById("trace-goal-id").value.trim();
   const container = document.getElementById("flow-trace");
@@ -397,6 +499,7 @@ async function refreshAll() {
     refreshEvents(),
     refreshFlowTrace(),
     refreshAudit(),
+    refreshFaults(),
     refreshHealth(),
     refreshQueue(),
   ]);
@@ -455,6 +558,7 @@ document.getElementById("goal-form").addEventListener("submit", async (event) =>
     document.getElementById("task-goal-id").value = goal.goal_id;
     document.getElementById("event-correlation-id").value = goal.goal_id;
     document.getElementById("trace-goal-id").value = goal.goal_id;
+    document.getElementById("fault-goal-id").value = goal.goal_id;
     formElement.reset();
     await refreshAll();
   } catch (error) {
@@ -494,6 +598,11 @@ document.getElementById("audit-filter-form").addEventListener("submit", async (e
   await refreshAudit();
 });
 
+document.getElementById("fault-filter-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await refreshFaults();
+});
+
 document.getElementById("flow-trace-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   await refreshFlowTrace();
@@ -504,6 +613,7 @@ document.getElementById("refresh-tasks").addEventListener("click", refreshTasks)
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
 document.getElementById("refresh-flow-trace").addEventListener("click", refreshFlowTrace);
 document.getElementById("refresh-audit").addEventListener("click", refreshAudit);
+document.getElementById("refresh-faults").addEventListener("click", refreshFaults);
 document.getElementById("refresh-queue").addEventListener("click", refreshQueue);
 
 document.addEventListener("click", async (event) => {
@@ -526,6 +636,7 @@ document.addEventListener("click", async (event) => {
       document.getElementById("task-goal-id").value = goalId;
       document.getElementById("event-correlation-id").value = goalId;
       document.getElementById("trace-goal-id").value = goalId;
+      document.getElementById("fault-goal-id").value = goalId;
       await refreshAll();
     }
 
@@ -549,8 +660,10 @@ document.addEventListener("click", async (event) => {
     if (correlation) {
       document.getElementById("event-correlation-id").value = correlation;
       document.getElementById("trace-goal-id").value = correlation.split(":")[0];
+      document.getElementById("fault-goal-id").value = correlation.split(":")[0];
       await refreshEvents();
       await refreshFlowTrace();
+      await refreshFaults();
     }
 
     if (selectGoal) {
@@ -558,9 +671,11 @@ document.addEventListener("click", async (event) => {
       document.getElementById("task-goal-id").value = selectGoal;
       document.getElementById("event-correlation-id").value = selectGoal;
       document.getElementById("trace-goal-id").value = selectGoal;
+      document.getElementById("fault-goal-id").value = selectGoal;
       await refreshTasks();
       await refreshEvents();
       await refreshFlowTrace();
+      await refreshFaults();
       document.getElementById("selected-goal-label").textContent = `Selected goal: ${selectGoal}`;
     }
   } catch (error) {
@@ -576,6 +691,7 @@ setInterval(() => {
   refreshEvents().catch(() => {});
   refreshFlowTrace().catch(() => {});
   refreshAudit().catch(() => {});
+  refreshFaults().catch(() => {});
   refreshHealth().catch(() => {});
   refreshQueue().catch(() => {});
 }, 5000);

@@ -146,6 +146,8 @@ The dashboard now includes an `Operator Controls` section for supervised Phase 2
   Removes old `events`, `event_processing` and `failure_log` rows based on retention policy.
 - `Flow Trace` (new section)
   Loads the full goal event chain and groups retry attempts per task.
+- `Dead-Letter / Fault Explorer` (new section)
+  Lists failure records with filters (`failure_type`, `task_status`, `goal_id`, `error_hash`) and a dead-letter toggle.
 - `Audit Log` (new section)
   Shows recent mutating API operations with status and request details.
 - `Metrics Hooks` (in System Health)
@@ -173,6 +175,8 @@ Observability endpoints:
 
 - `GET /system/metrics`
 - `GET /system/audit`
+- `GET /system/faults`
+- `GET /system/faults/summary`
 - `GET /events/trace/{goal_id}`
 
 ## Run The Test Suite
@@ -185,7 +189,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 Current result during implementation:
 
 ```text
-36 passed
+39 passed
 ```
 
 ## CI And PR Guardrails

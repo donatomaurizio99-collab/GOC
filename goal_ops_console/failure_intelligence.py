@@ -93,3 +93,129 @@ class FailureIntelligence:
         if retry_count < max_retries:
             return False
         return self.count_errors_in_window(error_hash, tx=tx) >= 2
+
+    def list_faults(
+        self,
+        *,
+        limit: int = 200,
+        failure_type: str | None = None,
+        task_status: str | None = None,
+        goal_id: str | None = None,
+        error_hash: str | None = None,
+        dead_letter_only: bool = False,
+    ) -> list[dict]:
+        clauses, params = self._fault_filters(
+            failure_type=failure_type,
+            task_status=task_status,
+            goal_id=goal_id,
+            error_hash=error_hash,
+            dead_letter_only=dead_letter_only,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.db.fetch_all(
+            f"""SELECT fl.id AS failure_id,
+                       fl.created_at,
+                       fl.failure_type,
+                       fl.fingerprint AS error_hash,
+                       fl.retry_count,
+                       fl.last_error,
+                       fl.status AS failure_status,
+                       fl.task_id,
+                       t.title AS task_title,
+                       ts.status AS task_status,
+                       fl.goal_id,
+                       g.title AS goal_title,
+                       g.state AS goal_state,
+                       fl.correlation_id
+                FROM failure_log fl
+                LEFT JOIN task_state ts ON ts.task_id = fl.task_id
+                LEFT JOIN tasks t ON t.task_id = fl.task_id
+                LEFT JOIN goals g ON g.goal_id = fl.goal_id
+                {where}
+                ORDER BY fl.created_at DESC
+                LIMIT ?""",
+            *params,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    def fault_summary(
+        self,
+        *,
+        limit: int = 20,
+        failure_type: str | None = None,
+        task_status: str | None = None,
+        goal_id: str | None = None,
+        error_hash: str | None = None,
+        dead_letter_only: bool = False,
+    ) -> dict:
+        clauses, params = self._fault_filters(
+            failure_type=failure_type,
+            task_status=task_status,
+            goal_id=goal_id,
+            error_hash=error_hash,
+            dead_letter_only=dead_letter_only,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        top_rows = self.db.fetch_all(
+            f"""SELECT fl.failure_type,
+                       fl.fingerprint AS error_hash,
+                       COUNT(*) AS count,
+                       COUNT(DISTINCT fl.task_id) AS task_count,
+                       MAX(fl.created_at) AS latest_at
+                FROM failure_log fl
+                LEFT JOIN task_state ts ON ts.task_id = fl.task_id
+                {where}
+                GROUP BY fl.failure_type, fl.fingerprint
+                ORDER BY count DESC, latest_at DESC
+                LIMIT ?""",
+            *params,
+            limit,
+        )
+        total_failures = self.db.fetch_scalar(
+            f"""SELECT COUNT(*)
+                FROM failure_log fl
+                LEFT JOIN task_state ts ON ts.task_id = fl.task_id
+                {where}""",
+            *params,
+        ) or 0
+        poison_tasks = self.db.fetch_scalar("SELECT COUNT(*) FROM task_state WHERE status = 'poison'") or 0
+        exhausted_tasks = (
+            self.db.fetch_scalar("SELECT COUNT(*) FROM task_state WHERE status = 'exhausted'") or 0
+        )
+        dead_letter_tasks = int(poison_tasks) + int(exhausted_tasks)
+        return {
+            "total_failures": int(total_failures),
+            "dead_letter_tasks": dead_letter_tasks,
+            "poison_tasks": int(poison_tasks),
+            "exhausted_tasks": int(exhausted_tasks),
+            "top_error_hashes": [dict(row) for row in top_rows],
+        }
+
+    def _fault_filters(
+        self,
+        *,
+        failure_type: str | None,
+        task_status: str | None,
+        goal_id: str | None,
+        error_hash: str | None,
+        dead_letter_only: bool,
+    ) -> tuple[list[str], list[object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if failure_type:
+            clauses.append("fl.failure_type = ?")
+            params.append(failure_type)
+        if task_status:
+            clauses.append("ts.status = ?")
+            params.append(task_status)
+        if goal_id:
+            clauses.append("fl.goal_id = ?")
+            params.append(goal_id)
+        if error_hash:
+            clauses.append("fl.fingerprint = ?")
+            params.append(error_hash)
+        if dead_letter_only:
+            clauses.append("ts.status IN ('poison', 'exhausted')")
+        return clauses, params
