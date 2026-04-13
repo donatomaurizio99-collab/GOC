@@ -163,6 +163,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_active_version
 ON learnings(parent_learning_id)
 WHERE status = 'promoted';
 
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+  workflow_id    TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  description    TEXT,
+  entrypoint     TEXT NOT NULL,
+  is_enabled     INTEGER NOT NULL DEFAULT 1,
+  version        INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definitions_enabled
+ON workflow_definitions(is_enabled, name);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  run_id         TEXT PRIMARY KEY,
+  workflow_id    TEXT NOT NULL,
+  status         TEXT NOT NULL,
+  requested_by   TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  input_payload  TEXT,
+  result_payload TEXT,
+  started_at     TEXT NOT NULL,
+  finished_at    TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_definitions(workflow_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id
+ON workflow_runs(workflow_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at
+ON workflow_runs(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   audit_id        TEXT PRIMARY KEY,
   action          TEXT NOT NULL,

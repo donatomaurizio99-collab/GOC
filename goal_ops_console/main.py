@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from goal_ops_console.config import Settings
 from goal_ops_console.models import DomainError
-from goal_ops_console.routers import events, goals, system, tasks
+from goal_ops_console.routers import events, goals, system, tasks, workflows
 from goal_ops_console.services import build_services
 
 
@@ -25,6 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(goals.router)
     app.include_router(tasks.router)
     app.include_router(events.router)
+    app.include_router(workflows.router)
 
     def route_template(request: Request) -> str:
         route = request.scope.get("route")

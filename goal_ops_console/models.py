@@ -105,3 +105,8 @@ class EventResponse(BaseModel):
     correlation_id: str
     payload: dict[str, Any] | None
     emitted_at: str
+
+
+class WorkflowStartRequest(BaseModel):
+    requested_by: str = Field(default="operator", min_length=1, max_length=120)
+    payload: dict[str, Any] = Field(default_factory=dict)

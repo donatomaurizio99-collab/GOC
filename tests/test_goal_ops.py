@@ -1016,3 +1016,77 @@ def test_47_fault_resolve_bulk_applies_filtered_resolution_and_tracks_skip(clien
 
     audit_entries = client.get("/system/audit?action=fault.remediation.resolve_bulk").json()["entries"]
     assert any(item["status"] == "success" for item in audit_entries)
+
+
+def test_48_workflow_catalog_lists_seeded_definitions(client):
+    response = client.get("/workflows")
+    assert response.status_code == 200
+    workflows = response.json()["workflows"]
+    workflow_ids = {item["workflow_id"] for item in workflows}
+    assert "scheduler.age_queue" in workflow_ids
+    assert "scheduler.pick_next_goal" in workflow_ids
+    assert "maintenance.retention_cleanup" in workflow_ids
+    assert all(item["is_enabled"] is True for item in workflows)
+
+
+def test_49_workflow_start_creates_succeeded_run_and_emits_events(client):
+    response = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"source": "test"}},
+    )
+    assert response.status_code == 201
+    run = response.json()["run"]
+    assert run["workflow_id"] == "maintenance.retention_cleanup"
+    assert run["status"] == "succeeded"
+    assert run["requested_by"] == "workflow-test"
+    assert run["result_payload"]["events_deleted"] >= 0
+
+    runs = client.get("/workflows/runs").json()["runs"]
+    assert any(item["run_id"] == run["run_id"] for item in runs)
+
+    events = client.get(f"/events?entity_id={run['run_id']}").json()
+    event_types = {item["event_type"] for item in events}
+    assert "workflow.run.started" in event_types
+    assert "workflow.run.succeeded" in event_types
+
+
+def test_50_workflow_start_returns_404_for_unknown_definition(client):
+    response = client.post(
+        "/workflows/does.not.exist/start",
+        json={"requested_by": "workflow-test", "payload": {}},
+    )
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_51_disabled_workflow_cannot_be_started(client):
+    services = client.app.state.services
+    services.db.execute(
+        "UPDATE workflow_definitions SET is_enabled = 0 WHERE workflow_id = ?",
+        "scheduler.age_queue",
+    )
+    response = client.post(
+        "/workflows/scheduler.age_queue/start",
+        json={"requested_by": "workflow-test", "payload": {}},
+    )
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_52_workflow_run_listing_supports_workflow_filter(client):
+    first = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"run": 1}},
+    )
+    second = client.post(
+        "/workflows/scheduler.age_queue/start",
+        json={"requested_by": "workflow-test", "payload": {"run": 2}},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+
+    response = client.get("/workflows/runs?workflow_id=maintenance.retention_cleanup")
+    assert response.status_code == 200
+    runs = response.json()["runs"]
+    assert runs
+    assert all(item["workflow_id"] == "maintenance.retention_cleanup" for item in runs)
