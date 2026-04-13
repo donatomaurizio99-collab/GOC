@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill
 ```
 
 This gate covers:
@@ -18,6 +18,7 @@ This gate covers:
 - `GET /system/readiness`
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
+- backup/restore drill with row-count and integrity verification on restored DB
 
 Verify before release:
 - CI checks green:

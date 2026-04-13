@@ -4,7 +4,9 @@ param(
     [switch]$SkipDesktopSmoke,
     [switch]$SkipApiProbe,
     [switch]$SkipFileDatabaseProbe,
-    [switch]$StrictFileDatabaseProbe
+    [switch]$StrictFileDatabaseProbe,
+    [switch]$SkipBackupRestoreDrill,
+    [switch]$StrictBackupRestoreDrill
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,6 +88,27 @@ if (-not $SkipFileDatabaseProbe) {
             }
             Write-Warning (
                 "File-backed DB probe failed but StrictFileDatabaseProbe is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipBackupRestoreDrill) {
+    Invoke-GateStep -Name "Backup/restore drill (file-backed DB)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\backup-restore-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\backup-restore-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictBackupRestoreDrill) {
+                throw
+            }
+            Write-Warning (
+                "Backup/restore drill failed but StrictBackupRestoreDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

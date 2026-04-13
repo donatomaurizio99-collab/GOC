@@ -1500,3 +1500,35 @@ def test_68_release_gate_probe_reports_memory_database():
     assert payload["integrity_quick_ok"] is True
     assert payload["integrity_full_ok"] is True
     assert payload["pending_migrations"] == []
+
+
+def test_69_backup_restore_drill_reports_success():
+    workspace = _local_test_dir("pytest-backup-restore-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "backup-restore-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["restore_matches_source"] is True
+    assert payload["restored_integrity"]["quick_ok"] is True
+    assert payload["restored_integrity"]["full_ok"] is True
+    assert payload["seed_validation"]["ok"] is True
+    shutil.rmtree(workspace, ignore_errors=True)
