@@ -114,6 +114,25 @@ Build `onefile`:
 .\scripts\build-desktop.ps1 -Mode onefile
 ```
 
+Package a desktop distribution bundle (release-ready artifacts):
+
+```powershell
+.\scripts\package-desktop-release.ps1 -Version "0.1.0" -Channel stable -Mode both -OutputDir artifacts
+```
+
+Optional signing during packaging:
+
+```powershell
+.\scripts\package-desktop-release.ps1 `
+  -Version "0.1.0" `
+  -Channel stable `
+  -Mode both `
+  -Sign `
+  -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" `
+  -CertThumbprint "<CERT_THUMBPRINT>" `
+  -TimeStampUrl "http://timestamp.digicert.com"
+```
+
 Optional:
 
 ```powershell
@@ -126,6 +145,13 @@ Optional:
 Output paths:
 - `onedir`: `dist\GoalOpsConsole\GoalOpsConsole.exe`
 - `onefile`: `dist\GoalOpsConsole.exe`
+
+Distribution bundle outputs (via `package-desktop-release.ps1`):
+- `GoalOpsConsole-onedir-<version>.zip`
+- `GoalOpsConsole-onefile-<version>.exe`
+- `GoalOpsConsole-install-<version>.ps1` (portable installer script)
+- `desktop-update-manifest.json` (auto-update feed preparation)
+- `SHA256SUMS.txt`
 
 Note:
 - `pywebview` on Windows requires WebView2 runtime.
@@ -142,8 +168,10 @@ Triggers:
 - push of tags matching `v*` (for release-style builds)
 
 Published artifacts:
-- `GoalOpsConsole-onedir.zip` (if `onedir` was built)
-- `GoalOpsConsole-onefile.exe` (if `onefile` was built)
+- `GoalOpsConsole-onedir-<version>.zip` (if `onedir` was built)
+- `GoalOpsConsole-onefile-<version>.exe` (if `onefile` was built)
+- `GoalOpsConsole-install-<version>.ps1` (if `onefile` was built)
+- `desktop-update-manifest.json` (version/channel + artifact hashes)
 - `SHA256SUMS.txt` (checksums for uploaded files)
 
 ## Stop And Restart
@@ -458,6 +486,7 @@ If a value is rejected:
 - [start-server.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-server.ps1)
 - [start-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-desktop.ps1)
 - [build-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/build-desktop.ps1)
+- [package-desktop-release.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/package-desktop-release.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
