@@ -32,7 +32,10 @@ class AppServices:
 
 def build_services(settings: Settings | None = None) -> AppServices:
     app_settings = settings or Settings()
-    db = Database(app_settings.database_url)
+    db = Database(
+        app_settings.database_url,
+        migration_backup_dir=app_settings.db_migration_backup_dir,
+    )
     db.initialize()
     observability = ObservabilityService(db)
     event_bus = EventBus(
