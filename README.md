@@ -406,11 +406,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -439,6 +439,13 @@ Standalone desktop-update safety drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-desktop-update-safety-drill.ps1
+```
+
+Standalone recovery hard-abort drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-recovery-hard-abort-drill.ps1
 ```
 
 Standalone SLO alert check:
@@ -634,6 +641,9 @@ If a value is rejected:
 - [run-auto-rollback-policy.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-auto-rollback-policy.ps1)
 - [desktop-update-safety-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/desktop-update-safety-drill.py)
 - [run-desktop-update-safety-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-desktop-update-safety-drill.ps1)
+- [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
+- [recovery-hard-abort-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-target.py)
+- [run-recovery-hard-abort-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-abort-drill.ps1)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)

@@ -73,6 +73,10 @@ FAILURE_LOG_RETENTION_DAYS = 90
 WORKFLOW_RUN_TIMEOUT_SECONDS = 300
 WORKFLOW_REAPER_BATCH_SIZE = 200
 WORKFLOW_WORKER_POLL_INTERVAL_SECONDS = 0.5
+WORKFLOW_STARTUP_RECOVERY_MAX_AGE_SECONDS = _env_int(
+    "GOAL_OPS_WORKFLOW_STARTUP_RECOVERY_MAX_AGE_SECONDS",
+    0,
+)
 DIAGNOSTICS_DIR = os.getenv("GOAL_OPS_DIAGNOSTICS_DIR", "")
 DB_MIGRATION_BACKUP_DIR = os.getenv("GOAL_OPS_DB_MIGRATION_BACKUP_DIR", "")
 
@@ -116,6 +120,7 @@ class Settings:
     workflow_run_timeout_seconds: int = WORKFLOW_RUN_TIMEOUT_SECONDS
     workflow_reaper_batch_size: int = WORKFLOW_REAPER_BATCH_SIZE
     workflow_worker_poll_interval_seconds: float = WORKFLOW_WORKER_POLL_INTERVAL_SECONDS
+    workflow_startup_recovery_max_age_seconds: int = WORKFLOW_STARTUP_RECOVERY_MAX_AGE_SECONDS
     diagnostics_dir: str = DIAGNOSTICS_DIR
     db_migration_backup_dir: str = DB_MIGRATION_BACKUP_DIR
     slo_min_http_request_sample: int = SLO_MIN_HTTP_REQUEST_SAMPLE

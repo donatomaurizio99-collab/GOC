@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -19,6 +19,7 @@ This gate covers:
 - `GET /system/slo` (`status` must be `ok`)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
+- recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large DB copies with explicit backup/restore/migration runtime thresholds
@@ -41,6 +42,12 @@ Manual desktop-update safety drill invocation:
 
 ```powershell
 .\scripts\run-desktop-update-safety-drill.ps1
+```
+
+Manual recovery hard-abort drill invocation:
+
+```powershell
+.\scripts\run-recovery-hard-abort-drill.ps1
 ```
 
 Verify before release:
@@ -263,6 +270,27 @@ Actions:
    .\scripts\run-desktop-update-safety-drill.ps1
    ```
 5. If fallback restore happened, keep stable version active and open an incident with checksum/signature evidence.
+
+### 3.9 Hard process abort / unexpected termination
+
+Symptoms:
+- host process is killed while a workflow run is still `running`
+- after restart, historical runs appear stuck in `running`
+
+Actions:
+1. Verify worker recovery on restart:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/readiness
+   ```
+2. Confirm no hanging runs remain:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/workflows/runs
+   ```
+3. Run deterministic hard-abort recovery drill:
+   ```powershell
+   .\scripts\run-recovery-hard-abort-drill.ps1
+   ```
+4. If drill fails, block rollout and escalate with drill JSON output + diagnostics snapshot.
 
 ## 4. Operational Defaults
 

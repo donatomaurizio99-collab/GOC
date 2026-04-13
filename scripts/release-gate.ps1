@@ -10,6 +10,8 @@ param(
     [switch]$StrictAutoRollbackPolicyDrill,
     [switch]$SkipDesktopUpdateSafetyDrill,
     [switch]$StrictDesktopUpdateSafetyDrill,
+    [switch]$SkipRecoveryHardAbortDrill,
+    [switch]$StrictRecoveryHardAbortDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -130,6 +132,27 @@ if (-not $SkipDesktopUpdateSafetyDrill) {
             }
             Write-Warning (
                 "Desktop update safety drill failed but StrictDesktopUpdateSafetyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipRecoveryHardAbortDrill) {
+    Invoke-GateStep -Name "Recovery hard-abort drill (kill process + startup recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\recovery-hard-abort-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\recovery-hard-abort-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictRecoveryHardAbortDrill) {
+                throw
+            }
+            Write-Warning (
+                "Recovery hard-abort drill failed but StrictRecoveryHardAbortDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
