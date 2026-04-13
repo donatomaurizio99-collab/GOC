@@ -73,12 +73,16 @@ Optional startup parameters:
 .\scripts\start-desktop.ps1 -MinWidth 1200 -MinHeight 800
 .\scripts\start-desktop.ps1 -NoWindowState
 .\scripts\start-desktop.ps1 -WindowStatePath ".\custom-window-state.json"
+.\scripts\start-desktop.ps1 -InstanceLockPath ".\goal-ops-desktop.lock"
+.\scripts\start-desktop.ps1 -AllowMultipleInstances
 ```
 
 Behavior:
 - starts an embedded local FastAPI server (`127.0.0.1`)
 - opens the same dashboard UI in a native window via `pywebview`
 - remembers window size/position across launches (disable with `-NoWindowState`)
+- enforces single-instance lock by default (disable with `-AllowMultipleInstances`)
+- writes crash reports to `%USERPROFILE%\.goal_ops_console\diagnostics` (or `GOAL_OPS_DIAGNOSTICS_DIR`)
 - shuts down the embedded server when the desktop window closes
 
 ## Operator Command Bar (UI)
@@ -399,6 +403,20 @@ Recommended branch protection on `master`:
 4. Enable `Require a pull request before merging`.
 5. Enable `Require status checks to pass before merging`.
 6. Select required check: `Pytest (Python 3.11)` and `Pytest (Python 3.12)`.
+7. Select required check: `Desktop Smoke (Windows)`.
+
+Local desktop smoke command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python .\scripts\desktop-smoke.py
+```
+
+## Production Runbook
+
+Reliability-first release and incident handling guide:
+
+- [production-runbook.md](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/production-runbook.md)
 
 ## Troubleshooting
 
