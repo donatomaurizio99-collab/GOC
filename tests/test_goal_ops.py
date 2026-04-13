@@ -1724,3 +1724,34 @@ def test_76_auto_rollback_policy_triggers_and_executes_rollback():
     assert stable_post["version"] == "0.0.1"
     assert stable_post["rollback_version"] == "0.0.2"
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_77_desktop_update_safety_drill_reports_success():
+    workspace = _local_test_dir("pytest-desktop-update-safety-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "desktop-update-safety-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["cases"]["successful_update"]["ok"] is True
+    assert payload["cases"]["tampered_hash_blocked"]["ok"] is True
+    assert payload["cases"]["fallback_after_copy_failure"]["ok"] is True
+    shutil.rmtree(workspace, ignore_errors=True)

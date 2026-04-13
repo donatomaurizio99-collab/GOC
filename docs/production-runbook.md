@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -18,6 +18,7 @@ This gate covers:
 - `GET /system/readiness`
 - `GET /system/slo` (`status` must be `ok`)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
+- desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large DB copies with explicit backup/restore/migration runtime thresholds
@@ -34,6 +35,12 @@ Manual auto-rollback policy invocation (live endpoint, stable ring):
 
 ```powershell
 .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+```
+
+Manual desktop-update safety drill invocation:
+
+```powershell
+.\scripts\run-desktop-update-safety-drill.ps1
 ```
 
 Verify before release:
@@ -56,6 +63,7 @@ Validate artifacts:
 - `artifacts\desktop-rings.json` exists and points `stable` to intended version.
 - `artifacts\SHA256SUMS.txt` exists.
 - `GoalOpsConsole-onefile-<version>.exe` starts and reaches dashboard.
+- `GoalOpsConsole-update-helper-<version>.ps1` exists next to installer script.
 
 ### 1.3 Ring promotion
 
@@ -230,6 +238,31 @@ Required triage fields:
 - `error`
 - `traceback`
 - `context`
+
+### 3.8 Desktop update validation or install failure
+
+Symptoms:
+- installer exits with hash/signature verification failure
+- update copy fails and app version appears unchanged after install attempt
+
+Actions:
+1. Confirm checksum line for onefile artifact:
+   ```powershell
+   Get-Content .\artifacts\SHA256SUMS.txt
+   ```
+2. Re-run installer (it enforces hash validation and restores previous stable executable on failure):
+   ```powershell
+   .\artifacts\GoalOpsConsole-install-<version>.ps1
+   ```
+3. If signature enforcement is required, verify signature explicitly:
+   ```powershell
+   Get-AuthenticodeSignature .\artifacts\GoalOpsConsole-onefile-<version>.exe
+   ```
+4. Run desktop-update safety drill before retrying rollout:
+   ```powershell
+   .\scripts\run-desktop-update-safety-drill.ps1
+   ```
+5. If fallback restore happened, keep stable version active and open an incident with checksum/signature evidence.
 
 ## 4. Operational Defaults
 
