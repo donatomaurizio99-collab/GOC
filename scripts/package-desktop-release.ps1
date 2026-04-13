@@ -100,7 +100,8 @@ $artifacts = @()
 function Add-ArtifactMetadata {
     param(
         [string]$Kind,
-        [string]$ArtifactPath
+        [string]$ArtifactPath,
+        [bool]$SignatureRequired = $false
     )
 
     $item = Get-Item -LiteralPath $ArtifactPath
@@ -116,6 +117,7 @@ function Add-ArtifactMetadata {
         sha256 = $hash
         size_bytes = [int64]$item.Length
         url = $url
+        signature_required = [bool]$SignatureRequired
     }
 }
 
@@ -130,57 +132,75 @@ if ($includeOneDir) {
 }
 
 $oneFileArtifactName = ""
+$updateHelperArtifactName = ""
 if ($includeOneFile) {
     $oneFileArtifactName = "$Name-onefile-$safeVersion.exe"
     $oneFileArtifactPath = Join-Path $resolvedOutputDir $oneFileArtifactName
     Copy-Item -LiteralPath $oneFileExe -Destination $oneFileArtifactPath -Force
-    Add-ArtifactMetadata -Kind "onefile" -ArtifactPath $oneFileArtifactPath
+    Add-ArtifactMetadata -Kind "onefile" -ArtifactPath $oneFileArtifactPath -SignatureRequired:$Sign
+
+    $updateHelperSource = Join-Path $ProjectRoot "scripts/install-desktop-update.ps1"
+    if (-not (Test-Path -LiteralPath $updateHelperSource)) {
+        throw "Update helper script not found at $updateHelperSource"
+    }
+    $updateHelperArtifactName = "$Name-update-helper-$safeVersion.ps1"
+    $updateHelperArtifactPath = Join-Path $resolvedOutputDir $updateHelperArtifactName
+    Copy-Item -LiteralPath $updateHelperSource -Destination $updateHelperArtifactPath -Force
+    Add-ArtifactMetadata -Kind "update_helper_script" -ArtifactPath $updateHelperArtifactPath
 }
 
 if ($includeOneFile) {
+    $oneFileArtifact = $artifacts | Where-Object { $_.kind -eq "onefile" } | Select-Object -First 1
+    if ($null -eq $oneFileArtifact) {
+        throw "Missing onefile artifact metadata for installer generation."
+    }
+    $oneFileExpectedSha = [string]$oneFileArtifact.sha256
+    $requireValidSignatureLiteral = if ($Sign) { "`$true" } else { "`$false" }
+
     $installerScriptName = "$Name-install-$safeVersion.ps1"
     $installerScriptPath = Join-Path $resolvedOutputDir $installerScriptName
     $installerContent = @"
 param(
     [string]`$InstallDir = "`$env:LOCALAPPDATA\$Name",
-    [switch]`$DesktopShortcut
+    [switch]`$DesktopShortcut,
+    [bool]`$RequireValidSignature = $requireValidSignatureLiteral,
+    [string]`$ExpectedSha256 = "$oneFileExpectedSha",
+    [switch]`$FailAfterCopy
 )
 
 `$ErrorActionPreference = "Stop"
 
 `$SourceExe = Join-Path `$PSScriptRoot "$oneFileArtifactName"
+`$HelperScript = Join-Path `$PSScriptRoot "$updateHelperArtifactName"
 if (-not (Test-Path -LiteralPath `$SourceExe)) {
     throw "Desktop executable not found next to installer script: `$SourceExe"
 }
-
-New-Item -ItemType Directory -Force -Path `$InstallDir | Out-Null
-`$TargetExe = Join-Path `$InstallDir "$Name.exe"
-Copy-Item -LiteralPath `$SourceExe -Destination `$TargetExe -Force
-
-`$ProgramsPath = [Environment]::GetFolderPath("Programs")
-`$ShortcutDir = Join-Path `$ProgramsPath "Goal Ops Console"
-New-Item -ItemType Directory -Force -Path `$ShortcutDir | Out-Null
-`$ShortcutPath = Join-Path `$ShortcutDir "Goal Ops Console.lnk"
-
-`$shell = New-Object -ComObject WScript.Shell
-`$shortcut = `$shell.CreateShortcut(`$ShortcutPath)
-`$shortcut.TargetPath = `$TargetExe
-`$shortcut.WorkingDirectory = `$InstallDir
-`$shortcut.IconLocation = "`$TargetExe,0"
-`$shortcut.Save()
-
-if (`$DesktopShortcut) {
-    `$desktopPath = [Environment]::GetFolderPath("Desktop")
-    `$desktopLinkPath = Join-Path `$desktopPath "Goal Ops Console.lnk"
-    `$desktopLink = `$shell.CreateShortcut(`$desktopLinkPath)
-    `$desktopLink.TargetPath = `$TargetExe
-    `$desktopLink.WorkingDirectory = `$InstallDir
-    `$desktopLink.IconLocation = "`$TargetExe,0"
-    `$desktopLink.Save()
+if (-not (Test-Path -LiteralPath `$HelperScript)) {
+    throw "Update helper script not found next to installer script: `$HelperScript"
 }
 
-Write-Host "Installed Goal Ops Console to: `$TargetExe" -ForegroundColor Green
-Write-Host "Start Menu shortcut: `$ShortcutPath" -ForegroundColor Green
+`$invokeArgs = @(
+    "-SourceExePath", `$SourceExe,
+    "-InstallDir", `$InstallDir,
+    "-AppName", "$Name",
+    "-ExpectedSha256", `$ExpectedSha256
+)
+if (`$DesktopShortcut) {
+    `$invokeArgs += "-DesktopShortcut"
+}
+if (`$RequireValidSignature) {
+    `$invokeArgs += "-RequireValidSignature"
+}
+if (`$FailAfterCopy) {
+    `$invokeArgs += "-FailAfterCopy"
+}
+
+& `$HelperScript @invokeArgs
+if (`$LASTEXITCODE -ne 0) {
+    throw "Desktop update helper failed with exit code `$LASTEXITCODE."
+}
+
+Write-Host "Installer completed with hash/signature validation and fallback protection." -ForegroundColor Green
 "@
     Set-Content -LiteralPath $installerScriptPath -Value $installerContent -Encoding UTF8
     Add-ArtifactMetadata -Kind "installer_script" -ArtifactPath $installerScriptPath

@@ -170,6 +170,7 @@ Output paths:
 Distribution bundle outputs (via `package-desktop-release.ps1`):
 - `GoalOpsConsole-onedir-<version>.zip`
 - `GoalOpsConsole-onefile-<version>.exe`
+- `GoalOpsConsole-update-helper-<version>.ps1` (hash/signature/fallback installer helper)
 - `GoalOpsConsole-install-<version>.ps1` (portable installer script)
 - `desktop-update-manifest.json` (auto-update feed preparation)
 - `desktop-rings.json` (ring targets + rollback pointer metadata)
@@ -212,6 +213,7 @@ Triggers:
 Published artifacts:
 - `GoalOpsConsole-onedir-<version>.zip` (if `onedir` was built)
 - `GoalOpsConsole-onefile-<version>.exe` (if `onefile` was built)
+- `GoalOpsConsole-update-helper-<version>.ps1` (if `onefile` was built)
 - `GoalOpsConsole-install-<version>.ps1` (if `onefile` was built)
 - `desktop-update-manifest.json` (version/channel + artifact hashes)
 - `SHA256SUMS.txt` (checksums for uploaded files)
@@ -404,11 +406,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -430,6 +432,13 @@ Standalone auto-rollback policy check (live service):
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+```
+
+Standalone desktop-update safety drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-desktop-update-safety-drill.ps1
 ```
 
 Standalone SLO alert check:
@@ -613,6 +622,7 @@ If a value is rejected:
 - [start-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-desktop.ps1)
 - [build-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/build-desktop.ps1)
 - [package-desktop-release.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/package-desktop-release.ps1)
+- [install-desktop-update.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/install-desktop-update.ps1)
 - [manage-desktop-rings.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/manage-desktop-rings.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
@@ -622,6 +632,8 @@ If a value is rejected:
 - [run-slo-alert-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-slo-alert-check.ps1)
 - [auto-rollback-policy.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/auto-rollback-policy.py)
 - [run-auto-rollback-policy.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-auto-rollback-policy.ps1)
+- [desktop-update-safety-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/desktop-update-safety-drill.py)
+- [run-desktop-update-safety-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-desktop-update-safety-drill.ps1)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)

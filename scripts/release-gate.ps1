@@ -8,6 +8,8 @@ param(
     [switch]$StrictFileDatabaseProbe,
     [switch]$SkipAutoRollbackPolicyDrill,
     [switch]$StrictAutoRollbackPolicyDrill,
+    [switch]$SkipDesktopUpdateSafetyDrill,
+    [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -107,6 +109,27 @@ if (-not $SkipAutoRollbackPolicyDrill) {
             }
             Write-Warning (
                 "Auto rollback policy drill failed but StrictAutoRollbackPolicyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDesktopUpdateSafetyDrill) {
+    Invoke-GateStep -Name "Desktop update safety drill (hash/signature validation + fallback)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\desktop-update-safety-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\desktop-update-safety-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictDesktopUpdateSafetyDrill) {
+                throw
+            }
+            Write-Warning (
+                "Desktop update safety drill failed but StrictDesktopUpdateSafetyDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
