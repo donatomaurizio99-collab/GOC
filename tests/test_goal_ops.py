@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1090,3 +1092,113 @@ def test_52_workflow_run_listing_supports_workflow_filter(client):
     runs = response.json()["runs"]
     assert runs
     assert all(item["workflow_id"] == "maintenance.retention_cleanup" for item in runs)
+
+
+def test_53_schema_migrations_record_workflow_hardening(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 1"
+    )
+    assert row is not None
+    assert row["name"] == "workflow_runs_hardening"
+
+
+def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
+    first = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        headers={"Idempotency-Key": "workflow-start-abc"},
+        json={"requested_by": "workflow-test", "payload": {"source": "first"}},
+    )
+    second = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        headers={"Idempotency-Key": "workflow-start-abc"},
+        json={"requested_by": "workflow-test", "payload": {"source": "second"}},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_run = first.json()["run"]
+    second_run = second.json()["run"]
+    assert first_run["run_id"] == second_run["run_id"]
+    assert first_run["idempotency_replay"] is False
+    assert second_run["idempotency_replay"] is True
+
+    count = client.app.state.services.db.fetch_scalar(
+        "SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = ? AND idempotency_key = ?",
+        "maintenance.retention_cleanup",
+        "workflow-start-abc",
+    )
+    assert count == 1
+
+
+def test_55_workflow_reaper_marks_stale_runs_timed_out(client):
+    services = client.app.state.services
+    run_id = new_id()
+    workflow_id = "maintenance.retention_cleanup"
+    correlation_id = f"workflow:{workflow_id}:manual"
+    services.db.execute(
+        """INSERT INTO workflow_runs
+           (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+            input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+           VALUES (?, ?, 'running', 'operator', ?, NULL, '{}', NULL,
+                   datetime('now', '-600 seconds'), NULL, datetime('now', '-600 seconds'), datetime('now', '-600 seconds'))""",
+        run_id,
+        workflow_id,
+        correlation_id,
+    )
+
+    response = client.post("/workflows/runs/reap?timeout_seconds=60&limit=10")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reaped_count"] >= 1
+    assert run_id in payload["run_ids"]
+
+    row = services.db.fetch_one("SELECT status FROM workflow_runs WHERE run_id = ?", run_id)
+    assert row["status"] == "timed_out"
+
+    events = client.get(f"/events?entity_id={run_id}").json()
+    assert any(item["event_type"] == "workflow.run.timed_out" for item in events)
+
+
+def test_56_workflow_runs_status_constraint_blocks_invalid_value(services):
+    with pytest.raises(sqlite3.IntegrityError):
+        services.db.execute(
+            """INSERT INTO workflow_runs
+               (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+                input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+               VALUES (?, ?, ?, 'operator', ?, NULL, '{}', NULL, ?, NULL, ?, ?)""",
+            new_id(),
+            "maintenance.retention_cleanup",
+            "invalid_status",
+            f"workflow:maintenance.retention_cleanup:{new_id()}",
+            now_utc(),
+            now_utc(),
+            now_utc(),
+        )
+
+
+def test_57_workflow_run_timeout_marks_run_timed_out():
+    app = create_app(Settings(database_url=":memory:", workflow_run_timeout_seconds=0))
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+
+        def slow_handler(_: dict) -> dict:
+            time.sleep(0.01)
+            return {"ok": True}
+
+        services.workflow_catalog.handlers["maintenance.retention_cleanup"] = slow_handler
+        response = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "timeout"}},
+        )
+        assert response.status_code == 201
+        run = response.json()["run"]
+        assert run["status"] == "timed_out"
+        assert run["result_payload"]["error_type"] == "TimeoutError"
+
+
+def test_58_workflow_runs_indexes_include_hardening_indexes(services):
+    indexes = services.db.fetch_all("PRAGMA index_list('workflow_runs')")
+    names = {row["name"] for row in indexes}
+    assert "idx_workflow_runs_status_created_at" in names
+    assert "idx_workflow_runs_correlation_id" in names
+    assert "idx_workflow_runs_idempotency" in names

@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-SPEC_VERSION = "1.4.3"
+SPEC_VERSION = "1.4.4"
 
 # Skill Selection
 MIN_RUNS = 5
@@ -50,6 +50,8 @@ EPHEMERAL_MAX_ROWS = 10_000
 EVENTS_RETENTION_DAYS = 30
 EVENT_PROCESSING_RETENTION_DAYS = 30
 FAILURE_LOG_RETENTION_DAYS = 90
+WORKFLOW_RUN_TIMEOUT_SECONDS = 300
+WORKFLOW_REAPER_BATCH_SIZE = 200
 
 # The sandbox in this workspace rejects file-backed SQLite locks, so the
 # persistent `goal_ops.db` path should be supplied via GOAL_OPS_DATABASE_URL.
@@ -76,3 +78,5 @@ class Settings:
     events_retention_days: int = EVENTS_RETENTION_DAYS
     event_processing_retention_days: int = EVENT_PROCESSING_RETENTION_DAYS
     failure_log_retention_days: int = FAILURE_LOG_RETENTION_DAYS
+    workflow_run_timeout_seconds: int = WORKFLOW_RUN_TIMEOUT_SECONDS
+    workflow_reaper_batch_size: int = WORKFLOW_REAPER_BATCH_SIZE

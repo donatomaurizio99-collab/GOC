@@ -808,6 +808,7 @@ function renderWorkflows(workflows, runs) {
     run.workflow_name,
     run.status,
     run.requested_by,
+    run.idempotency_key,
     run.correlation_id,
     JSON.stringify(run.result_payload || {}),
   ]);
@@ -834,6 +835,7 @@ function renderWorkflows(workflows, runs) {
               <td>
                 <div>${run.requested_by}</div>
                 <div class="meta">${run.run_id}</div>
+                <div class="meta">${run.idempotency_key || "no idempotency key"}</div>
               </td>
               <td><pre>${JSON.stringify(run.result_payload || {}, null, 2)}</pre></td>
             </tr>`).join("")}
@@ -1053,18 +1055,35 @@ async function runWorkflowStart(workflowId) {
     throw new Error("Select a workflow first.");
   }
   const requestedBy = document.getElementById("workflow-requested-by").value.trim() || "operator";
+  const idempotencyKey = document.getElementById("workflow-idempotency-key").value.trim();
   const payloadText = document.getElementById("workflow-payload").value;
   const payload = parseWorkflowPayload(payloadText);
   const response = await api(`/workflows/${encodeURIComponent(workflowId)}/start`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
     body: JSON.stringify({
       requested_by: requestedBy,
       payload,
     }),
   });
   const run = response.run;
+  const replayNote = run.idempotency_replay ? " (idempotency replay)" : "";
+  const reaperNote = run.stale_runs_reaped
+    ? ` Reaper closed ${run.stale_runs_reaped} stale runs before execution.`
+    : "";
   document.getElementById("system-feedback").textContent = (
-    `Workflow ${run.workflow_name} finished with status ${run.status}.`
+    `Workflow ${run.workflow_name} finished with status ${run.status}${replayNote}.${reaperNote}`
+  );
+  await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
+}
+
+async function runWorkflowReaper() {
+  const response = await api("/workflows/runs/reap", { method: "POST" });
+  document.getElementById("system-feedback").textContent = (
+    `Workflow reaper marked ${response.reaped_count} stale runs as timed_out.`
   );
   await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
 }
@@ -1210,6 +1229,15 @@ document.getElementById("workflow-start-form").addEventListener("submit", async 
   const workflowId = document.getElementById("workflow-select").value.trim();
   try {
     await runWorkflowStart(workflowId);
+  } catch (error) {
+    showError("workflow-error", error);
+  }
+});
+
+document.getElementById("workflow-reap-runs").addEventListener("click", async () => {
+  try {
+    showError("workflow-error", null);
+    await runWorkflowReaper();
   } catch (error) {
     showError("workflow-error", error);
   }

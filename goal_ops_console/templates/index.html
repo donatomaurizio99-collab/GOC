@@ -831,6 +831,11 @@
           <label class="sr-only" for="workflow-requested-by">Requested by</label>
           <input id="workflow-requested-by" value="operator" placeholder="Requested by">
         </div>
+        <div class="split">
+          <label class="sr-only" for="workflow-idempotency-key">Idempotency key</label>
+          <input id="workflow-idempotency-key" placeholder="Optional Idempotency-Key">
+          <button type="button" class="secondary" id="workflow-reap-runs">Reap Stuck Runs</button>
+        </div>
         <label class="sr-only" for="workflow-payload">Workflow payload JSON</label>
         <textarea id="workflow-payload" placeholder='Optional payload as JSON (example: {"note":"manual run"})'></textarea>
         <button type="submit">Start Workflow</button>

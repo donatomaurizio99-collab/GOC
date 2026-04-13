@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from goal_ops_console.database import Database, Transaction, new_id, now_utc
@@ -42,11 +44,15 @@ class WorkflowCatalog:
         event_bus: EventBus,
         scheduler: SchedulerService,
         *,
+        run_timeout_seconds: int = 300,
+        reaper_batch_size: int = 200,
         observability: "ObservabilityService | None" = None,
     ):
         self.db = db
         self.event_bus = event_bus
         self.scheduler = scheduler
+        self.run_timeout_seconds = run_timeout_seconds
+        self.reaper_batch_size = reaper_batch_size
         self.observability = observability
         self.handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "scheduler.age_queue": self._run_scheduler_age_queue,
@@ -114,6 +120,7 @@ class WorkflowCatalog:
                        wr.status,
                        wr.requested_by,
                        wr.correlation_id,
+                       wr.idempotency_key,
                        wr.input_payload,
                        wr.result_payload,
                        wr.started_at,
@@ -138,6 +145,7 @@ class WorkflowCatalog:
                       wr.status,
                       wr.requested_by,
                       wr.correlation_id,
+                      wr.idempotency_key,
                       wr.input_payload,
                       wr.result_payload,
                       wr.started_at,
@@ -159,6 +167,7 @@ class WorkflowCatalog:
         *,
         requested_by: str = "operator",
         payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         definition = self.get_workflow(workflow_id, include_disabled=True)
         if not definition["is_enabled"]:
@@ -170,21 +179,188 @@ class WorkflowCatalog:
                 f"Workflow {workflow_id} has unknown entrypoint '{definition['entrypoint']}'"
             )
 
+        stale = self.reap_stuck_runs(
+            timeout_seconds=self.run_timeout_seconds,
+            limit=self.reaper_batch_size,
+        )
         self.event_bus.ensure_within_backpressure()
+
+        normalized_idempotency_key = self._normalize_idempotency_key(idempotency_key)
+        if normalized_idempotency_key:
+            existing = self._find_run_by_idempotency(workflow_id, normalized_idempotency_key)
+            if existing is not None:
+                replayed = self.get_run(existing["run_id"])
+                replayed["idempotency_replay"] = True
+                replayed["stale_runs_reaped"] = stale["reaped_count"]
+                return replayed
+
         run_id = new_id()
         correlation_id = f"workflow:{workflow_id}:{run_id[:8]}"
         started_at = now_utc()
         input_payload = payload or {}
+        try:
+            self._insert_run(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                requested_by=requested_by,
+                correlation_id=correlation_id,
+                idempotency_key=normalized_idempotency_key,
+                input_payload=input_payload,
+                started_at=started_at,
+                entrypoint=str(definition["entrypoint"]),
+            )
+        except sqlite3.IntegrityError as error:
+            existing = self._find_run_by_idempotency(workflow_id, normalized_idempotency_key)
+            if normalized_idempotency_key and existing is not None:
+                replayed = self.get_run(existing["run_id"])
+                replayed["idempotency_replay"] = True
+                replayed["stale_runs_reaped"] = stale["reaped_count"]
+                return replayed
+            raise ConflictError(f"Workflow run insert failed: {error}") from error
+
+        started_monotonic = perf_counter()
+        try:
+            result_payload = handler(input_payload)
+        except Exception as error:
+            failed = self._mark_run_failed(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                requested_by=requested_by,
+                correlation_id=correlation_id,
+                error=error,
+                status="failed",
+            )
+            failed["idempotency_replay"] = False
+            failed["stale_runs_reaped"] = stale["reaped_count"]
+            return failed
+
+        duration_ms = int((perf_counter() - started_monotonic) * 1000)
+        if duration_ms > self.run_timeout_seconds * 1000:
+            timeout_error = TimeoutError(
+                (
+                    f"Workflow {workflow_id} exceeded timeout "
+                    f"({duration_ms}ms > {self.run_timeout_seconds * 1000}ms)"
+                )
+            )
+            timed_out = self._mark_run_failed(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                requested_by=requested_by,
+                correlation_id=correlation_id,
+                error=timeout_error,
+                status="timed_out",
+                details={"duration_ms": duration_ms},
+            )
+            timed_out["idempotency_replay"] = False
+            timed_out["stale_runs_reaped"] = stale["reaped_count"]
+            return timed_out
+
+        result = self._mark_run_succeeded(
+            run_id=run_id,
+            workflow_id=workflow_id,
+            requested_by=requested_by,
+            correlation_id=correlation_id,
+            result_payload={**result_payload, "duration_ms": duration_ms},
+        )
+        result["idempotency_replay"] = False
+        result["stale_runs_reaped"] = stale["reaped_count"]
+        return result
+
+    def reap_stuck_runs(self, *, timeout_seconds: int, limit: int) -> dict[str, Any]:
+        safe_limit = max(1, min(500, int(limit)))
+        rows = self.db.fetch_all(
+            """SELECT run_id, workflow_id, requested_by, correlation_id, started_at
+               FROM workflow_runs
+               WHERE status = 'running'
+               AND started_at < datetime('now', ? || ' seconds')
+               ORDER BY started_at ASC
+               LIMIT ?""",
+            f"-{timeout_seconds}",
+            safe_limit,
+        )
+        if not rows:
+            return {"reaped_count": 0, "run_ids": []}
+
+        run_ids: list[str] = []
+        with self.db.transaction() as tx:
+            for row in rows:
+                run_id = str(row["run_id"])
+                finished_at = now_utc()
+                updated = tx.execute(
+                    """UPDATE workflow_runs
+                       SET status = 'timed_out',
+                           result_payload = ?,
+                           finished_at = ?,
+                           updated_at = ?
+                       WHERE run_id = ? AND status = 'running'""",
+                    self._json_dump(
+                        {
+                            "error_type": "TimeoutError",
+                            "error": (
+                                f"Reaper timed out run after {timeout_seconds}s without completion"
+                            ),
+                            "timeout_seconds": timeout_seconds,
+                        }
+                    ),
+                    finished_at,
+                    finished_at,
+                    run_id,
+                )
+                if updated == 0:
+                    continue
+                run_ids.append(run_id)
+                self.event_bus.record_event(
+                    "workflow.run.timed_out",
+                    run_id,
+                    str(row["correlation_id"]),
+                    {
+                        "workflow_id": row["workflow_id"],
+                        "requested_by": row["requested_by"],
+                        "timeout_seconds": timeout_seconds,
+                        "started_at": row["started_at"],
+                    },
+                    tx=tx,
+                )
+                self._record_audit(
+                    tx,
+                    action="workflow.reaper",
+                    actor="system",
+                    status="error",
+                    workflow_id=str(row["workflow_id"]),
+                    correlation_id=str(row["correlation_id"]),
+                    details={
+                        "run_id": run_id,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+
+            if run_ids:
+                self._metric("workflows.runs.timed_out", delta=len(run_ids), tx=tx)
+        return {"reaped_count": len(run_ids), "run_ids": run_ids}
+
+    def _insert_run(
+        self,
+        *,
+        run_id: str,
+        workflow_id: str,
+        requested_by: str,
+        correlation_id: str,
+        idempotency_key: str | None,
+        input_payload: dict[str, Any],
+        started_at: str,
+        entrypoint: str,
+    ) -> None:
         with self.db.transaction() as tx:
             tx.execute(
                 """INSERT INTO workflow_runs
-                   (run_id, workflow_id, status, requested_by, correlation_id,
+                   (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
                     input_payload, result_payload, started_at, finished_at, created_at, updated_at)
-                   VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, NULL, ?, ?)""",
+                   VALUES (?, ?, 'running', ?, ?, ?, ?, NULL, ?, NULL, ?, ?)""",
                 run_id,
                 workflow_id,
                 requested_by,
                 correlation_id,
+                idempotency_key,
                 self._json_dump(input_payload),
                 started_at,
                 started_at,
@@ -197,30 +373,33 @@ class WorkflowCatalog:
                 {
                     "workflow_id": workflow_id,
                     "requested_by": requested_by,
-                    "entrypoint": definition["entrypoint"],
+                    "entrypoint": entrypoint,
+                    "idempotency_key": idempotency_key,
                 },
                 tx=tx,
             )
             self._metric("workflows.runs.started", tx=tx)
 
-        try:
-            result_payload = handler(input_payload)
-            return self._mark_run_succeeded(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                requested_by=requested_by,
-                correlation_id=correlation_id,
-                result_payload=result_payload,
-            )
-        except Exception as error:
-            self._mark_run_failed(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                requested_by=requested_by,
-                correlation_id=correlation_id,
-                error=error,
-            )
-            raise
+    def _find_run_by_idempotency(
+        self,
+        workflow_id: str,
+        idempotency_key: str | None,
+    ) -> dict[str, Any] | None:
+        if not idempotency_key:
+            return None
+        return self.db.fetch_one(
+            """SELECT run_id
+               FROM workflow_runs
+               WHERE workflow_id = ? AND idempotency_key = ?""",
+            workflow_id,
+            idempotency_key,
+        )
+
+    def _normalize_idempotency_key(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     def _mark_run_succeeded(
         self,
@@ -276,27 +455,32 @@ class WorkflowCatalog:
         requested_by: str,
         correlation_id: str,
         error: Exception,
-    ) -> None:
+        status: str = "failed",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         finished_at = now_utc()
         error_payload = {
             "error_type": error.__class__.__name__,
             "error": str(error),
+            **(details or {}),
         }
+        event_type = "workflow.run.timed_out" if status == "timed_out" else "workflow.run.failed"
         with self.db.transaction() as tx:
             tx.execute(
                 """UPDATE workflow_runs
-                   SET status = 'failed',
+                   SET status = ?,
                        result_payload = ?,
                        finished_at = ?,
                        updated_at = ?
                    WHERE run_id = ?""",
+                status,
                 self._json_dump(error_payload),
                 finished_at,
                 finished_at,
                 run_id,
             )
             self.event_bus.record_event(
-                "workflow.run.failed",
+                event_type,
                 run_id,
                 correlation_id,
                 {
@@ -307,7 +491,8 @@ class WorkflowCatalog:
                 },
                 tx=tx,
             )
-            self._metric("workflows.runs.failed", tx=tx)
+            metric_name = "workflows.runs.timed_out" if status == "timed_out" else "workflows.runs.failed"
+            self._metric(metric_name, tx=tx)
             self._record_audit(
                 tx,
                 action="workflow.run",
@@ -315,8 +500,9 @@ class WorkflowCatalog:
                 status="error",
                 workflow_id=workflow_id,
                 correlation_id=correlation_id,
-                details={"run_id": run_id, "error": str(error)},
+                details={"run_id": run_id, "status": status, "error": str(error)},
             )
+        return self.get_run(run_id)
 
     def _run_scheduler_age_queue(self, _: dict[str, Any]) -> dict[str, Any]:
         self.event_bus.ensure_within_backpressure()
@@ -355,6 +541,7 @@ class WorkflowCatalog:
         data = dict(row)
         data["input_payload"] = self._json_load(data.get("input_payload"))
         data["result_payload"] = self._json_load(data.get("result_payload"))
+        data["idempotency_key"] = data.get("idempotency_key")
         return data
 
     def _json_dump(self, payload: dict[str, Any]) -> str:

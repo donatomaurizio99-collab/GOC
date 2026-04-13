@@ -65,6 +65,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         db,
         event_bus,
         scheduler,
+        run_timeout_seconds=app_settings.workflow_run_timeout_seconds,
+        reaper_batch_size=app_settings.workflow_reaper_batch_size,
         observability=observability,
     )
     return AppServices(
