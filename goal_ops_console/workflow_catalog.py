@@ -428,7 +428,16 @@ class WorkflowCatalog:
 
             processed_any = False
             while not self._worker_stop.is_set():
-                claimed = self._claim_next_queued_run()
+                try:
+                    claimed = self._claim_next_queued_run()
+                except sqlite3.OperationalError:
+                    # SQLite lock contention is transient in concurrent test/desktop scenarios.
+                    # Keep worker alive and retry on the next wake cycle.
+                    self._metric("workflows.worker.lock_conflicts")
+                    break
+                except Exception:
+                    self._metric("workflows.worker.errors")
+                    break
                 if claimed is None:
                     break
                 processed_any = True

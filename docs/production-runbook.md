@@ -29,10 +29,24 @@ Verify before release:
 
 Validate artifacts:
 - `artifacts\desktop-update-manifest.json` exists and version matches release tag.
+- `artifacts\desktop-rings.json` exists and points `stable` to intended version.
 - `artifacts\SHA256SUMS.txt` exists.
 - `GoalOpsConsole-onefile-<version>.exe` starts and reaches dashboard.
 
-### 1.3 Publish
+### 1.3 Ring promotion
+
+Use one control manifest for production channel pointers:
+
+```powershell
+.\scripts\manage-desktop-rings.ps1 `
+  -ManifestPath ".\artifacts\desktop-rings.json" `
+  -Action promote `
+  -Ring stable `
+  -Version "<VERSION>" `
+  -ReleaseManifestPath ".\artifacts\desktop-update-manifest.json"
+```
+
+### 1.4 Publish
 
 Tag and push:
 
@@ -43,7 +57,7 @@ git push origin v<VERSION>
 
 GitHub Actions `Desktop Build` publishes release assets on tag pushes.
 
-### 1.4 Post-release checks
+### 1.5 Post-release checks
 
 After release is live:
 - Launch desktop binary on a clean Windows machine.
@@ -55,7 +69,13 @@ After release is live:
 
 Use rollback when crash rate or readiness failures rise immediately after rollout.
 
-1. Disable rollout in updater channel (set previous stable manifest/version).
+1. Roll back stable ring pointer (fast path):
+   ```powershell
+   .\scripts\manage-desktop-rings.ps1 `
+     -ManifestPath ".\artifacts\desktop-rings.json" `
+     -Action rollback `
+     -Ring stable
+   ```
 2. Repoint download/install instructions to previous stable artifact.
 3. Keep diagnostics snapshots from failed version for triage.
 4. Open incident ticket with:
@@ -126,7 +146,22 @@ Actions:
 2. Retry launch once (stale lock auto-recovery is enabled).
 3. If still blocked, collect crash/diagnostics and escalate.
 
-### 3.5 Crash reports
+### 3.5 Crash-loop protection triggered
+
+Symptoms:
+- launcher exits with crash-loop protection message.
+- repeated crash on startup despite restart.
+
+Actions:
+1. Review latest crash report and diagnostics snapshot.
+2. Validate fix/hypothesis before bypassing protection.
+3. Use one-time bypass only for supervised verification:
+   ```powershell
+   .\scripts\start-desktop.ps1 -AllowCrashLoop
+   ```
+4. If crash reproduces, stop and roll back ring immediately.
+
+### 3.6 Crash reports
 
 Location:
 - default: `%USERPROFILE%\.goal_ops_console\diagnostics`
@@ -146,4 +181,5 @@ Required triage fields:
 - Keep single-instance protection enabled in production.
 - Keep readiness endpoint as launch gate.
 - Keep diagnostics export enabled for operators.
+- Keep crash-loop protection enabled; only bypass for supervised triage.
 - Prefer rollback over hotfix-in-place during active outage.

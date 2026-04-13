@@ -10,7 +10,7 @@ import traceback
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,10 @@ from goal_ops_console.main import create_app
 class InstanceLock:
     path: Path
     pid: int
+
+
+DEFAULT_CRASH_LOOP_MAX_CRASHES = 3
+DEFAULT_CRASH_LOOP_WINDOW_SECONDS = 600
 
 
 def _pick_port(host: str, explicit_port: int | None) -> int:
@@ -64,6 +68,10 @@ def _default_instance_lock_path() -> Path:
 
 def _default_diagnostics_dir() -> Path:
     return Path.home() / ".goal_ops_console" / "diagnostics"
+
+
+def _default_crash_state_path() -> Path:
+    return Path.home() / ".goal_ops_console" / "desktop-crash-state.json"
 
 
 def _utc_timestamp() -> str:
@@ -212,6 +220,143 @@ def _coerce_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_crash_positive_int(value: Any, fallback: int) -> int:
+    parsed = _coerce_int(value)
+    if parsed is None or parsed <= 0:
+        return int(fallback)
+    return int(parsed)
+
+
+def _parse_utc_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _load_crash_state(path: Path) -> dict[str, Any]:
+    defaults: dict[str, Any] = {"crashes": [], "last_success_utc": None}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return defaults
+    if not isinstance(payload, dict):
+        return defaults
+
+    crashes = payload.get("crashes")
+    sanitized_crashes: list[dict[str, Any]] = []
+    if isinstance(crashes, list):
+        for item in crashes:
+            if not isinstance(item, dict):
+                continue
+            timestamp_utc = item.get("timestamp_utc")
+            if _parse_utc_datetime(timestamp_utc) is None:
+                continue
+            sanitized_crashes.append(
+                {
+                    "timestamp_utc": str(timestamp_utc),
+                    "error_type": str(item.get("error_type") or ""),
+                    "error": str(item.get("error") or ""),
+                    "report_path": str(item.get("report_path") or ""),
+                }
+            )
+
+    return {
+        "crashes": sanitized_crashes,
+        "last_success_utc": payload.get("last_success_utc"),
+    }
+
+
+def _save_crash_state(path: Path, state: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, ensure_ascii=True, indent=2), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _recent_crashes(
+    crashes: list[dict[str, Any]],
+    *,
+    now_utc: datetime,
+    window_seconds: int,
+) -> list[dict[str, Any]]:
+    cutoff = now_utc - timedelta(seconds=max(1, int(window_seconds)))
+    recent: list[dict[str, Any]] = []
+    for item in crashes:
+        timestamp = _parse_utc_datetime(item.get("timestamp_utc"))
+        if timestamp is None:
+            continue
+        if timestamp >= cutoff:
+            recent.append(item)
+    return recent
+
+
+def _crash_loop_status(
+    path: Path,
+    *,
+    max_crashes: int,
+    window_seconds: int,
+) -> dict[str, Any]:
+    safe_max = _coerce_crash_positive_int(max_crashes, DEFAULT_CRASH_LOOP_MAX_CRASHES)
+    safe_window = _coerce_crash_positive_int(window_seconds, DEFAULT_CRASH_LOOP_WINDOW_SECONDS)
+    state = _load_crash_state(path)
+    now = datetime.now(UTC)
+    recent = _recent_crashes(state.get("crashes", []), now_utc=now, window_seconds=safe_window)
+    if len(recent) != len(state.get("crashes", [])):
+        state["crashes"] = recent
+        _save_crash_state(path, state)
+    return {
+        "blocked": len(recent) >= safe_max,
+        "recent_count": len(recent),
+        "max_crashes": safe_max,
+        "window_seconds": safe_window,
+    }
+
+
+def _record_crash_event(
+    path: Path,
+    *,
+    exc: Exception,
+    report_path: Path | None,
+    window_seconds: int,
+) -> None:
+    safe_window = _coerce_crash_positive_int(window_seconds, DEFAULT_CRASH_LOOP_WINDOW_SECONDS)
+    state = _load_crash_state(path)
+    recent = _recent_crashes(
+        state.get("crashes", []),
+        now_utc=datetime.now(UTC),
+        window_seconds=safe_window,
+    )
+    recent.append(
+        {
+            "timestamp_utc": _iso_utc(),
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+            "report_path": str(report_path) if report_path else "",
+        }
+    )
+    state["crashes"] = recent[-50:]
+    _save_crash_state(path, state)
+
+
+def _record_successful_launch(path: Path) -> None:
+    state = _load_crash_state(path)
+    state["crashes"] = []
+    state["last_success_utc"] = _iso_utc()
+    _save_crash_state(path, state)
 
 
 def _load_window_state(
@@ -414,6 +559,14 @@ def run_desktop(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Goal Ops Console in a desktop window.")
+    default_crash_loop_max = _coerce_crash_positive_int(
+        os.getenv("GOAL_OPS_DESKTOP_CRASH_LOOP_MAX_CRASHES"),
+        DEFAULT_CRASH_LOOP_MAX_CRASHES,
+    )
+    default_crash_loop_window = _coerce_crash_positive_int(
+        os.getenv("GOAL_OPS_DESKTOP_CRASH_LOOP_WINDOW_SECONDS"),
+        DEFAULT_CRASH_LOOP_WINDOW_SECONDS,
+    )
     parser.add_argument(
         "--database-url",
         default="goal_ops.db",
@@ -475,6 +628,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Disable single-instance lock (not recommended for production).",
     )
     parser.add_argument(
+        "--crash-state-path",
+        default=None,
+        help="Optional JSON file path for desktop crash-loop protection state.",
+    )
+    parser.add_argument(
+        "--allow-crash-loop",
+        action="store_true",
+        help="Bypass crash-loop launch protection for a single start.",
+    )
+    parser.add_argument(
+        "--crash-loop-max-crashes",
+        type=int,
+        default=default_crash_loop_max,
+        help=f"Maximum crashes allowed within crash-loop window (default: {default_crash_loop_max}).",
+    )
+    parser.add_argument(
+        "--crash-loop-window-seconds",
+        type=int,
+        default=default_crash_loop_window,
+        help=f"Crash-loop window in seconds (default: {default_crash_loop_window}).",
+    )
+    parser.add_argument(
         "--no-window-state",
         action="store_true",
         help="Disable persistent desktop window state.",
@@ -494,6 +669,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    crash_state_path = (
+        Path(args.crash_state_path).expanduser()
+        if args.crash_state_path
+        else _default_crash_state_path()
+    )
+    crash_loop_status = _crash_loop_status(
+        crash_state_path,
+        max_crashes=args.crash_loop_max_crashes,
+        window_seconds=args.crash_loop_window_seconds,
+    )
+    if crash_loop_status["blocked"] and not args.allow_crash_loop:
+        print(
+            "[desktop] Crash-loop protection active: "
+            f"{crash_loop_status['recent_count']} crashes in "
+            f"{crash_loop_status['window_seconds']}s."
+        )
+        print(
+            "[desktop] Bypass once with --allow-crash-loop after reviewing diagnostics."
+        )
+        return 2
     try:
         run_desktop(
             database_url=args.database_url,
@@ -511,6 +706,7 @@ def main(argv: list[str] | None = None) -> int:
             window_title=args.title,
             debug=args.debug,
         )
+        _record_successful_launch(crash_state_path)
     except Exception as exc:  # pragma: no cover - this is top-level UX handling
         configured_diagnostics_dir = os.getenv("GOAL_OPS_DIAGNOSTICS_DIR", "").strip()
         diagnostics_dir = (
@@ -532,6 +728,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         if report_path is not None:
             print(f"[desktop] Crash report saved to: {report_path}")
+        _record_crash_event(
+            crash_state_path,
+            exc=exc,
+            report_path=report_path,
+            window_seconds=args.crash_loop_window_seconds,
+        )
         print(f"[desktop] Failed to launch: {exc}")
         return 1
     return 0

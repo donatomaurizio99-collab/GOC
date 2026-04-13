@@ -1381,3 +1381,41 @@ def test_63_system_diagnostics_exports_snapshot():
             assert "recent_workflow_runs" in snapshot
     finally:
         shutil.rmtree(diagnostics_dir, ignore_errors=True)
+
+
+def test_64_workflow_worker_survives_claim_lock_conflict(monkeypatch):
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            workflow_worker_poll_interval_seconds=0.05,
+        )
+    )
+    with TestClient(app) as local_client:
+        catalog = local_client.app.state.services.workflow_catalog
+        original_claim = catalog._claim_next_queued_run
+        fail_once = {"remaining": 1}
+
+        def _flaky_claim():
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise sqlite3.OperationalError("database table is locked: workflow_runs")
+            return original_claim()
+
+        monkeypatch.setattr(catalog, "_claim_next_queued_run", _flaky_claim)
+
+        started = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "lock-conflict"}},
+        )
+        assert started.status_code == 201
+        run_id = started.json()["run"]["run_id"]
+
+        final_run = _wait_for_run_in_states(
+            local_client,
+            run_id,
+            {"succeeded", "failed", "timed_out", "cancelled"},
+            timeout_seconds=3.0,
+        )
+        assert final_run["status"] == "succeeded"
+        assert fail_once["remaining"] == 0
+        assert catalog.worker_status()["is_running"] is True
