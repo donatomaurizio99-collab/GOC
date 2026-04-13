@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -20,6 +20,7 @@ This gate covers:
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - backup/restore drill with row-count and integrity verification on restored DB
+- incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 
 Verify before release:
 - CI checks green:
@@ -93,6 +94,10 @@ Use rollback when crash rate or readiness failures rise immediately after rollou
    - failing version
    - first failure timestamp (UTC)
    - attached diagnostics JSON and crash report JSON
+5. After rollback, run a short verification drill:
+   ```powershell
+   .\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
+   ```
 
 ## 3. Failure Playbook
 
