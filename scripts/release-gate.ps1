@@ -3,6 +3,7 @@ param(
     [switch]$SkipPytest,
     [switch]$SkipDesktopSmoke,
     [switch]$SkipApiProbe,
+    [switch]$SkipSloAlertCheck,
     [switch]$SkipFileDatabaseProbe,
     [switch]$StrictFileDatabaseProbe,
     [switch]$SkipBackupRestoreDrill,
@@ -61,6 +62,16 @@ if (-not $SkipApiProbe) {
             "--label", "memory",
             "--database-url", ":memory:",
             "--expected-db-kind", "memory"
+        )
+    }
+}
+
+if (-not $SkipSloAlertCheck) {
+    Invoke-GateStep -Name "SLO alert check (:memory:)" -Action {
+        Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+            ".\scripts\slo-alert-check.py",
+            "--database-url", ":memory:",
+            "--allowed-status", "ok"
         )
     }
 }

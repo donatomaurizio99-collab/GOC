@@ -16,6 +16,7 @@ This gate covers:
 - full `pytest` suite
 - desktop smoke boot path
 - `GET /system/readiness`
+- `GET /system/slo` (`status` must be `ok`)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - backup/restore drill with row-count and integrity verification on restored DB
@@ -70,6 +71,7 @@ GitHub Actions `Desktop Build` publishes release assets on tag pushes.
 After release is live:
 - Launch desktop binary on a clean Windows machine.
 - Confirm `GET /system/readiness` returns `{"ready": true, ...}`.
+- Confirm `GET /system/slo` returns `"status": "ok"`.
 - Confirm `GET /system/database/integrity?mode=quick` returns `"ok": true`.
 - Trigger `Export Diagnostics` once from Operator Controls and confirm snapshot file exists.
 - Verify one workflow run can be queued and completed from UI.
@@ -149,7 +151,25 @@ Actions:
 3. Temporarily reduce operator-initiated workflow starts.
 4. When stable, run retention cleanup once.
 
-### 3.4 Desktop startup conflicts (single-instance lock)
+### 3.4 SLO alert status degraded or critical
+
+Symptoms:
+- `GET /system/slo` returns `status=degraded` or `status=critical`.
+- alert list contains active SLO violations.
+
+Actions:
+1. Check current SLO payload:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/slo
+   ```
+2. Run operator gate check against live service:
+   ```powershell
+   .\scripts\run-slo-alert-check.ps1 -BaseUrl "http://127.0.0.1:8000" -AllowedStatus degraded
+   ```
+3. If status is `critical`, treat as release blocker or trigger rollback.
+4. Export diagnostics snapshot and attach to incident ticket.
+
+### 3.5 Desktop startup conflicts (single-instance lock)
 
 Symptoms:
 - error: another desktop instance is already running.
@@ -159,7 +179,7 @@ Actions:
 2. Retry launch once (stale lock auto-recovery is enabled).
 3. If still blocked, collect crash/diagnostics and escalate.
 
-### 3.5 Crash-loop protection triggered
+### 3.6 Crash-loop protection triggered
 
 Symptoms:
 - launcher exits with crash-loop protection message.
@@ -174,7 +194,7 @@ Actions:
    ```
 4. If crash reproduces, stop and roll back ring immediately.
 
-### 3.6 Crash reports
+### 3.7 Crash reports
 
 Location:
 - default: `%USERPROFILE%\.goal_ops_console\diagnostics`

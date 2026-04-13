@@ -1,7 +1,27 @@
 import os
 from dataclasses import dataclass
 
-SPEC_VERSION = "1.4.5"
+SPEC_VERSION = "1.4.6"
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 # Skill Selection
 MIN_RUNS = 5
@@ -56,6 +76,18 @@ WORKFLOW_WORKER_POLL_INTERVAL_SECONDS = 0.5
 DIAGNOSTICS_DIR = os.getenv("GOAL_OPS_DIAGNOSTICS_DIR", "")
 DB_MIGRATION_BACKUP_DIR = os.getenv("GOAL_OPS_DB_MIGRATION_BACKUP_DIR", "")
 
+# SLO / Alerting
+SLO_MIN_HTTP_REQUEST_SAMPLE = _env_int("GOAL_OPS_SLO_MIN_HTTP_REQUEST_SAMPLE", 20)
+SLO_MIN_EVENT_ATTEMPT_SAMPLE = _env_int("GOAL_OPS_SLO_MIN_EVENT_ATTEMPT_SAMPLE", 20)
+SLO_MIN_HTTP_SUCCESS_RATE_PERCENT = _env_float("GOAL_OPS_SLO_MIN_HTTP_SUCCESS_RATE_PERCENT", 99.0)
+SLO_MAX_HTTP_429_RATE_PERCENT = _env_float("GOAL_OPS_SLO_MAX_HTTP_429_RATE_PERCENT", 5.0)
+SLO_MAX_EVENT_FAILURE_RATE_PERCENT = _env_float("GOAL_OPS_SLO_MAX_EVENT_FAILURE_RATE_PERCENT", 5.0)
+SLO_MAX_BACKLOG_UTILIZATION_PERCENT = _env_float(
+    "GOAL_OPS_SLO_MAX_BACKLOG_UTILIZATION_PERCENT",
+    90.0,
+)
+SLO_MAX_STUCK_EVENTS = _env_int("GOAL_OPS_SLO_MAX_STUCK_EVENTS", 0)
+
 # The sandbox in this workspace rejects file-backed SQLite locks, so the
 # persistent `goal_ops.db` path should be supplied via GOAL_OPS_DATABASE_URL.
 DEFAULT_DATABASE_URL = os.getenv("GOAL_OPS_DATABASE_URL", ":memory:")
@@ -86,3 +118,10 @@ class Settings:
     workflow_worker_poll_interval_seconds: float = WORKFLOW_WORKER_POLL_INTERVAL_SECONDS
     diagnostics_dir: str = DIAGNOSTICS_DIR
     db_migration_backup_dir: str = DB_MIGRATION_BACKUP_DIR
+    slo_min_http_request_sample: int = SLO_MIN_HTTP_REQUEST_SAMPLE
+    slo_min_event_attempt_sample: int = SLO_MIN_EVENT_ATTEMPT_SAMPLE
+    slo_min_http_success_rate_percent: float = SLO_MIN_HTTP_SUCCESS_RATE_PERCENT
+    slo_max_http_429_rate_percent: float = SLO_MAX_HTTP_429_RATE_PERCENT
+    slo_max_event_failure_rate_percent: float = SLO_MAX_EVENT_FAILURE_RATE_PERCENT
+    slo_max_backlog_utilization_percent: float = SLO_MAX_BACKLOG_UTILIZATION_PERCENT
+    slo_max_stuck_events: int = SLO_MAX_STUCK_EVENTS
