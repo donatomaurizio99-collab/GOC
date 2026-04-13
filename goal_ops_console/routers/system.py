@@ -2,7 +2,7 @@ import json
 import platform
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -141,6 +141,20 @@ def system_readiness(services: AppServices = Depends(get_services)) -> dict:
     return _build_readiness_payload(services)
 
 
+@router.get("/system/database/integrity")
+def database_integrity(
+    mode: Literal["quick", "full"] = "quick",
+    services: AppServices = Depends(get_services),
+) -> dict:
+    check = services.db.integrity_check(mode=mode)
+    return {
+        "timestamp_utc": _utc_iso(),
+        "integrity": check,
+        "file": services.db.database_file_info(),
+        "migrations": services.db.migration_status(),
+    }
+
+
 @router.post("/system/diagnostics")
 def export_system_diagnostics(services: AppServices = Depends(get_services)) -> dict:
     diagnostics_dir = _resolve_diagnostics_dir(services.settings.diagnostics_dir)
@@ -157,6 +171,9 @@ def export_system_diagnostics(services: AppServices = Depends(get_services)) -> 
         "database": {
             "original_url": services.db.original_url,
             "normalized_url": services.db.database_url,
+            "file": services.db.database_file_info(),
+            "integrity": services.db.integrity_check(mode="quick"),
+            "migrations": services.db.migration_status(),
         },
         "readiness": _build_readiness_payload(services),
         "health": _build_health_payload(services),

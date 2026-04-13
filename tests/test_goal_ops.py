@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from goal_ops_console.config import Settings
-from goal_ops_console.database import new_id, now_utc
+from goal_ops_console.database import Database, new_id, now_utc
 from goal_ops_console.failure_intelligence import compute_error_hash
 from goal_ops_console.main import create_app
 from goal_ops_console.models import OptimisticLockError, RetryBudgetExceeded
@@ -1379,6 +1379,8 @@ def test_63_system_diagnostics_exports_snapshot():
             assert snapshot["readiness"]["ready"] is True
             assert "health" in snapshot
             assert "recent_workflow_runs" in snapshot
+            assert snapshot["database"]["integrity"]["ok"] is True
+            assert snapshot["database"]["migrations"]["pending_versions"] == []
     finally:
         shutil.rmtree(diagnostics_dir, ignore_errors=True)
 
@@ -1419,3 +1421,52 @@ def test_64_workflow_worker_survives_claim_lock_conflict(monkeypatch):
         assert final_run["status"] == "succeeded"
         assert fail_once["remaining"] == 0
         assert catalog.worker_status()["is_running"] is True
+
+
+def test_65_database_creates_backup_before_pending_migration():
+    temp_dir = _local_test_dir("pytest-db-migration-backup")
+    db_path = temp_dir / "goal_ops.db"
+    backup_dir = temp_dir / "migration-backups"
+    try:
+        baseline = Database(str(db_path))
+        try:
+            baseline.initialize()
+        except sqlite3.OperationalError as exc:
+            if "disk i/o error" in str(exc).lower():
+                pytest.skip("File-backed SQLite is unavailable in this sandbox")
+            raise
+        baseline.execute("DELETE FROM schema_migrations WHERE version = 1")
+
+        migrating = Database(str(db_path), migration_backup_dir=str(backup_dir))
+        migrating.initialize()
+
+        migration_state = migrating.migration_status()
+        assert migration_state["pending_versions"] == []
+        assert migration_state["last_backup_versions"] == [1]
+        assert migration_state["last_backup_path"] is not None
+        backup_path = Path(str(migration_state["last_backup_path"]))
+        assert backup_path.exists()
+        assert backup_path.parent == backup_dir
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_66_system_database_integrity_endpoint_reports_status(client):
+    response = client.get("/system/database/integrity")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["integrity"]["ok"] is True
+    assert payload["integrity"]["mode"] == "quick"
+    assert payload["integrity"]["result"] == "ok"
+    assert payload["migrations"]["pending_versions"] == []
+
+    full = client.get("/system/database/integrity?mode=full")
+    assert full.status_code == 200
+    full_payload = full.json()
+    assert full_payload["integrity"]["ok"] is True
+    assert full_payload["integrity"]["mode"] == "full"
+
+
+def test_67_system_database_integrity_rejects_invalid_mode(client):
+    response = client.get("/system/database/integrity?mode=invalid")
+    assert response.status_code == 422

@@ -322,10 +322,23 @@ class Transaction:
 
 
 class Database:
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        migration_backup_dir: str = "",
+    ):
         self.original_url = database_url
         self.database_url = self._normalize_database_url(database_url)
         self._uri = self.database_url.startswith("file:")
+        self.migration_backup_dir = migration_backup_dir.strip()
+        self._database_path = self._resolve_database_file_path(self.database_url)
+        self._database_existed_at_startup = bool(
+            self._database_path is not None and self._database_path.exists()
+        )
+        self._last_migration_backup_path: str | None = None
+        self._last_migration_backup_created_at: str | None = None
+        self._last_migration_backup_versions: list[int] = []
         self._keeper = None
         if "mode=memory" in self.database_url:
             self._keeper = self._connect()
@@ -334,6 +347,14 @@ class Database:
         if database_url == ":memory:":
             return f"file:goal_ops_{uuid.uuid4().hex}?mode=memory&cache=shared"
         return str(Path(database_url)) if not database_url.startswith("file:") else database_url
+
+    def _resolve_database_file_path(self, database_url: str) -> Path | None:
+        if database_url.startswith("file:"):
+            return None
+        normalized = Path(database_url)
+        if normalized.name == ":memory:":
+            return None
+        return normalized
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(
@@ -382,14 +403,155 @@ class Database:
                 conn.close()
 
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
-        for version, script in MIGRATIONS:
-            row = conn.execute(
-                "SELECT 1 FROM schema_migrations WHERE version = ?",
-                (version,),
-            ).fetchone()
-            if row is not None:
-                continue
+        pending = self._pending_migrations(conn)
+        if not pending:
+            return
+        self._create_migration_backup(conn, [version for version, _ in pending])
+        for _, script in pending:
             conn.executescript(script)
+
+    def _pending_migrations(self, conn: sqlite3.Connection) -> list[tuple[int, str]]:
+        applied_rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+        applied_versions = {int(row[0]) for row in applied_rows}
+        return [(version, script) for version, script in MIGRATIONS if version not in applied_versions]
+
+    def _create_migration_backup(
+        self,
+        conn: sqlite3.Connection,
+        pending_versions: list[int],
+    ) -> None:
+        if not pending_versions:
+            return
+        if self._database_path is None or not self._database_existed_at_startup:
+            return
+
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        versions = "-".join(str(version) for version in pending_versions)
+        backup_suffix = self._database_path.suffix or ".sqlite3"
+        backup_name_prefix = (
+            f"{self._database_path.stem}-pre-migration-v{versions}-"
+            f"{timestamp}"
+        )
+        candidate_roots: list[Path] = []
+        if self.migration_backup_dir:
+            candidate_roots.append(Path(self.migration_backup_dir).expanduser())
+        default_root = self._database_path.parent / "migration_backups"
+        if all(default_root != root for root in candidate_roots):
+            candidate_roots.append(default_root)
+
+        last_error: Exception | None = None
+        for backup_root in candidate_roots:
+            backup_path = backup_root / (
+                f"{backup_name_prefix}-{uuid.uuid4().hex[:8]}{backup_suffix}"
+            )
+            try:
+                backup_root.mkdir(parents=True, exist_ok=True)
+                backup_conn = sqlite3.connect(
+                    str(backup_path),
+                    check_same_thread=False,
+                    isolation_level=None,
+                )
+                try:
+                    conn.backup(backup_conn)
+                finally:
+                    backup_conn.close()
+            except Exception as exc:
+                last_error = exc
+                continue
+
+            self._last_migration_backup_path = str(backup_path)
+            self._last_migration_backup_created_at = datetime.now(UTC).isoformat()
+            self._last_migration_backup_versions = list(pending_versions)
+            return
+
+        if last_error is not None:
+            raise RuntimeError("Failed to create database migration backup") from last_error
+
+    def database_file_info(self) -> dict[str, object]:
+        if self._database_path is None:
+            return {
+                "kind": "memory",
+                "path": None,
+                "exists": False,
+                "size_bytes": 0,
+                "modified_at_utc": None,
+            }
+
+        exists = self._database_path.exists()
+        if not exists:
+            return {
+                "kind": "file",
+                "path": str(self._database_path),
+                "exists": False,
+                "size_bytes": 0,
+                "modified_at_utc": None,
+            }
+
+        stat_result = self._database_path.stat()
+        return {
+            "kind": "file",
+            "path": str(self._database_path),
+            "exists": True,
+            "size_bytes": int(stat_result.st_size),
+            "modified_at_utc": datetime.fromtimestamp(stat_result.st_mtime, tz=UTC).isoformat(),
+        }
+
+    def integrity_check(self, *, mode: str = "quick") -> dict[str, object]:
+        normalized_mode = str(mode).strip().lower()
+        if normalized_mode not in {"quick", "full"}:
+            raise ValueError("Integrity mode must be 'quick' or 'full'")
+
+        pragma = "quick_check" if normalized_mode == "quick" else "integrity_check"
+        started = time.perf_counter()
+        try:
+            rows = self.fetch_all(f"PRAGMA {pragma}")
+            messages = [str(row[0]) for row in rows if row and row[0] is not None]
+            if not messages:
+                messages = ["no result"]
+            ok = len(messages) == 1 and messages[0].lower() == "ok"
+            result = "ok" if ok else "; ".join(messages)
+            return {
+                "ok": ok,
+                "mode": normalized_mode,
+                "result": result,
+                "messages": messages,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "mode": normalized_mode,
+                "result": str(exc),
+                "messages": [str(exc)],
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            }
+
+    def migration_status(self) -> dict[str, object]:
+        rows = self.fetch_all(
+            """SELECT version, name, applied_at
+               FROM schema_migrations
+               ORDER BY version ASC"""
+        )
+        applied = [
+            {
+                "version": int(row["version"]),
+                "name": str(row["name"]),
+                "applied_at": str(row["applied_at"]),
+            }
+            for row in rows
+        ]
+        applied_versions = {item["version"] for item in applied}
+        pending_versions = [version for version, _ in MIGRATIONS if version not in applied_versions]
+        latest_applied_version = max(applied_versions) if applied_versions else None
+        return {
+            "latest_applied_version": latest_applied_version,
+            "applied_count": len(applied),
+            "pending_versions": pending_versions,
+            "last_backup_path": self._last_migration_backup_path,
+            "last_backup_created_at": self._last_migration_backup_created_at,
+            "last_backup_versions": list(self._last_migration_backup_versions),
+            "applied": applied,
+        }
 
     def execute(self, sql: str, *params: object) -> int:
         def _op(conn: sqlite3.Connection) -> int:

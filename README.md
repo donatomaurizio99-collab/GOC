@@ -385,6 +385,7 @@ Observability endpoints:
 
 - `GET /system/metrics`
 - `GET /system/audit`
+- `GET /system/database/integrity?mode=quick|full`
 - `GET /system/faults`
 - `GET /system/faults/summary`
 - `POST /system/faults/resolve_bulk`
@@ -553,6 +554,7 @@ If a value is rejected:
 - `goal_ops.db` keeps your manual test data between restarts.
 - If you see old goals or tasks, reset the local database.
 - In this sandboxed environment, file-backed SQLite can behave differently than in a normal local shell. For normal local use, keep `GOAL_OPS_DATABASE_URL="goal_ops.db"` set before starting the server.
+- Optional: set `GOAL_OPS_DB_MIGRATION_BACKUP_DIR` to control where pre-migration SQLite backups are written.
 - If you start `uvicorn` from outside the project directory, keep the `--app-dir` flag.
 
 ## Key Files

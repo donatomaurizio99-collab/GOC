@@ -62,6 +62,7 @@ GitHub Actions `Desktop Build` publishes release assets on tag pushes.
 After release is live:
 - Launch desktop binary on a clean Windows machine.
 - Confirm `GET /system/readiness` returns `{"ready": true, ...}`.
+- Confirm `GET /system/database/integrity?mode=quick` returns `"ok": true`.
 - Trigger `Export Diagnostics` once from Operator Controls and confirm snapshot file exists.
 - Verify one workflow run can be queued and completed from UI.
 
@@ -99,10 +100,14 @@ Actions:
 2. Check failing check:
    - `checks.database.ok = false`: inspect DB path/permissions/locking.
    - `checks.workflow_worker.ok = false`: worker thread failed to start.
-3. Export diagnostics:
+3. If the database check fails, run integrity probe:
+   ```powershell
+   Invoke-RestMethod "http://127.0.0.1:8000/system/database/integrity?mode=quick"
+   ```
+4. Export diagnostics:
    - UI: `Export Diagnostics`
    - API: `POST /system/diagnostics`
-4. Restart app and retry once. If still failing, rollback.
+5. Restart app and retry once. If still failing, rollback.
 
 ### 3.2 Workflow worker stalled
 
