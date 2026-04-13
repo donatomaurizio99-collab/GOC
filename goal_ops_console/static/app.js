@@ -821,6 +821,7 @@ function renderWorkflows(workflows, runs) {
             <th>Status</th>
             <th>Requested By</th>
             <th>Result</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -838,6 +839,11 @@ function renderWorkflows(workflows, runs) {
                 <div class="meta">${run.idempotency_key || "no idempotency key"}</div>
               </td>
               <td><pre>${JSON.stringify(run.result_payload || {}, null, 2)}</pre></td>
+              <td>
+                ${["queued", "running"].includes(run.status)
+                  ? `<button type="button" class="secondary" data-workflow-cancel="${run.run_id}">Cancel</button>`
+                  : `<span class="meta">-</span>`}
+              </td>
             </tr>`).join("")}
         </tbody>
       </table></div>`
@@ -1074,8 +1080,9 @@ async function runWorkflowStart(workflowId) {
   const reaperNote = run.stale_runs_reaped
     ? ` Reaper closed ${run.stale_runs_reaped} stale runs before execution.`
     : "";
+  const queuedNote = run.status === "queued" ? " Run is queued and will execute asynchronously." : "";
   document.getElementById("system-feedback").textContent = (
-    `Workflow ${run.workflow_name} finished with status ${run.status}${replayNote}.${reaperNote}`
+    `Workflow ${run.workflow_name} accepted with status ${run.status}${replayNote}.${queuedNote}${reaperNote}`
   );
   await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
 }
@@ -1084,6 +1091,21 @@ async function runWorkflowReaper() {
   const response = await api("/workflows/runs/reap", { method: "POST" });
   document.getElementById("system-feedback").textContent = (
     `Workflow reaper marked ${response.reaped_count} stale runs as timed_out.`
+  );
+  await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
+}
+
+async function runWorkflowCancel(runId) {
+  const response = await api(`/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({
+      requested_by: "operator",
+      reason: "Cancelled from dashboard",
+    }),
+  });
+  const run = response.run;
+  document.getElementById("system-feedback").textContent = (
+    `Workflow run ${run.run_id} is now ${run.status}.`
   );
   await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
 }
@@ -1368,6 +1390,7 @@ document.addEventListener("click", async (event) => {
   const faultAction = event.target.dataset.faultAction;
   const failureId = event.target.dataset.failureId;
   const workflowStart = event.target.dataset.workflowStart;
+  const workflowCancel = event.target.dataset.workflowCancel;
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
   const operatorAction = event.target.dataset.operatorAction;
@@ -1390,6 +1413,10 @@ document.addEventListener("click", async (event) => {
     if (workflowStart) {
       document.getElementById("workflow-select").value = workflowStart;
       await runWorkflowStart(workflowStart);
+    }
+
+    if (workflowCancel) {
+      await runWorkflowCancel(workflowCancel);
     }
 
     if (goalAction && goalId) {
@@ -1445,7 +1472,7 @@ document.addEventListener("click", async (event) => {
   } catch (error) {
     const target = operatorAction || faultAction
       ? "system-feedback"
-      : workflowStart
+      : workflowStart || workflowCancel
         ? "workflow-error"
         : goalAction
           ? "goal-error"

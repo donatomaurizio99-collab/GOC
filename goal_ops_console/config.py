@@ -52,6 +52,7 @@ EVENT_PROCESSING_RETENTION_DAYS = 30
 FAILURE_LOG_RETENTION_DAYS = 90
 WORKFLOW_RUN_TIMEOUT_SECONDS = 300
 WORKFLOW_REAPER_BATCH_SIZE = 200
+WORKFLOW_WORKER_POLL_INTERVAL_SECONDS = 0.5
 
 # The sandbox in this workspace rejects file-backed SQLite locks, so the
 # persistent `goal_ops.db` path should be supplied via GOAL_OPS_DATABASE_URL.
@@ -80,3 +81,4 @@ class Settings:
     failure_log_retention_days: int = FAILURE_LOG_RETENTION_DAYS
     workflow_run_timeout_seconds: int = WORKFLOW_RUN_TIMEOUT_SECONDS
     workflow_reaper_batch_size: int = WORKFLOW_REAPER_BATCH_SIZE
+    workflow_worker_poll_interval_seconds: float = WORKFLOW_WORKER_POLL_INTERVAL_SECONDS

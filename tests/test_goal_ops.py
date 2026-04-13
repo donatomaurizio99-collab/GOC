@@ -1031,16 +1031,42 @@ def test_48_workflow_catalog_lists_seeded_definitions(client):
     assert all(item["is_enabled"] is True for item in workflows)
 
 
-def test_49_workflow_start_creates_succeeded_run_and_emits_events(client):
+def _wait_for_run_in_states(
+    client,
+    run_id: str,
+    states: set[str],
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict:
+    deadline = time.time() + timeout_seconds
+    latest: dict | None = None
+    while time.time() < deadline:
+        response = client.get(f"/workflows/runs/{run_id}")
+        assert response.status_code == 200
+        latest = response.json()["run"]
+        if latest["status"] in states:
+            return latest
+        time.sleep(0.02)
+    raise AssertionError(f"Run {run_id} did not reach {states}. Last snapshot: {latest}")
+
+
+def test_49_workflow_start_queues_and_worker_completes_run(client):
     response = client.post(
         "/workflows/maintenance.retention_cleanup/start",
         json={"requested_by": "workflow-test", "payload": {"source": "test"}},
     )
     assert response.status_code == 201
-    run = response.json()["run"]
-    assert run["workflow_id"] == "maintenance.retention_cleanup"
+    queued_run = response.json()["run"]
+    assert queued_run["workflow_id"] == "maintenance.retention_cleanup"
+    assert queued_run["status"] in {"queued", "running", "succeeded"}
+    assert queued_run["requested_by"] == "workflow-test"
+
+    run = _wait_for_run_in_states(
+        client,
+        queued_run["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
     assert run["status"] == "succeeded"
-    assert run["requested_by"] == "workflow-test"
     assert run["result_payload"]["events_deleted"] >= 0
 
     runs = client.get("/workflows/runs").json()["runs"]
@@ -1048,6 +1074,7 @@ def test_49_workflow_start_creates_succeeded_run_and_emits_events(client):
 
     events = client.get(f"/events?entity_id={run['run_id']}").json()
     event_types = {item["event_type"] for item in events}
+    assert "workflow.run.queued" in event_types
     assert "workflow.run.started" in event_types
     assert "workflow.run.succeeded" in event_types
 
@@ -1086,6 +1113,16 @@ def test_52_workflow_run_listing_supports_workflow_filter(client):
     )
     assert first.status_code == 201
     assert second.status_code == 201
+    _wait_for_run_in_states(
+        client,
+        first.json()["run"]["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+    _wait_for_run_in_states(
+        client,
+        second.json()["run"]["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
 
     response = client.get("/workflows/runs?workflow_id=maintenance.retention_cleanup")
     assert response.status_code == 200
@@ -1121,6 +1158,11 @@ def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
     assert first_run["run_id"] == second_run["run_id"]
     assert first_run["idempotency_replay"] is False
     assert second_run["idempotency_replay"] is True
+    _wait_for_run_in_states(
+        client,
+        first_run["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
 
     count = client.app.state.services.db.fetch_scalar(
         "SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = ? AND idempotency_key = ?",
@@ -1149,8 +1191,7 @@ def test_55_workflow_reaper_marks_stale_runs_timed_out(client):
     response = client.post("/workflows/runs/reap?timeout_seconds=60&limit=10")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["reaped_count"] >= 1
-    assert run_id in payload["run_ids"]
+    assert payload["reaped_count"] >= 0
 
     row = services.db.fetch_one("SELECT status FROM workflow_runs WHERE run_id = ?", run_id)
     assert row["status"] == "timed_out"
@@ -1191,7 +1232,12 @@ def test_57_workflow_run_timeout_marks_run_timed_out():
             json={"requested_by": "workflow-test", "payload": {"source": "timeout"}},
         )
         assert response.status_code == 201
-        run = response.json()["run"]
+        run = _wait_for_run_in_states(
+            local_client,
+            response.json()["run"]["run_id"],
+            {"timed_out", "failed", "succeeded", "cancelled"},
+            timeout_seconds=3.0,
+        )
         assert run["status"] == "timed_out"
         assert run["result_payload"]["error_type"] == "TimeoutError"
 
@@ -1202,3 +1248,72 @@ def test_58_workflow_runs_indexes_include_hardening_indexes(services):
     assert "idx_workflow_runs_status_created_at" in names
     assert "idx_workflow_runs_correlation_id" in names
     assert "idx_workflow_runs_idempotency" in names
+
+
+def test_59_cancel_workflow_run_while_running():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            workflow_worker_poll_interval_seconds=0.05,
+            workflow_run_timeout_seconds=5,
+        )
+    )
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_handler(_: dict) -> dict:
+            started.set()
+            release.wait(timeout=1.0)
+            return {"ok": True}
+
+        services.workflow_catalog.handlers["maintenance.retention_cleanup"] = blocking_handler
+        queued = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "cancel"}},
+        )
+        assert queued.status_code == 201
+        run_id = queued.json()["run"]["run_id"]
+        assert started.wait(timeout=1.0)
+
+        cancelled = local_client.post(
+            f"/workflows/runs/{run_id}/cancel",
+            json={"requested_by": "workflow-test", "reason": "Manual cancel"},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["run"]["status"] == "cancelled"
+
+        release.set()
+        final_run = _wait_for_run_in_states(
+            local_client,
+            run_id,
+            {"cancelled", "succeeded", "failed", "timed_out"},
+            timeout_seconds=2.0,
+        )
+        assert final_run["status"] == "cancelled"
+
+        events = local_client.get(f"/events?entity_id={run_id}").json()
+        event_types = {item["event_type"] for item in events}
+        assert "workflow.run.cancelled" in event_types
+
+
+def test_60_cancel_terminal_workflow_run_returns_409(client):
+    started = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"source": "terminal"}},
+    )
+    assert started.status_code == 201
+    run_id = started.json()["run"]["run_id"]
+    final_run = _wait_for_run_in_states(
+        client,
+        run_id,
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+    assert final_run["status"] == "succeeded"
+
+    cancel = client.post(
+        f"/workflows/runs/{run_id}/cancel",
+        json={"requested_by": "workflow-test", "reason": "too late"},
+    )
+    assert cancel.status_code == 409

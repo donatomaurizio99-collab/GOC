@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Callable
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -36,6 +37,8 @@ DEFAULT_WORKFLOW_DEFINITIONS: tuple[dict[str, str], ...] = (
     },
 )
 
+TERMINAL_RUN_STATES = {"succeeded", "failed", "timed_out", "cancelled"}
+
 
 class WorkflowCatalog:
     def __init__(
@@ -46,20 +49,53 @@ class WorkflowCatalog:
         *,
         run_timeout_seconds: int = 300,
         reaper_batch_size: int = 200,
+        worker_poll_interval_seconds: float = 0.5,
         observability: "ObservabilityService | None" = None,
     ):
         self.db = db
         self.event_bus = event_bus
         self.scheduler = scheduler
-        self.run_timeout_seconds = run_timeout_seconds
-        self.reaper_batch_size = reaper_batch_size
+        self.run_timeout_seconds = max(0, int(run_timeout_seconds))
+        self.reaper_batch_size = max(1, int(reaper_batch_size))
+        self.worker_poll_interval_seconds = max(0.05, float(worker_poll_interval_seconds))
         self.observability = observability
         self.handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "scheduler.age_queue": self._run_scheduler_age_queue,
             "scheduler.pick_next_goal": self._run_scheduler_pick_next_goal,
             "maintenance.retention_cleanup": self._run_retention_cleanup,
         }
+
+        self._worker_stop = threading.Event()
+        self._worker_wakeup = threading.Event()
+        self._worker_lock = threading.Lock()
+        self._worker_thread: threading.Thread | None = None
+
         self._seed_default_workflows()
+
+    def start_worker(self) -> None:
+        with self._worker_lock:
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                return
+            self._worker_stop.clear()
+            self._worker_wakeup.set()
+            self._worker_thread = threading.Thread(
+                target=self._worker_loop,
+                daemon=True,
+                name="goal-ops-workflow-worker",
+            )
+            self._worker_thread.start()
+
+    def stop_worker(self, timeout_seconds: float = 5.0) -> None:
+        with self._worker_lock:
+            thread = self._worker_thread
+            if thread is None:
+                return
+            self._worker_stop.set()
+            self._worker_wakeup.set()
+        thread.join(timeout=timeout_seconds)
+        with self._worker_lock:
+            if self._worker_thread is thread:
+                self._worker_thread = None
 
     def list_workflows(self, *, include_disabled: bool = False) -> list[dict[str, Any]]:
         where = "" if include_disabled else "WHERE wd.is_enabled = 1"
@@ -133,7 +169,7 @@ class WorkflowCatalog:
                 ORDER BY wr.created_at DESC
                 LIMIT ?""",
             *params,
-            limit,
+            max(1, min(500, int(limit))),
         )
         return [self._run_to_dict(row) for row in rows]
 
@@ -196,17 +232,17 @@ class WorkflowCatalog:
 
         run_id = new_id()
         correlation_id = f"workflow:{workflow_id}:{run_id[:8]}"
-        started_at = now_utc()
+        created_at = now_utc()
         input_payload = payload or {}
         try:
-            self._insert_run(
+            self._insert_queued_run(
                 run_id=run_id,
                 workflow_id=workflow_id,
                 requested_by=requested_by,
                 correlation_id=correlation_id,
                 idempotency_key=normalized_idempotency_key,
                 input_payload=input_payload,
-                started_at=started_at,
+                created_at=created_at,
                 entrypoint=str(definition["entrypoint"]),
             )
         except sqlite3.IntegrityError as error:
@@ -218,53 +254,78 @@ class WorkflowCatalog:
                 return replayed
             raise ConflictError(f"Workflow run insert failed: {error}") from error
 
-        started_monotonic = perf_counter()
-        try:
-            result_payload = handler(input_payload)
-        except Exception as error:
-            failed = self._mark_run_failed(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                requested_by=requested_by,
-                correlation_id=correlation_id,
-                error=error,
-                status="failed",
-            )
-            failed["idempotency_replay"] = False
-            failed["stale_runs_reaped"] = stale["reaped_count"]
-            return failed
+        self._worker_wakeup.set()
+        queued = self.get_run(run_id)
+        queued["idempotency_replay"] = False
+        queued["stale_runs_reaped"] = stale["reaped_count"]
+        return queued
 
-        duration_ms = int((perf_counter() - started_monotonic) * 1000)
-        if duration_ms > self.run_timeout_seconds * 1000:
-            timeout_error = TimeoutError(
-                (
-                    f"Workflow {workflow_id} exceeded timeout "
-                    f"({duration_ms}ms > {self.run_timeout_seconds * 1000}ms)"
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        requested_by: str = "operator",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        with self.db.transaction() as tx:
+            run = tx.fetch_one(
+                "SELECT run_id, workflow_id, status, correlation_id FROM workflow_runs WHERE run_id = ?",
+                run_id,
+            )
+            if run is None:
+                raise NotFoundError(f"Workflow run {run_id} not found")
+
+            current_status = str(run["status"])
+            if current_status in {"succeeded", "failed", "timed_out"}:
+                raise ConflictError(
+                    f"Workflow run {run_id} is already terminal with status '{current_status}'"
                 )
-            )
-            timed_out = self._mark_run_failed(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                requested_by=requested_by,
-                correlation_id=correlation_id,
-                error=timeout_error,
-                status="timed_out",
-                details={"duration_ms": duration_ms},
-            )
-            timed_out["idempotency_replay"] = False
-            timed_out["stale_runs_reaped"] = stale["reaped_count"]
-            return timed_out
+            if current_status == "cancelled":
+                return self.get_run(run_id)
 
-        result = self._mark_run_succeeded(
-            run_id=run_id,
-            workflow_id=workflow_id,
-            requested_by=requested_by,
-            correlation_id=correlation_id,
-            result_payload={**result_payload, "duration_ms": duration_ms},
-        )
-        result["idempotency_replay"] = False
-        result["stale_runs_reaped"] = stale["reaped_count"]
-        return result
+            timestamp = now_utc()
+            updated = tx.execute(
+                """UPDATE workflow_runs
+                   SET status = 'cancelled',
+                       finished_at = COALESCE(finished_at, ?),
+                       updated_at = ?
+                   WHERE run_id = ? AND status IN ('queued', 'running')""",
+                timestamp,
+                timestamp,
+                run_id,
+            )
+            if updated == 0:
+                return self.get_run(run_id)
+
+            self._safe_record_event(
+                "workflow.run.cancelled",
+                run_id,
+                str(run["correlation_id"]),
+                {
+                    "workflow_id": run["workflow_id"],
+                    "requested_by": requested_by,
+                    "reason": reason,
+                    "from_status": current_status,
+                },
+                tx=tx,
+            )
+            self._metric("workflows.runs.cancelled", tx=tx)
+            self._record_audit(
+                tx,
+                action="workflow.cancel",
+                actor=requested_by,
+                status="success",
+                workflow_id=str(run["workflow_id"]),
+                correlation_id=str(run["correlation_id"]),
+                details={
+                    "run_id": run_id,
+                    "from_status": current_status,
+                    "reason": reason,
+                },
+            )
+
+        self._worker_wakeup.set()
+        return self.get_run(run_id)
 
     def reap_stuck_runs(self, *, timeout_seconds: int, limit: int) -> dict[str, Any]:
         safe_limit = max(1, min(500, int(limit)))
@@ -275,7 +336,7 @@ class WorkflowCatalog:
                AND started_at < datetime('now', ? || ' seconds')
                ORDER BY started_at ASC
                LIMIT ?""",
-            f"-{timeout_seconds}",
+            f"-{max(0, int(timeout_seconds))}",
             safe_limit,
         )
         if not rows:
@@ -309,7 +370,7 @@ class WorkflowCatalog:
                 if updated == 0:
                     continue
                 run_ids.append(run_id)
-                self.event_bus.record_event(
+                self._safe_record_event(
                     "workflow.run.timed_out",
                     run_id,
                     str(row["correlation_id"]),
@@ -338,7 +399,146 @@ class WorkflowCatalog:
                 self._metric("workflows.runs.timed_out", delta=len(run_ids), tx=tx)
         return {"reaped_count": len(run_ids), "run_ids": run_ids}
 
-    def _insert_run(
+    def _worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            try:
+                self.reap_stuck_runs(
+                    timeout_seconds=self.run_timeout_seconds,
+                    limit=self.reaper_batch_size,
+                )
+            except Exception:
+                self._metric("workflows.worker.errors")
+
+            processed_any = False
+            while not self._worker_stop.is_set():
+                claimed = self._claim_next_queued_run()
+                if claimed is None:
+                    break
+                processed_any = True
+                self._execute_claimed_run(claimed)
+
+            if processed_any:
+                continue
+
+            self._worker_wakeup.wait(self.worker_poll_interval_seconds)
+            self._worker_wakeup.clear()
+
+    def _claim_next_queued_run(self) -> dict[str, Any] | None:
+        with self.db.transaction() as tx:
+            row = tx.fetch_one(
+                """SELECT run_id
+                   FROM workflow_runs
+                   WHERE status = 'queued'
+                   ORDER BY created_at ASC
+                   LIMIT 1"""
+            )
+            if row is None:
+                return None
+
+            run_id = str(row["run_id"])
+            started_at = now_utc()
+            updated = tx.execute(
+                """UPDATE workflow_runs
+                   SET status = 'running', started_at = ?, updated_at = ?
+                   WHERE run_id = ? AND status = 'queued'""",
+                started_at,
+                started_at,
+                run_id,
+            )
+            if updated == 0:
+                return None
+
+            claimed = tx.fetch_one(
+                """SELECT run_id, workflow_id, requested_by, correlation_id, input_payload
+                   FROM workflow_runs WHERE run_id = ?""",
+                run_id,
+            )
+            if claimed is None:
+                return None
+
+            self._safe_record_event(
+                "workflow.run.started",
+                run_id,
+                str(claimed["correlation_id"]),
+                {
+                    "workflow_id": claimed["workflow_id"],
+                    "requested_by": claimed["requested_by"],
+                },
+                tx=tx,
+            )
+            self._metric("workflows.runs.started", tx=tx)
+            return dict(claimed)
+
+    def _execute_claimed_run(self, claimed_run: dict[str, Any]) -> None:
+        run_id = str(claimed_run["run_id"])
+        workflow_id = str(claimed_run["workflow_id"])
+        requested_by = str(claimed_run["requested_by"])
+        correlation_id = str(claimed_run["correlation_id"])
+
+        try:
+            definition = self.get_workflow(workflow_id, include_disabled=True)
+            handler = self.handlers.get(str(definition["entrypoint"]))
+            if handler is None:
+                self._mark_run_failed(
+                    run_id=run_id,
+                    workflow_id=workflow_id,
+                    requested_by=requested_by,
+                    correlation_id=correlation_id,
+                    error=ConflictError(
+                        f"Workflow {workflow_id} has unknown entrypoint '{definition['entrypoint']}'"
+                    ),
+                    status="failed",
+                    expected_status="running",
+                )
+                return
+
+            payload = self._json_load(claimed_run.get("input_payload")) or {}
+            started_monotonic = perf_counter()
+            try:
+                result_payload = handler(payload)
+            except Exception as error:
+                self._mark_run_failed(
+                    run_id=run_id,
+                    workflow_id=workflow_id,
+                    requested_by=requested_by,
+                    correlation_id=correlation_id,
+                    error=error,
+                    status="failed",
+                    expected_status="running",
+                )
+                return
+
+            duration_ms = int((perf_counter() - started_monotonic) * 1000)
+            if duration_ms > self.run_timeout_seconds * 1000:
+                self._mark_run_failed(
+                    run_id=run_id,
+                    workflow_id=workflow_id,
+                    requested_by=requested_by,
+                    correlation_id=correlation_id,
+                    error=TimeoutError(
+                        (
+                            f"Workflow {workflow_id} exceeded timeout "
+                            f"({duration_ms}ms > {self.run_timeout_seconds * 1000}ms)"
+                        )
+                    ),
+                    status="timed_out",
+                    expected_status="running",
+                    details={"duration_ms": duration_ms},
+                )
+                return
+
+            self._mark_run_succeeded(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                requested_by=requested_by,
+                correlation_id=correlation_id,
+                result_payload={**result_payload, "duration_ms": duration_ms},
+                expected_status="running",
+            )
+        except Exception:
+            self._metric("workflows.worker.errors")
+
+    def _insert_queued_run(
         self,
         *,
         run_id: str,
@@ -347,7 +547,7 @@ class WorkflowCatalog:
         correlation_id: str,
         idempotency_key: str | None,
         input_payload: dict[str, Any],
-        started_at: str,
+        created_at: str,
         entrypoint: str,
     ) -> None:
         with self.db.transaction() as tx:
@@ -355,19 +555,19 @@ class WorkflowCatalog:
                 """INSERT INTO workflow_runs
                    (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
                     input_payload, result_payload, started_at, finished_at, created_at, updated_at)
-                   VALUES (?, ?, 'running', ?, ?, ?, ?, NULL, ?, NULL, ?, ?)""",
+                   VALUES (?, ?, 'queued', ?, ?, ?, ?, NULL, ?, NULL, ?, ?)""",
                 run_id,
                 workflow_id,
                 requested_by,
                 correlation_id,
                 idempotency_key,
                 self._json_dump(input_payload),
-                started_at,
-                started_at,
-                started_at,
+                created_at,
+                created_at,
+                created_at,
             )
-            self.event_bus.record_event(
-                "workflow.run.started",
+            self._safe_record_event(
+                "workflow.run.queued",
                 run_id,
                 correlation_id,
                 {
@@ -378,7 +578,19 @@ class WorkflowCatalog:
                 },
                 tx=tx,
             )
-            self._metric("workflows.runs.started", tx=tx)
+            self._metric("workflows.runs.queued", tx=tx)
+            self._record_audit(
+                tx,
+                action="workflow.enqueue",
+                actor=requested_by,
+                status="success",
+                workflow_id=workflow_id,
+                correlation_id=correlation_id,
+                details={
+                    "run_id": run_id,
+                    "idempotency_key": idempotency_key,
+                },
+            )
 
     def _find_run_by_idempotency(
         self,
@@ -409,43 +621,54 @@ class WorkflowCatalog:
         requested_by: str,
         correlation_id: str,
         result_payload: dict[str, Any],
+        expected_status: str,
     ) -> dict[str, Any]:
         finished_at = now_utc()
+        applied = False
         with self.db.transaction() as tx:
-            tx.execute(
+            rows = tx.execute(
                 """UPDATE workflow_runs
                    SET status = 'succeeded',
                        result_payload = ?,
                        finished_at = ?,
                        updated_at = ?
-                   WHERE run_id = ?""",
+                   WHERE run_id = ? AND status = ?""",
                 self._json_dump(result_payload),
                 finished_at,
                 finished_at,
                 run_id,
+                expected_status,
             )
-            self.event_bus.record_event(
-                "workflow.run.succeeded",
-                run_id,
-                correlation_id,
-                {
-                    "workflow_id": workflow_id,
-                    "requested_by": requested_by,
-                    "result": result_payload,
-                },
-                tx=tx,
+            if rows > 0:
+                applied = True
+                self._safe_record_event(
+                    "workflow.run.succeeded",
+                    run_id,
+                    correlation_id,
+                    {
+                        "workflow_id": workflow_id,
+                        "requested_by": requested_by,
+                        "result": result_payload,
+                    },
+                    tx=tx,
+                )
+                self._metric("workflows.runs.succeeded", tx=tx)
+                self._record_audit(
+                    tx,
+                    action="workflow.run",
+                    actor=requested_by,
+                    status="success",
+                    workflow_id=workflow_id,
+                    correlation_id=correlation_id,
+                    details={"run_id": run_id, "result": result_payload},
+                )
+
+        run = self.get_run(run_id)
+        if not applied and run["status"] not in TERMINAL_RUN_STATES:
+            raise ConflictError(
+                f"Workflow run {run_id} could not transition from {expected_status} to succeeded"
             )
-            self._metric("workflows.runs.succeeded", tx=tx)
-            self._record_audit(
-                tx,
-                action="workflow.run",
-                actor=requested_by,
-                status="success",
-                workflow_id=workflow_id,
-                correlation_id=correlation_id,
-                details={"run_id": run_id, "result": result_payload},
-            )
-        return self.get_run(run_id)
+        return run
 
     def _mark_run_failed(
         self,
@@ -455,7 +678,8 @@ class WorkflowCatalog:
         requested_by: str,
         correlation_id: str,
         error: Exception,
-        status: str = "failed",
+        status: str,
+        expected_status: str,
         details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         finished_at = now_utc()
@@ -465,44 +689,55 @@ class WorkflowCatalog:
             **(details or {}),
         }
         event_type = "workflow.run.timed_out" if status == "timed_out" else "workflow.run.failed"
+        metric_name = "workflows.runs.timed_out" if status == "timed_out" else "workflows.runs.failed"
+
+        applied = False
         with self.db.transaction() as tx:
-            tx.execute(
+            rows = tx.execute(
                 """UPDATE workflow_runs
                    SET status = ?,
                        result_payload = ?,
                        finished_at = ?,
                        updated_at = ?
-                   WHERE run_id = ?""",
+                   WHERE run_id = ? AND status = ?""",
                 status,
                 self._json_dump(error_payload),
                 finished_at,
                 finished_at,
                 run_id,
+                expected_status,
             )
-            self.event_bus.record_event(
-                event_type,
-                run_id,
-                correlation_id,
-                {
-                    "workflow_id": workflow_id,
-                    "requested_by": requested_by,
-                    "error_type": error.__class__.__name__,
-                    "error": str(error),
-                },
-                tx=tx,
+            if rows > 0:
+                applied = True
+                self._safe_record_event(
+                    event_type,
+                    run_id,
+                    correlation_id,
+                    {
+                        "workflow_id": workflow_id,
+                        "requested_by": requested_by,
+                        "error_type": error.__class__.__name__,
+                        "error": str(error),
+                    },
+                    tx=tx,
+                )
+                self._metric(metric_name, tx=tx)
+                self._record_audit(
+                    tx,
+                    action="workflow.run",
+                    actor=requested_by,
+                    status="error",
+                    workflow_id=workflow_id,
+                    correlation_id=correlation_id,
+                    details={"run_id": run_id, "status": status, "error": str(error)},
+                )
+
+        run = self.get_run(run_id)
+        if not applied and run["status"] not in TERMINAL_RUN_STATES:
+            raise ConflictError(
+                f"Workflow run {run_id} could not transition from {expected_status} to {status}"
             )
-            metric_name = "workflows.runs.timed_out" if status == "timed_out" else "workflows.runs.failed"
-            self._metric(metric_name, tx=tx)
-            self._record_audit(
-                tx,
-                action="workflow.run",
-                actor=requested_by,
-                status="error",
-                workflow_id=workflow_id,
-                correlation_id=correlation_id,
-                details={"run_id": run_id, "status": status, "error": str(error)},
-            )
-        return self.get_run(run_id)
+        return run
 
     def _run_scheduler_age_queue(self, _: dict[str, Any]) -> dict[str, Any]:
         self.event_bus.ensure_within_backpressure()
@@ -561,6 +796,26 @@ class WorkflowCatalog:
         if isinstance(payload, dict):
             return payload
         return {"value": payload}
+
+    def _safe_record_event(
+        self,
+        event_type: str,
+        entity_id: str,
+        correlation_id: str,
+        payload: dict[str, Any],
+        *,
+        tx: Transaction | None = None,
+    ) -> None:
+        try:
+            self.event_bus.record_event(
+                event_type,
+                entity_id,
+                correlation_id,
+                payload,
+                tx=tx,
+            )
+        except Exception:
+            self._metric("workflows.events.dropped", tx=tx)
 
     def _record_audit(
         self,

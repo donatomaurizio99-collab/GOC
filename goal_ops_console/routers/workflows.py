@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Header
 
-from goal_ops_console.models import WorkflowStartRequest
+from goal_ops_console.models import WorkflowCancelRequest, WorkflowStartRequest
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -40,6 +40,28 @@ def reap_workflow_runs(
         timeout_seconds=timeout_seconds or services.settings.workflow_run_timeout_seconds,
         limit=limit or services.settings.workflow_reaper_batch_size,
     )
+
+
+@router.get("/runs/{run_id}")
+def get_workflow_run(
+    run_id: str,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return {"run": services.workflow_catalog.get_run(run_id)}
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_workflow_run(
+    run_id: str,
+    request: WorkflowCancelRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    run = services.workflow_catalog.cancel_run(
+        run_id,
+        requested_by=request.requested_by,
+        reason=request.reason,
+    )
+    return {"run": run}
 
 
 @router.post("/{workflow_id}/start", status_code=201)
