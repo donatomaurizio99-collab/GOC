@@ -34,6 +34,10 @@ def test_parse_args_defaults():
     assert args.window_state_path is None
     assert args.instance_lock_path is None
     assert args.allow_multiple_instances is False
+    assert args.crash_state_path is None
+    assert args.allow_crash_loop is False
+    assert args.crash_loop_max_crashes == desktop.DEFAULT_CRASH_LOOP_MAX_CRASHES
+    assert args.crash_loop_window_seconds == desktop.DEFAULT_CRASH_LOOP_WINDOW_SECONDS
     assert args.no_window_state is False
     assert args.title == "Goal Ops Console"
     assert args.debug is False
@@ -215,6 +219,73 @@ def test_write_crash_report_writes_json_payload():
         shutil.rmtree(test_dir, ignore_errors=True)
 
 
+def test_crash_loop_status_blocks_after_threshold():
+    test_dir = _local_test_dir()
+    try:
+        crash_state_path = test_dir / "crash-state.json"
+        now = desktop._iso_utc()
+        crash_state_path.write_text(
+            json.dumps(
+                {
+                    "crashes": [
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "A"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "B"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "C"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = desktop._crash_loop_status(
+            crash_state_path,
+            max_crashes=3,
+            window_seconds=600,
+        )
+        assert status["blocked"] is True
+        assert status["recent_count"] == 3
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_crash_loop_status_prunes_old_crashes():
+    test_dir = _local_test_dir()
+    try:
+        crash_state_path = test_dir / "crash-state.json"
+        crash_state_path.write_text(
+            json.dumps(
+                {
+                    "crashes": [
+                        {
+                            "timestamp_utc": "2000-01-01T00:00:00+00:00",
+                            "error_type": "RuntimeError",
+                            "error": "Old",
+                        },
+                        {
+                            "timestamp_utc": desktop._iso_utc(),
+                            "error_type": "RuntimeError",
+                            "error": "New",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = desktop._crash_loop_status(
+            crash_state_path,
+            max_crashes=2,
+            window_seconds=600,
+        )
+        assert status["blocked"] is False
+        assert status["recent_count"] == 1
+
+        persisted = json.loads(crash_state_path.read_text(encoding="utf-8"))
+        assert len(persisted["crashes"]) == 1
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
 def test_main_returns_nonzero_when_launch_fails(monkeypatch, capsys):
     def _raise(**_kwargs):
         raise RuntimeError("boom")
@@ -320,3 +391,119 @@ def test_main_can_disable_single_instance(monkeypatch):
     assert exit_code == 0
     assert captured_kwargs["single_instance"] is False
     assert captured_kwargs["instance_lock_path"] == "custom-desktop.lock"
+
+
+def test_main_blocks_launch_when_crash_loop_active(monkeypatch, capsys):
+    test_dir = _local_test_dir()
+    try:
+        crash_state_path = test_dir / "crash-state.json"
+        now = desktop._iso_utc()
+        crash_state_path.write_text(
+            json.dumps(
+                {
+                    "crashes": [
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "A"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "B"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "C"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        called = {"run": False}
+
+        def _fake_run_desktop(**_kwargs):
+            called["run"] = True
+
+        monkeypatch.setattr(desktop, "run_desktop", _fake_run_desktop)
+
+        exit_code = desktop.main(
+            [
+                "--database-url",
+                "demo.db",
+                "--crash-state-path",
+                str(crash_state_path),
+                "--crash-loop-max-crashes",
+                "3",
+                "--crash-loop-window-seconds",
+                "600",
+            ]
+        )
+        captured = capsys.readouterr()
+
+        assert exit_code == 2
+        assert called["run"] is False
+        assert "Crash-loop protection active" in captured.out
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_main_can_bypass_crash_loop_once(monkeypatch):
+    test_dir = _local_test_dir()
+    try:
+        crash_state_path = test_dir / "crash-state.json"
+        now = desktop._iso_utc()
+        crash_state_path.write_text(
+            json.dumps(
+                {
+                    "crashes": [
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "A"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "B"},
+                        {"timestamp_utc": now, "error_type": "RuntimeError", "error": "C"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        called = {"run": False}
+
+        def _fake_run_desktop(**_kwargs):
+            called["run"] = True
+
+        monkeypatch.setattr(desktop, "run_desktop", _fake_run_desktop)
+        exit_code = desktop.main(
+            [
+                "--database-url",
+                "demo.db",
+                "--crash-state-path",
+                str(crash_state_path),
+                "--allow-crash-loop",
+            ]
+        )
+
+        assert exit_code == 0
+        assert called["run"] is True
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_main_records_crash_event_on_failure(monkeypatch):
+    test_dir = _local_test_dir()
+    try:
+        crash_state_path = test_dir / "crash-state.json"
+        report_path = test_dir / "desktop-crash-report.json"
+
+        def _raise(**_kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(desktop, "run_desktop", _raise)
+        monkeypatch.setattr(desktop, "_write_crash_report", lambda *_args, **_kwargs: report_path)
+
+        exit_code = desktop.main(
+            [
+                "--database-url",
+                "demo.db",
+                "--crash-state-path",
+                str(crash_state_path),
+            ]
+        )
+
+        assert exit_code == 1
+        payload = json.loads(crash_state_path.read_text(encoding="utf-8"))
+        assert len(payload["crashes"]) == 1
+        assert payload["crashes"][0]["error_type"] == "RuntimeError"
+        assert payload["crashes"][0]["report_path"] == str(report_path)
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)

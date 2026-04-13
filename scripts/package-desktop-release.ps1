@@ -3,9 +3,12 @@ param(
     [string]$Version = "0.1.0-dev",
     [ValidateSet("snapshot", "stable", "beta")]
     [string]$Channel = "snapshot",
+    [ValidateSet("auto", "stable", "canary")]
+    [string]$RolloutRing = "auto",
     [ValidateSet("onedir", "onefile", "both")]
     [string]$Mode = "both",
     [string]$OutputDir = "artifacts",
+    [string]$RingsManifestPath = "",
     [string]$BaseDownloadUrl = "",
     [switch]$Sign,
     [string]$SignToolPath = "signtool.exe",
@@ -195,17 +198,42 @@ foreach ($artifact in $artifacts) {
 $checksumLines | Set-Content -LiteralPath $checksumsPath -Encoding UTF8
 
 $manifestPath = Join-Path $resolvedOutputDir "desktop-update-manifest.json"
+$resolvedRolloutRing = if ($RolloutRing -eq "auto") {
+    if ($Channel -eq "stable") { "stable" } else { "canary" }
+} else {
+    $RolloutRing
+}
+
 $manifest = [pscustomobject]@{
     app_id = "goal-ops-console"
     name = $Name
     version = $Version
     channel = $Channel
+    rollout_ring = $resolvedRolloutRing
     published_at_utc = (Get-Date).ToUniversalTime().ToString("o")
     artifacts = $artifacts
 }
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
+$resolvedRingsManifestPath = if ([string]::IsNullOrWhiteSpace($RingsManifestPath)) {
+    Join-Path $resolvedOutputDir "desktop-rings.json"
+} elseif ([System.IO.Path]::IsPathRooted($RingsManifestPath)) {
+    $RingsManifestPath
+} else {
+    Join-Path $ProjectRoot $RingsManifestPath
+}
+$ringsScriptPath = Join-Path $ProjectRoot "scripts/manage-desktop-rings.ps1"
+if (Test-Path -LiteralPath $ringsScriptPath) {
+    & $ringsScriptPath `
+        -ManifestPath $resolvedRingsManifestPath `
+        -Action promote `
+        -Ring $resolvedRolloutRing `
+        -Version $Version `
+        -ReleaseManifestPath $manifestPath | Out-Null
+}
+
 Write-Host "Desktop release package ready." -ForegroundColor Green
 Write-Host "Output directory: $resolvedOutputDir" -ForegroundColor Green
 Write-Host "Manifest: $manifestPath" -ForegroundColor Green
+Write-Host "Rings: $resolvedRingsManifestPath" -ForegroundColor Green
 Write-Host "Checksums: $checksumsPath" -ForegroundColor Green

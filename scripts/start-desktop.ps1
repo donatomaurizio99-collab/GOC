@@ -10,7 +10,11 @@ param(
     [string]$WindowStatePath = "",
     [string]$InstanceLockPath = "",
     [switch]$AllowMultipleInstances,
-    [string]$DiagnosticsDir = ""
+    [string]$DiagnosticsDir = "",
+    [string]$CrashStatePath = "",
+    [switch]$AllowCrashLoop,
+    [int]$CrashLoopMaxCrashes = 0,
+    [int]$CrashLoopWindowSeconds = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +60,18 @@ if (-not [string]::IsNullOrWhiteSpace($InstanceLockPath)) {
 }
 if ($AllowMultipleInstances) {
     $args += "--allow-multiple-instances"
+}
+if (-not [string]::IsNullOrWhiteSpace($CrashStatePath)) {
+    $args += @("--crash-state-path", $CrashStatePath)
+}
+if ($AllowCrashLoop) {
+    $args += "--allow-crash-loop"
+}
+if ($CrashLoopMaxCrashes -gt 0) {
+    $args += @("--crash-loop-max-crashes", $CrashLoopMaxCrashes)
+}
+if ($CrashLoopWindowSeconds -gt 0) {
+    $args += @("--crash-loop-window-seconds", $CrashLoopWindowSeconds)
 }
 
 python @args

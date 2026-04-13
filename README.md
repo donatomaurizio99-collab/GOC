@@ -75,6 +75,9 @@ Optional startup parameters:
 .\scripts\start-desktop.ps1 -WindowStatePath ".\custom-window-state.json"
 .\scripts\start-desktop.ps1 -InstanceLockPath ".\goal-ops-desktop.lock"
 .\scripts\start-desktop.ps1 -AllowMultipleInstances
+.\scripts\start-desktop.ps1 -CrashStatePath ".\desktop-crash-state.json"
+.\scripts\start-desktop.ps1 -CrashLoopMaxCrashes 3 -CrashLoopWindowSeconds 600
+.\scripts\start-desktop.ps1 -AllowCrashLoop
 ```
 
 Behavior:
@@ -82,6 +85,7 @@ Behavior:
 - opens the same dashboard UI in a native window via `pywebview`
 - remembers window size/position across launches (disable with `-NoWindowState`)
 - enforces single-instance lock by default (disable with `-AllowMultipleInstances`)
+- blocks startup after repeated crash loops (bypass once with `-AllowCrashLoop`)
 - writes crash reports to `%USERPROFILE%\.goal_ops_console\diagnostics` (or `GOAL_OPS_DIAGNOSTICS_DIR`)
 - shuts down the embedded server when the desktop window closes
 
@@ -168,7 +172,28 @@ Distribution bundle outputs (via `package-desktop-release.ps1`):
 - `GoalOpsConsole-onefile-<version>.exe`
 - `GoalOpsConsole-install-<version>.ps1` (portable installer script)
 - `desktop-update-manifest.json` (auto-update feed preparation)
+- `desktop-rings.json` (ring targets + rollback pointer metadata)
 - `SHA256SUMS.txt`
+
+Optional rollout-ring target override during packaging:
+
+```powershell
+.\scripts\package-desktop-release.ps1 `
+  -Version "0.2.3" `
+  -Channel stable `
+  -RolloutRing stable `
+  -Mode both `
+  -OutputDir artifacts
+```
+
+Manage ring promotion / rollback without rebuilding binaries:
+
+```powershell
+.\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action show
+.\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action promote -Ring canary -Version "0.2.4"
+.\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action promote -Ring stable -Version "0.2.3"
+.\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action rollback -Ring stable
+```
 
 Note:
 - `pywebview` on Windows requires WebView2 runtime.
@@ -540,6 +565,7 @@ If a value is rejected:
 - [start-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/start-desktop.ps1)
 - [build-desktop.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/build-desktop.ps1)
 - [package-desktop-release.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/package-desktop-release.ps1)
+- [manage-desktop-rings.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/manage-desktop-rings.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
