@@ -404,11 +404,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + migration state + migration rehearsal on S/M/L DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -423,6 +423,13 @@ Standalone migration rehearsal drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000
+```
+
+Standalone auto-rollback policy check (live service):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Standalone SLO alert check:
@@ -613,6 +620,8 @@ If a value is rejected:
 - [release-gate-probe.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-probe.py)
 - [slo-alert-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/slo-alert-check.py)
 - [run-slo-alert-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-slo-alert-check.ps1)
+- [auto-rollback-policy.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/auto-rollback-policy.py)
+- [run-auto-rollback-policy.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-auto-rollback-policy.ps1)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)

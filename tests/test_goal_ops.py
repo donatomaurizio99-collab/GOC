@@ -1669,3 +1669,58 @@ def test_75_migration_rehearsal_reports_success():
         assert scenario["checks"]["restore_within_threshold"] is True
         assert scenario["checks"]["migration_within_threshold"] is True
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_76_auto_rollback_policy_triggers_and_executes_rollback():
+    workspace = _local_test_dir("pytest-auto-rollback-policy")
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "auto-rollback-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "critical,critical,critical,critical",
+        "--critical-window-seconds",
+        "2",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["rollback"]["attempted"] is True
+    assert payload["rollback"]["executed"] is True
+    assert payload["decision"]["recommended_action"] == "rollback_executed"
+    stable_pre = payload["rollback"]["pre_state"]["rings"]["stable"]
+    stable_post = payload["rollback"]["post_state"]["rings"]["stable"]
+    assert stable_pre["version"] == "0.0.2"
+    assert stable_pre["rollback_version"] == "0.0.1"
+    assert stable_post["version"] == "0.0.1"
+    assert stable_post["rollback_version"] == "0.0.2"
+    shutil.rmtree(workspace, ignore_errors=True)
