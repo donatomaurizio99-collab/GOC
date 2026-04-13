@@ -1858,3 +1858,56 @@ def test_80_migration_rehearsal_supports_optional_xlarge_scenario():
     assert payload["success"] is True
     assert scenario_names == ["small", "medium", "large", "xlarge"]
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_81_workflow_lock_resilience_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "workflow-lock-resilience-drill.py"),
+        "--lock-failures",
+        "5",
+        "--timeout-seconds",
+        "12",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["run"]["status"] == "succeeded"
+    assert payload["lock_conflict_metric"] >= payload["requested_lock_failures"]
+    assert payload["worker_status"]["is_running"] is True
+
+
+def test_82_workflow_soak_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "workflow-soak-drill.py"),
+        "--run-count",
+        "30",
+        "--timeout-seconds",
+        "25",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["run_count"] == 30
+    assert payload["status_counts"]["succeeded"] == 30
+    assert payload["readiness"]["ready"] is True
+    assert payload["slo_status"] == "ok"
