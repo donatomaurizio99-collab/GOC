@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -19,8 +19,15 @@ This gate covers:
 - `GET /system/slo` (`status` must be `ok`)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
+- migration rehearsal across small/medium/large DB copies with explicit backup/restore/migration runtime thresholds
 - backup/restore drill with row-count and integrity verification on restored DB
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
+
+Manual migration rehearsal invocation (same thresholds as gate defaults):
+
+```powershell
+.\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000
+```
 
 Verify before release:
 - CI checks green:
