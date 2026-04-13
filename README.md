@@ -403,11 +403,18 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + migration state):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + migration state + backup/restore drill):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill
+```
+
+Standalone backup/restore drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-backup-restore-drill.ps1
 ```
 
 Current result during implementation:
@@ -582,5 +589,7 @@ If a value is rejected:
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [release-gate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate.ps1)
 - [release-gate-probe.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-probe.py)
+- [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
+- [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)
