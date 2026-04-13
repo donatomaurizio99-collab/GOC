@@ -1755,3 +1755,66 @@ def test_77_desktop_update_safety_drill_reports_success():
     assert payload["cases"]["tampered_hash_blocked"]["ok"] is True
     assert payload["cases"]["fallback_after_copy_failure"]["ok"] is True
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_78_recover_interrupted_runs_marks_running_status_failed(client):
+    services = client.app.state.services
+    services.workflow_catalog.stop_worker()
+
+    run_id = new_id()
+    created_at = now_utc()
+    services.db.execute(
+        """INSERT INTO workflow_runs
+           (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+            input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+           VALUES (?, ?, 'running', ?, ?, NULL, '{}', NULL, ?, NULL, ?, ?)""",
+        run_id,
+        "maintenance.retention_cleanup",
+        "startup-recovery-test",
+        f"workflow:maintenance.retention_cleanup:{run_id[:8]}",
+        created_at,
+        created_at,
+        created_at,
+    )
+
+    recovered = services.workflow_catalog.recover_interrupted_runs(max_age_seconds=0, limit=10)
+    run = client.get(f"/workflows/runs/{run_id}").json()["run"]
+
+    assert recovered["recovered_count"] == 1
+    assert recovered["run_ids"] == [run_id]
+    assert run["status"] == "failed"
+    assert run["result_payload"]["error_type"] == "ProcessAbortRecovery"
+
+    services.workflow_catalog.start_worker()
+
+
+def test_79_recovery_hard_abort_drill_reports_success():
+    workspace = _local_test_dir("pytest-recovery-hard-abort-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "recovery-hard-abort-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["recovery"]["status_before_abort"] == "running"
+    assert payload["recovery"]["status_after_restart"] == "failed"
+    assert payload["recovery"]["error_type_after_restart"] == "ProcessAbortRecovery"
+    assert payload["recovery"]["readiness_ready"] is True
+    shutil.rmtree(workspace, ignore_errors=True)

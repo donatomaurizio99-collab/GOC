@@ -50,6 +50,7 @@ class WorkflowCatalog:
         run_timeout_seconds: int = 300,
         reaper_batch_size: int = 200,
         worker_poll_interval_seconds: float = 0.5,
+        startup_recovery_max_age_seconds: int = 0,
         observability: "ObservabilityService | None" = None,
     ):
         self.db = db
@@ -58,6 +59,7 @@ class WorkflowCatalog:
         self.run_timeout_seconds = max(0, int(run_timeout_seconds))
         self.reaper_batch_size = max(1, int(reaper_batch_size))
         self.worker_poll_interval_seconds = max(0.05, float(worker_poll_interval_seconds))
+        self.startup_recovery_max_age_seconds = max(0, int(startup_recovery_max_age_seconds))
         self.observability = observability
         self.handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "scheduler.age_queue": self._run_scheduler_age_queue,
@@ -69,6 +71,14 @@ class WorkflowCatalog:
         self._worker_wakeup = threading.Event()
         self._worker_lock = threading.Lock()
         self._worker_thread: threading.Thread | None = None
+        self._startup_recovery_state: dict[str, Any] = {
+            "executed": False,
+            "recovered_count": 0,
+            "run_ids": [],
+            "error": None,
+            "at_utc": None,
+            "max_age_seconds": self.startup_recovery_max_age_seconds,
+        }
 
         self._seed_default_workflows()
 
@@ -76,6 +86,26 @@ class WorkflowCatalog:
         with self._worker_lock:
             if self._worker_thread is not None and self._worker_thread.is_alive():
                 return
+            startup_state: dict[str, Any] = {
+                "executed": True,
+                "recovered_count": 0,
+                "run_ids": [],
+                "error": None,
+                "at_utc": now_utc(),
+                "max_age_seconds": self.startup_recovery_max_age_seconds,
+            }
+            try:
+                recovered = self.recover_interrupted_runs(
+                    max_age_seconds=self.startup_recovery_max_age_seconds,
+                    limit=self.reaper_batch_size,
+                )
+                startup_state["recovered_count"] = int(recovered["recovered_count"])
+                startup_state["run_ids"] = list(recovered["run_ids"])
+            except Exception as exc:
+                startup_state["error"] = str(exc)
+                self._metric("workflows.startup_recovery.errors")
+            self._startup_recovery_state = startup_state
+
             self._worker_stop.clear()
             self._worker_wakeup.set()
             self._worker_thread = threading.Thread(
@@ -158,6 +188,7 @@ class WorkflowCatalog:
             "stop_requested": self._worker_stop.is_set(),
             "queued_runs": queued_runs,
             "running_runs": running_runs,
+            "startup_recovery": dict(self._startup_recovery_state),
         }
 
     def list_runs(self, *, limit: int = 100, workflow_id: str | None = None) -> list[dict[str, Any]]:
@@ -415,6 +446,84 @@ class WorkflowCatalog:
             if run_ids:
                 self._metric("workflows.runs.timed_out", delta=len(run_ids), tx=tx)
         return {"reaped_count": len(run_ids), "run_ids": run_ids}
+
+    def recover_interrupted_runs(self, *, max_age_seconds: int, limit: int) -> dict[str, Any]:
+        safe_limit = max(1, min(500, int(limit)))
+        safe_max_age = max(0, int(max_age_seconds))
+        rows = self.db.fetch_all(
+            """SELECT run_id, workflow_id, requested_by, correlation_id, started_at
+               FROM workflow_runs
+               WHERE status = 'running'
+               AND (
+                   started_at IS NULL
+                   OR started_at <= datetime('now', ? || ' seconds')
+               )
+               ORDER BY COALESCE(started_at, created_at) ASC
+               LIMIT ?""",
+            f"-{safe_max_age}",
+            safe_limit,
+        )
+        if not rows:
+            return {"recovered_count": 0, "run_ids": []}
+
+        run_ids: list[str] = []
+        with self.db.transaction() as tx:
+            for row in rows:
+                run_id = str(row["run_id"])
+                finished_at = now_utc()
+                updated = tx.execute(
+                    """UPDATE workflow_runs
+                       SET status = 'failed',
+                           result_payload = ?,
+                           finished_at = ?,
+                           updated_at = ?
+                       WHERE run_id = ? AND status = 'running'""",
+                    self._json_dump(
+                        {
+                            "error_type": "ProcessAbortRecovery",
+                            "error": (
+                                "Recovered interrupted workflow run during startup "
+                                "after previous process termination."
+                            ),
+                            "max_age_seconds": safe_max_age,
+                        }
+                    ),
+                    finished_at,
+                    finished_at,
+                    run_id,
+                )
+                if updated == 0:
+                    continue
+                run_ids.append(run_id)
+                self._safe_record_event(
+                    "workflow.run.recovered_after_abort",
+                    run_id,
+                    str(row["correlation_id"]),
+                    {
+                        "workflow_id": row["workflow_id"],
+                        "requested_by": row["requested_by"],
+                        "started_at": row["started_at"],
+                        "max_age_seconds": safe_max_age,
+                    },
+                    tx=tx,
+                )
+                self._record_audit(
+                    tx,
+                    action="workflow.startup_recovery",
+                    actor="system",
+                    status="error",
+                    workflow_id=str(row["workflow_id"]),
+                    correlation_id=str(row["correlation_id"]),
+                    details={
+                        "run_id": run_id,
+                        "max_age_seconds": safe_max_age,
+                        "started_at": row["started_at"],
+                    },
+                )
+
+            if run_ids:
+                self._metric("workflows.runs.recovered_after_abort", delta=len(run_ids), tx=tx)
+        return {"recovered_count": len(run_ids), "run_ids": run_ids}
 
     def _worker_loop(self) -> None:
         while not self._worker_stop.is_set():

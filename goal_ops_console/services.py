@@ -71,6 +71,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         run_timeout_seconds=app_settings.workflow_run_timeout_seconds,
         reaper_batch_size=app_settings.workflow_reaper_batch_size,
         worker_poll_interval_seconds=app_settings.workflow_worker_poll_interval_seconds,
+        startup_recovery_max_age_seconds=app_settings.workflow_startup_recovery_max_age_seconds,
         observability=observability,
     )
     return AppServices(
