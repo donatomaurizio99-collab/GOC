@@ -5,6 +5,7 @@ const SECTION_IDS = [
   "goals-section",
   "tasks-section",
   "operator-section",
+  "workflows-section",
   "events-section",
   "trace-section",
   "audit-section",
@@ -43,6 +44,8 @@ let jumpScrollScheduled = false;
 const viewCache = {
   goals: [],
   tasks: [],
+  workflows: [],
+  workflowRuns: [],
   events: [],
   auditEntries: [],
   faultSummary: {},
@@ -238,6 +241,7 @@ function setAutoRefresh(enabled) {
 function rerenderFilteredViews() {
   renderGoals(viewCache.goals);
   renderTasks(viewCache.tasks);
+  renderWorkflows(viewCache.workflows, viewCache.workflowRuns);
   renderEvents(viewCache.events);
   renderAudit(viewCache.auditEntries);
   renderFaults(viewCache.faultSummary, viewCache.faultEntries);
@@ -737,11 +741,130 @@ function renderQueue(goals) {
   </table></div>`;
 }
 
+function renderWorkflows(workflows, runs) {
+  const workflowContainer = document.getElementById("workflows-table");
+  const runsContainer = document.getElementById("workflow-runs-table");
+  const workflowSelect = document.getElementById("workflow-select");
+  if (!workflowContainer || !runsContainer || !workflowSelect) {
+    return;
+  }
+
+  const selectableWorkflows = workflows.filter((item) => item.is_enabled);
+  const selectedBefore = workflowSelect.value;
+  workflowSelect.innerHTML = `
+    <option value="">Select workflow</option>
+    ${selectableWorkflows.map((item) => `<option value="${item.workflow_id}">${item.name}</option>`).join("")}
+  `;
+  if (selectedBefore && selectableWorkflows.some((item) => item.workflow_id === selectedBefore)) {
+    workflowSelect.value = selectedBefore;
+  } else if (!selectedBefore && selectableWorkflows.length) {
+    workflowSelect.value = selectableWorkflows[0].workflow_id;
+  }
+
+  const filteredWorkflows = filterRows(workflows, (item) => [
+    item.workflow_id,
+    item.name,
+    item.description,
+    item.entrypoint,
+    item.last_run_at,
+  ]);
+  workflowContainer.innerHTML = filteredWorkflows.length
+    ? `<div class="table-scroll"><table>
+        <thead>
+          <tr>
+            <th>Workflow</th>
+            <th>Description</th>
+            <th>Entrypoint</th>
+            <th>Runs</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filteredWorkflows.map((item) => `
+            <tr>
+              <td>
+                <div>${item.name}</div>
+                <div class="meta">${item.workflow_id}</div>
+              </td>
+              <td>${item.description || "-"}</td>
+              <td><span class="meta">${item.entrypoint}</span></td>
+              <td>
+                <div>${item.run_count || 0}</div>
+                <div class="meta">${item.last_run_at || "never"}</div>
+              </td>
+              <td>
+                <div class="actions">
+                  <button type="button" class="secondary" data-workflow-start="${item.workflow_id}" ${item.is_enabled ? "" : "disabled"}>Start</button>
+                </div>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>`
+    : `<div class="meta">${filteredEmptyMessage("No workflows available.")}</div>`;
+
+  const filteredRuns = filterRows(runs, (run) => [
+    run.run_id,
+    run.workflow_id,
+    run.workflow_name,
+    run.status,
+    run.requested_by,
+    run.idempotency_key,
+    run.correlation_id,
+    JSON.stringify(run.result_payload || {}),
+  ]);
+  runsContainer.innerHTML = filteredRuns.length
+    ? `<div class="table-scroll"><table>
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Workflow</th>
+            <th>Status</th>
+            <th>Requested By</th>
+            <th>Result</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filteredRuns.map((run) => `
+            <tr>
+              <td>${run.started_at}</td>
+              <td>
+                <div>${run.workflow_name}</div>
+                <div class="meta">${run.workflow_id}</div>
+              </td>
+              <td><span class="pill ${stateClass(run.status)}">${run.status}</span></td>
+              <td>
+                <div>${run.requested_by}</div>
+                <div class="meta">${run.run_id}</div>
+                <div class="meta">${run.idempotency_key || "no idempotency key"}</div>
+              </td>
+              <td><pre>${JSON.stringify(run.result_payload || {}, null, 2)}</pre></td>
+              <td>
+                ${["queued", "running"].includes(run.status)
+                  ? `<button type="button" class="secondary" data-workflow-cancel="${run.run_id}">Cancel</button>`
+                  : `<span class="meta">-</span>`}
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>`
+    : `<div class="meta">${filteredEmptyMessage("No workflow runs yet.")}</div>`;
+}
+
 async function refreshGoals() {
   const goals = await api("/goals");
   viewCache.goals = goals;
   renderGoals(viewCache.goals);
   updateSelectedGoalLabel();
+}
+
+async function refreshWorkflows() {
+  const [workflowPayload, runPayload] = await Promise.all([
+    api("/workflows"),
+    api("/workflows/runs?limit=100"),
+  ]);
+  viewCache.workflows = workflowPayload.workflows || [];
+  viewCache.workflowRuns = runPayload.runs || [];
+  renderWorkflows(viewCache.workflows, viewCache.workflowRuns);
 }
 
 async function refreshQueue() {
@@ -854,6 +977,7 @@ async function refreshAll() {
   await Promise.all([
     refreshGoals(),
     refreshTasks(),
+    refreshWorkflows(),
     refreshEvents(),
     refreshFlowTrace(),
     refreshAudit(),
@@ -873,6 +997,7 @@ function startAutoRefreshLoop() {
     }
     refreshGoals().catch(() => {});
     refreshTasks().catch(() => {});
+    refreshWorkflows().catch(() => {});
     refreshEvents().catch(() => {});
     refreshFlowTrace().catch(() => {});
     refreshAudit().catch(() => {});
@@ -911,8 +1036,83 @@ async function runOperatorAction(action) {
       + `event_processing=${result.event_processing_deleted}, `
       + `failure_log=${result.failure_log_deleted}.`
     );
+  } else if (action === "diagnostics") {
+    result = await api("/system/diagnostics", { method: "POST" });
+    document.getElementById("system-feedback").textContent = (
+      `Diagnostics snapshot exported to ${result.file_path}.`
+    );
   }
   await refreshAll();
+}
+
+function parseWorkflowPayload(text) {
+  if (!text.trim()) {
+    return {};
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error("Workflow payload must be valid JSON.");
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error("Workflow payload must be a JSON object.");
+  }
+  return payload;
+}
+
+async function runWorkflowStart(workflowId) {
+  if (!workflowId) {
+    throw new Error("Select a workflow first.");
+  }
+  const requestedBy = document.getElementById("workflow-requested-by").value.trim() || "operator";
+  const idempotencyKey = document.getElementById("workflow-idempotency-key").value.trim();
+  const payloadText = document.getElementById("workflow-payload").value;
+  const payload = parseWorkflowPayload(payloadText);
+  const response = await api(`/workflows/${encodeURIComponent(workflowId)}/start`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: JSON.stringify({
+      requested_by: requestedBy,
+      payload,
+    }),
+  });
+  const run = response.run;
+  const replayNote = run.idempotency_replay ? " (idempotency replay)" : "";
+  const reaperNote = run.stale_runs_reaped
+    ? ` Reaper closed ${run.stale_runs_reaped} stale runs before execution.`
+    : "";
+  const queuedNote = run.status === "queued" ? " Run is queued and will execute asynchronously." : "";
+  document.getElementById("system-feedback").textContent = (
+    `Workflow ${run.workflow_name} accepted with status ${run.status}${replayNote}.${queuedNote}${reaperNote}`
+  );
+  await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
+}
+
+async function runWorkflowReaper() {
+  const response = await api("/workflows/runs/reap", { method: "POST" });
+  document.getElementById("system-feedback").textContent = (
+    `Workflow reaper marked ${response.reaped_count} stale runs as timed_out.`
+  );
+  await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
+}
+
+async function runWorkflowCancel(runId) {
+  const response = await api(`/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({
+      requested_by: "operator",
+      reason: "Cancelled from dashboard",
+    }),
+  });
+  const run = response.run;
+  document.getElementById("system-feedback").textContent = (
+    `Workflow run ${run.run_id} is now ${run.status}.`
+  );
+  await Promise.all([refreshWorkflows(), refreshHealth(), refreshEvents()]);
 }
 
 async function runFaultAction(action, failureId) {
@@ -1050,6 +1250,26 @@ document.getElementById("task-form").addEventListener("submit", async (event) =>
   }
 });
 
+document.getElementById("workflow-start-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("workflow-error", null);
+  const workflowId = document.getElementById("workflow-select").value.trim();
+  try {
+    await runWorkflowStart(workflowId);
+  } catch (error) {
+    showError("workflow-error", error);
+  }
+});
+
+document.getElementById("workflow-reap-runs").addEventListener("click", async () => {
+  try {
+    showError("workflow-error", null);
+    await runWorkflowReaper();
+  } catch (error) {
+    showError("workflow-error", error);
+  }
+});
+
 document.getElementById("event-filter-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   await refreshEvents();
@@ -1081,6 +1301,7 @@ document.getElementById("flow-trace-form").addEventListener("submit", async (eve
 
 document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
+document.getElementById("refresh-workflows").addEventListener("click", refreshWorkflows);
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
 document.getElementById("refresh-flow-trace").addEventListener("click", refreshFlowTrace);
 document.getElementById("refresh-audit").addEventListener("click", refreshAudit);
@@ -1173,6 +1394,8 @@ document.addEventListener("click", async (event) => {
   const taskId = event.target.dataset.taskId;
   const faultAction = event.target.dataset.faultAction;
   const failureId = event.target.dataset.failureId;
+  const workflowStart = event.target.dataset.workflowStart;
+  const workflowCancel = event.target.dataset.workflowCancel;
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
   const operatorAction = event.target.dataset.operatorAction;
@@ -1190,6 +1413,15 @@ document.addEventListener("click", async (event) => {
 
     if (faultAction && failureId) {
       await runFaultAction(faultAction, failureId);
+    }
+
+    if (workflowStart) {
+      document.getElementById("workflow-select").value = workflowStart;
+      await runWorkflowStart(workflowStart);
+    }
+
+    if (workflowCancel) {
+      await runWorkflowCancel(workflowCancel);
     }
 
     if (goalAction && goalId) {
@@ -1243,7 +1475,13 @@ document.addEventListener("click", async (event) => {
       updateSelectedGoalLabel();
     }
   } catch (error) {
-    const target = operatorAction || faultAction ? "system-feedback" : goalAction ? "goal-error" : "task-error";
+    const target = operatorAction || faultAction
+      ? "system-feedback"
+      : workflowStart || workflowCancel
+        ? "workflow-error"
+        : goalAction
+          ? "goal-error"
+          : "task-error";
     showError(target, error);
   }
 });

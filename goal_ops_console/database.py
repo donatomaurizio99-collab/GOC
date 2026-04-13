@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS skill_metrics (
   updated_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version    INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS goal_queue (
   goal_id        TEXT PRIMARY KEY,
   urgency        REAL NOT NULL DEFAULT 0.0,
@@ -163,6 +169,47 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_active_version
 ON learnings(parent_learning_id)
 WHERE status = 'promoted';
 
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+  workflow_id    TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  description    TEXT,
+  entrypoint     TEXT NOT NULL,
+  is_enabled     INTEGER NOT NULL DEFAULT 1,
+  version        INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definitions_enabled
+ON workflow_definitions(is_enabled, name);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  run_id         TEXT PRIMARY KEY,
+  workflow_id    TEXT NOT NULL,
+  status         TEXT NOT NULL
+                 CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled')),
+  requested_by   TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  idempotency_key TEXT,
+  input_payload  TEXT,
+  result_payload TEXT,
+  started_at     TEXT NOT NULL,
+  finished_at    TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_definitions(workflow_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_created_at
+ON workflow_runs(workflow_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at
+ON workflow_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status_created_at
+ON workflow_runs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_correlation_id
+ON workflow_runs(correlation_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency
+ON workflow_runs(workflow_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS audit_log (
   audit_id        TEXT PRIMARY KEY,
   action          TEXT NOT NULL,
@@ -188,6 +235,68 @@ CREATE INDEX IF NOT EXISTS idx_metrics_updated_at ON metrics_counters(updated_at
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 LOCK_RETRY_ATTEMPTS = 8
 LOCK_RETRY_BASE_SECONDS = 0.01
+MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (
+        1,
+        """
+PRAGMA foreign_keys = OFF;
+BEGIN IMMEDIATE;
+ALTER TABLE workflow_runs RENAME TO workflow_runs_legacy;
+CREATE TABLE workflow_runs (
+  run_id          TEXT PRIMARY KEY,
+  workflow_id     TEXT NOT NULL,
+  status          TEXT NOT NULL
+                  CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled')),
+  requested_by    TEXT NOT NULL,
+  correlation_id  TEXT NOT NULL,
+  idempotency_key TEXT,
+  input_payload   TEXT,
+  result_payload  TEXT,
+  started_at      TEXT NOT NULL,
+  finished_at     TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  FOREIGN KEY(workflow_id) REFERENCES workflow_definitions(workflow_id)
+);
+INSERT INTO workflow_runs
+  (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+   input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+SELECT run_id,
+       workflow_id,
+       CASE
+         WHEN status IN ('queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled')
+           THEN status
+         ELSE 'failed'
+       END,
+       requested_by,
+       correlation_id,
+       NULL,
+       input_payload,
+       result_payload,
+       started_at,
+       finished_at,
+       created_at,
+       updated_at
+FROM workflow_runs_legacy;
+DROP TABLE workflow_runs_legacy;
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_created_at
+ON workflow_runs(workflow_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at
+ON workflow_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status_created_at
+ON workflow_runs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_correlation_id
+ON workflow_runs(correlation_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency
+ON workflow_runs(workflow_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (1, 'workflow_runs_hardening', datetime('now'));
+COMMIT;
+PRAGMA foreign_keys = ON;
+""",
+    ),
+)
 T = TypeVar("T")
 
 
@@ -267,9 +376,20 @@ class Database:
         conn = self._keeper or self._connect()
         try:
             conn.executescript(SCHEMA)
+            self._apply_migrations(conn)
         finally:
             if conn is not self._keeper:
                 conn.close()
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        for version, script in MIGRATIONS:
+            row = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = ?",
+                (version,),
+            ).fetchone()
+            if row is not None:
+                continue
+            conn.executescript(script)
 
     def execute(self, sql: str, *params: object) -> int:
         def _op(conn: sqlite3.Connection) -> int:

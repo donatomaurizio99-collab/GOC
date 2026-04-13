@@ -7,7 +7,10 @@ param(
     [int]$MinHeight = 720,
     [switch]$Maximized,
     [switch]$NoWindowState,
-    [string]$WindowStatePath = ""
+    [string]$WindowStatePath = "",
+    [string]$InstanceLockPath = "",
+    [switch]$AllowMultipleInstances,
+    [string]$DiagnosticsDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +19,9 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 $env:GOAL_OPS_DATABASE_URL = $DatabaseUrl
+if (-not [string]::IsNullOrWhiteSpace($DiagnosticsDir)) {
+    $env:GOAL_OPS_DIAGNOSTICS_DIR = $DiagnosticsDir
+}
 
 Write-Host "Starting Goal Ops Console desktop shell from $ProjectRoot" -ForegroundColor Cyan
 Write-Host "Database: $DatabaseUrl" -ForegroundColor Cyan
@@ -44,6 +50,12 @@ if ($NoWindowState) {
 }
 if (-not [string]::IsNullOrWhiteSpace($WindowStatePath)) {
     $args += @("--window-state-path", $WindowStatePath)
+}
+if (-not [string]::IsNullOrWhiteSpace($InstanceLockPath)) {
+    $args += @("--instance-lock-path", $InstanceLockPath)
+}
+if ($AllowMultipleInstances) {
+    $args += "--allow-multiple-instances"
 }
 
 python @args

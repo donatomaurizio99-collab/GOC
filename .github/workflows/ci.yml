@@ -42,3 +42,28 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q
+
+  desktop-smoke-windows:
+    name: Desktop Smoke (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Run desktop smoke
+        shell: pwsh
+        run: |
+          python .\scripts\desktop-smoke.py

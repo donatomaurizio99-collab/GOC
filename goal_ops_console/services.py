@@ -11,6 +11,7 @@ from goal_ops_console.observability import ObservabilityService
 from goal_ops_console.scheduler import SchedulerService
 from goal_ops_console.state_manager import StateManager
 from goal_ops_console.stubs import PermissionManager, Planner, QdrantClientStub
+from goal_ops_console.workflow_catalog import WorkflowCatalog
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class AppServices:
     execution_layer: ExecutionLayer
     failure_intelligence: FailureIntelligence
     scheduler: SchedulerService
+    workflow_catalog: WorkflowCatalog
     qdrant: QdrantClientStub
     planner: Planner
     permission_manager: PermissionManager
@@ -59,6 +61,15 @@ def build_services(settings: Settings | None = None) -> AppServices:
         observability=observability,
     )
     scheduler = SchedulerService(db, state_manager)
+    workflow_catalog = WorkflowCatalog(
+        db,
+        event_bus,
+        scheduler,
+        run_timeout_seconds=app_settings.workflow_run_timeout_seconds,
+        reaper_batch_size=app_settings.workflow_reaper_batch_size,
+        worker_poll_interval_seconds=app_settings.workflow_worker_poll_interval_seconds,
+        observability=observability,
+    )
     return AppServices(
         settings=app_settings,
         db=db,
@@ -68,6 +79,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         execution_layer=execution_layer,
         failure_intelligence=failure_intelligence,
         scheduler=scheduler,
+        workflow_catalog=workflow_catalog,
         qdrant=QdrantClientStub(),
         planner=Planner(),
         permission_manager=PermissionManager(),

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+import shutil
 import threading
+import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +31,14 @@ def create_active_goal(client, title: str = "Goal") -> dict:
 def create_task(client, goal_id: str, title: str = "Task") -> dict:
     response = client.post("/tasks", json={"goal_id": goal_id, "title": title})
     return response.json()
+
+
+def _local_test_dir(prefix: str) -> Path:
+    base = Path(".tmp") / prefix
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / f"case-{time.time_ns()}"
+    target.mkdir(parents=True, exist_ok=False)
+    return target
 
 
 def test_01_goal_creation_inserts_goal_and_queue_atomically(client):
@@ -1016,3 +1029,355 @@ def test_47_fault_resolve_bulk_applies_filtered_resolution_and_tracks_skip(clien
 
     audit_entries = client.get("/system/audit?action=fault.remediation.resolve_bulk").json()["entries"]
     assert any(item["status"] == "success" for item in audit_entries)
+
+
+def test_48_workflow_catalog_lists_seeded_definitions(client):
+    response = client.get("/workflows")
+    assert response.status_code == 200
+    workflows = response.json()["workflows"]
+    workflow_ids = {item["workflow_id"] for item in workflows}
+    assert "scheduler.age_queue" in workflow_ids
+    assert "scheduler.pick_next_goal" in workflow_ids
+    assert "maintenance.retention_cleanup" in workflow_ids
+    assert all(item["is_enabled"] is True for item in workflows)
+
+
+def _wait_for_run_in_states(
+    client,
+    run_id: str,
+    states: set[str],
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict:
+    deadline = time.time() + timeout_seconds
+    latest: dict | None = None
+    while time.time() < deadline:
+        response = client.get(f"/workflows/runs/{run_id}")
+        assert response.status_code == 200
+        latest = response.json()["run"]
+        if latest["status"] in states:
+            return latest
+        time.sleep(0.02)
+    raise AssertionError(f"Run {run_id} did not reach {states}. Last snapshot: {latest}")
+
+
+def test_49_workflow_start_queues_and_worker_completes_run(client):
+    response = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"source": "test"}},
+    )
+    assert response.status_code == 201
+    queued_run = response.json()["run"]
+    assert queued_run["workflow_id"] == "maintenance.retention_cleanup"
+    assert queued_run["status"] in {"queued", "running", "succeeded"}
+    assert queued_run["requested_by"] == "workflow-test"
+
+    run = _wait_for_run_in_states(
+        client,
+        queued_run["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+    assert run["status"] == "succeeded"
+    assert run["result_payload"]["events_deleted"] >= 0
+
+    runs = client.get("/workflows/runs").json()["runs"]
+    assert any(item["run_id"] == run["run_id"] for item in runs)
+
+    events = client.get(f"/events?entity_id={run['run_id']}").json()
+    event_types = {item["event_type"] for item in events}
+    assert "workflow.run.queued" in event_types
+    assert "workflow.run.started" in event_types
+    assert "workflow.run.succeeded" in event_types
+
+
+def test_50_workflow_start_returns_404_for_unknown_definition(client):
+    response = client.post(
+        "/workflows/does.not.exist/start",
+        json={"requested_by": "workflow-test", "payload": {}},
+    )
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_51_disabled_workflow_cannot_be_started(client):
+    services = client.app.state.services
+    services.db.execute(
+        "UPDATE workflow_definitions SET is_enabled = 0 WHERE workflow_id = ?",
+        "scheduler.age_queue",
+    )
+    response = client.post(
+        "/workflows/scheduler.age_queue/start",
+        json={"requested_by": "workflow-test", "payload": {}},
+    )
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_52_workflow_run_listing_supports_workflow_filter(client):
+    first = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"run": 1}},
+    )
+    second = client.post(
+        "/workflows/scheduler.age_queue/start",
+        json={"requested_by": "workflow-test", "payload": {"run": 2}},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    _wait_for_run_in_states(
+        client,
+        first.json()["run"]["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+    _wait_for_run_in_states(
+        client,
+        second.json()["run"]["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+
+    response = client.get("/workflows/runs?workflow_id=maintenance.retention_cleanup")
+    assert response.status_code == 200
+    runs = response.json()["runs"]
+    assert runs
+    assert all(item["workflow_id"] == "maintenance.retention_cleanup" for item in runs)
+
+
+def test_53_schema_migrations_record_workflow_hardening(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 1"
+    )
+    assert row is not None
+    assert row["name"] == "workflow_runs_hardening"
+
+
+def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
+    first = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        headers={"Idempotency-Key": "workflow-start-abc"},
+        json={"requested_by": "workflow-test", "payload": {"source": "first"}},
+    )
+    second = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        headers={"Idempotency-Key": "workflow-start-abc"},
+        json={"requested_by": "workflow-test", "payload": {"source": "second"}},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_run = first.json()["run"]
+    second_run = second.json()["run"]
+    assert first_run["run_id"] == second_run["run_id"]
+    assert first_run["idempotency_replay"] is False
+    assert second_run["idempotency_replay"] is True
+    _wait_for_run_in_states(
+        client,
+        first_run["run_id"],
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+
+    count = client.app.state.services.db.fetch_scalar(
+        "SELECT COUNT(*) FROM workflow_runs WHERE workflow_id = ? AND idempotency_key = ?",
+        "maintenance.retention_cleanup",
+        "workflow-start-abc",
+    )
+    assert count == 1
+
+
+def test_55_workflow_reaper_marks_stale_runs_timed_out(client):
+    services = client.app.state.services
+    run_id = new_id()
+    workflow_id = "maintenance.retention_cleanup"
+    correlation_id = f"workflow:{workflow_id}:manual"
+    services.db.execute(
+        """INSERT INTO workflow_runs
+           (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+            input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+           VALUES (?, ?, 'running', 'operator', ?, NULL, '{}', NULL,
+                   datetime('now', '-600 seconds'), NULL, datetime('now', '-600 seconds'), datetime('now', '-600 seconds'))""",
+        run_id,
+        workflow_id,
+        correlation_id,
+    )
+
+    response = client.post("/workflows/runs/reap?timeout_seconds=60&limit=10")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reaped_count"] >= 0
+
+    row = services.db.fetch_one("SELECT status FROM workflow_runs WHERE run_id = ?", run_id)
+    assert row["status"] == "timed_out"
+
+    events = client.get(f"/events?entity_id={run_id}").json()
+    assert any(item["event_type"] == "workflow.run.timed_out" for item in events)
+
+
+def test_56_workflow_runs_status_constraint_blocks_invalid_value(services):
+    with pytest.raises(sqlite3.IntegrityError):
+        services.db.execute(
+            """INSERT INTO workflow_runs
+               (run_id, workflow_id, status, requested_by, correlation_id, idempotency_key,
+                input_payload, result_payload, started_at, finished_at, created_at, updated_at)
+               VALUES (?, ?, ?, 'operator', ?, NULL, '{}', NULL, ?, NULL, ?, ?)""",
+            new_id(),
+            "maintenance.retention_cleanup",
+            "invalid_status",
+            f"workflow:maintenance.retention_cleanup:{new_id()}",
+            now_utc(),
+            now_utc(),
+            now_utc(),
+        )
+
+
+def test_57_workflow_run_timeout_marks_run_timed_out():
+    app = create_app(Settings(database_url=":memory:", workflow_run_timeout_seconds=0))
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+
+        def slow_handler(_: dict) -> dict:
+            time.sleep(0.01)
+            return {"ok": True}
+
+        services.workflow_catalog.handlers["maintenance.retention_cleanup"] = slow_handler
+        response = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "timeout"}},
+        )
+        assert response.status_code == 201
+        run = _wait_for_run_in_states(
+            local_client,
+            response.json()["run"]["run_id"],
+            {"timed_out", "failed", "succeeded", "cancelled"},
+            timeout_seconds=3.0,
+        )
+        assert run["status"] == "timed_out"
+        assert run["result_payload"]["error_type"] == "TimeoutError"
+
+
+def test_58_workflow_runs_indexes_include_hardening_indexes(services):
+    indexes = services.db.fetch_all("PRAGMA index_list('workflow_runs')")
+    names = {row["name"] for row in indexes}
+    assert "idx_workflow_runs_status_created_at" in names
+    assert "idx_workflow_runs_correlation_id" in names
+    assert "idx_workflow_runs_idempotency" in names
+
+
+def test_59_cancel_workflow_run_while_running():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            workflow_worker_poll_interval_seconds=0.05,
+            workflow_run_timeout_seconds=5,
+        )
+    )
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_handler(_: dict) -> dict:
+            started.set()
+            release.wait(timeout=1.0)
+            return {"ok": True}
+
+        services.workflow_catalog.handlers["maintenance.retention_cleanup"] = blocking_handler
+        queued = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "cancel"}},
+        )
+        assert queued.status_code == 201
+        run_id = queued.json()["run"]["run_id"]
+        assert started.wait(timeout=1.0)
+
+        cancelled = local_client.post(
+            f"/workflows/runs/{run_id}/cancel",
+            json={"requested_by": "workflow-test", "reason": "Manual cancel"},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["run"]["status"] == "cancelled"
+
+        release.set()
+        final_run = _wait_for_run_in_states(
+            local_client,
+            run_id,
+            {"cancelled", "succeeded", "failed", "timed_out"},
+            timeout_seconds=2.0,
+        )
+        assert final_run["status"] == "cancelled"
+
+        events = local_client.get(f"/events?entity_id={run_id}").json()
+        event_types = {item["event_type"] for item in events}
+        assert "workflow.run.cancelled" in event_types
+
+
+def test_60_cancel_terminal_workflow_run_returns_409(client):
+    started = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"source": "terminal"}},
+    )
+    assert started.status_code == 201
+    run_id = started.json()["run"]["run_id"]
+    final_run = _wait_for_run_in_states(
+        client,
+        run_id,
+        {"succeeded", "failed", "timed_out", "cancelled"},
+    )
+    assert final_run["status"] == "succeeded"
+
+    cancel = client.post(
+        f"/workflows/runs/{run_id}/cancel",
+        json={"requested_by": "workflow-test", "reason": "too late"},
+    )
+    assert cancel.status_code == 409
+
+
+def test_61_system_readiness_reports_ready(client):
+    deadline = time.time() + 2.0
+    payload: dict | None = None
+    while time.time() < deadline:
+        response = client.get("/system/readiness")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["ready"]:
+            break
+        time.sleep(0.05)
+
+    assert payload is not None
+    assert payload["ready"] is True
+    assert payload["checks"]["database"]["ok"] is True
+    assert payload["checks"]["workflow_worker"]["ok"] is True
+    assert payload["checks"]["workflow_worker"]["is_running"] is True
+
+
+def test_62_system_readiness_reports_not_ready_when_worker_stopped():
+    app = create_app(Settings(database_url=":memory:"))
+    with TestClient(app) as local_client:
+        local_client.app.state.services.workflow_catalog.stop_worker()
+        response = local_client.get("/system/readiness")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ready"] is False
+        assert payload["checks"]["database"]["ok"] is True
+        assert payload["checks"]["workflow_worker"]["ok"] is False
+        assert payload["checks"]["workflow_worker"]["is_running"] is False
+
+
+def test_63_system_diagnostics_exports_snapshot():
+    diagnostics_dir = _local_test_dir("pytest-system-diagnostics")
+    try:
+        app = create_app(Settings(database_url=":memory:", diagnostics_dir=str(diagnostics_dir)))
+        with TestClient(app) as local_client:
+            response = local_client.post("/system/diagnostics")
+            assert response.status_code == 200
+            payload = response.json()
+
+            file_path = Path(payload["file_path"])
+            assert file_path.exists()
+            assert file_path.parent == diagnostics_dir
+            assert payload["ready"] is True
+
+            snapshot = json.loads(file_path.read_text(encoding="utf-8"))
+            assert snapshot["readiness"]["ready"] is True
+            assert "health" in snapshot
+            assert "recent_workflow_runs" in snapshot
+    finally:
+        shutil.rmtree(diagnostics_dir, ignore_errors=True)

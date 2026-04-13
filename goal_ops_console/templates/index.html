@@ -730,7 +730,7 @@
     <div class="command-bar" aria-label="Operator command bar">
       <div class="command-row">
         <label class="sr-only" for="global-filter">Global filter</label>
-        <input id="global-filter" placeholder="Global filter across goals, tasks, events, faults and queue (press /)">
+        <input id="global-filter" placeholder="Global filter across goals, tasks, workflows, events, faults and queue (press /)">
         <button type="button" class="secondary" id="toggle-refresh">Auto-refresh: On</button>
         <button type="button" class="secondary" id="toggle-density">Density: Comfy</button>
         <button type="button" class="secondary" id="toggle-visual-mode">Visual: Warm</button>
@@ -739,6 +739,7 @@
         <button type="button" class="jump-btn active" data-jump-target="goals-section">Goals</button>
         <button type="button" class="jump-btn" data-jump-target="tasks-section">Tasks</button>
         <button type="button" class="jump-btn" data-jump-target="operator-section">Operator</button>
+        <button type="button" class="jump-btn" data-jump-target="workflows-section">Workflows</button>
         <button type="button" class="jump-btn" data-jump-target="events-section">Events</button>
         <button type="button" class="jump-btn" data-jump-target="trace-section">Trace</button>
         <button type="button" class="jump-btn" data-jump-target="audit-section">Audit</button>
@@ -812,11 +813,38 @@
           <span class="meta">Maintenance</span>
           <div class="actions" style="margin-top:0.75rem;">
             <button type="button" data-operator-action="retention">Run Retention Cleanup</button>
+            <button type="button" class="secondary" data-operator-action="diagnostics">Export Diagnostics</button>
           </div>
         </div>
       </div>
       <div class="error" id="system-feedback" role="status" aria-live="polite"></div>
       <div id="queue-table"></div>
+    </section>
+
+    <section class="wide" id="workflows-section" data-section-anchor="workflows">
+      <h2><span>Workflow Catalog</span><button class="secondary" id="refresh-workflows">Refresh</button></h2>
+      <form id="workflow-start-form">
+        <div class="split">
+          <label class="sr-only" for="workflow-select">Workflow definition</label>
+          <select id="workflow-select" required>
+            <option value="">Select workflow</option>
+          </select>
+          <label class="sr-only" for="workflow-requested-by">Requested by</label>
+          <input id="workflow-requested-by" value="operator" placeholder="Requested by">
+        </div>
+        <div class="split">
+          <label class="sr-only" for="workflow-idempotency-key">Idempotency key</label>
+          <input id="workflow-idempotency-key" placeholder="Optional Idempotency-Key">
+          <button type="button" class="secondary" id="workflow-reap-runs">Reap Stuck Runs</button>
+        </div>
+        <label class="sr-only" for="workflow-payload">Workflow payload JSON</label>
+        <textarea id="workflow-payload" placeholder='Optional payload as JSON (example: {"note":"manual run"})'></textarea>
+        <button type="submit">Start Workflow</button>
+        <div class="error" id="workflow-error" role="status" aria-live="polite"></div>
+      </form>
+      <div id="workflows-table"></div>
+      <h3>Recent Runs</h3>
+      <div id="workflow-runs-table"></div>
     </section>
 
     <section class="wide" id="events-section" data-section-anchor="events">

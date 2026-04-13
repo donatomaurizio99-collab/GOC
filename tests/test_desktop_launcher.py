@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
+
+import pytest
 
 import goal_ops_console.desktop as desktop
 
@@ -29,6 +32,8 @@ def test_parse_args_defaults():
     assert args.min_height == 720
     assert args.maximized is False
     assert args.window_state_path is None
+    assert args.instance_lock_path is None
+    assert args.allow_multiple_instances is False
     assert args.no_window_state is False
     assert args.title == "Goal Ops Console"
     assert args.debug is False
@@ -139,11 +144,83 @@ def test_save_window_state_writes_json():
         shutil.rmtree(test_dir, ignore_errors=True)
 
 
+def test_acquire_and_release_instance_lock_roundtrip():
+    test_dir = _local_test_dir()
+    try:
+        lock_path = test_dir / "desktop.lock"
+        lock = desktop._acquire_instance_lock(lock_path)
+        payload = desktop._read_lock_payload(lock_path)
+        assert lock_path.exists()
+        assert payload is not None
+        assert payload["pid"] == lock.pid
+
+        desktop._release_instance_lock(lock)
+        if lock_path.exists():
+            released_payload = desktop._read_lock_payload(lock_path)
+            assert released_payload is not None
+            assert released_payload.get("released") is True
+            assert released_payload["pid"] == lock.pid
+        else:
+            assert lock_path.exists() is False
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_acquire_instance_lock_reclaims_stale_lock(monkeypatch):
+    test_dir = _local_test_dir()
+    try:
+        lock_path = test_dir / "desktop.lock"
+        lock_path.write_text(json.dumps({"pid": 424242, "created_at": "2026-01-01T00:00:00Z"}), encoding="utf-8")
+
+        monkeypatch.setattr(desktop, "_is_process_running", lambda _pid: False)
+        lock = desktop._acquire_instance_lock(lock_path)
+        payload = desktop._read_lock_payload(lock_path)
+
+        assert payload is not None
+        assert payload["pid"] == os.getpid()
+        desktop._release_instance_lock(lock)
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_acquire_instance_lock_rejects_active_lock(monkeypatch):
+    test_dir = _local_test_dir()
+    try:
+        lock_path = test_dir / "desktop.lock"
+        lock_path.write_text(json.dumps({"pid": 99999, "created_at": "2026-01-01T00:00:00Z"}), encoding="utf-8")
+        monkeypatch.setattr(desktop, "_is_process_running", lambda _pid: True)
+
+        with pytest.raises(RuntimeError, match="already running"):
+            desktop._acquire_instance_lock(lock_path)
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_write_crash_report_writes_json_payload():
+    test_dir = _local_test_dir()
+    try:
+        error = RuntimeError("boom")
+        report_path = desktop._write_crash_report(
+            error,
+            diagnostics_dir=test_dir,
+            context={"case": "unit"},
+        )
+        assert report_path is not None
+        assert report_path.exists()
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["error_type"] == "RuntimeError"
+        assert payload["error"] == "boom"
+        assert payload["context"]["case"] == "unit"
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
 def test_main_returns_nonzero_when_launch_fails(monkeypatch, capsys):
     def _raise(**_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(desktop, "run_desktop", _raise)
+    monkeypatch.setattr(desktop, "_write_crash_report", lambda *_args, **_kwargs: None)
     exit_code = desktop.main(["--database-url", "demo.db"])
     captured = capsys.readouterr()
 
@@ -190,6 +267,8 @@ def test_main_maps_port_zero_to_none(monkeypatch):
     assert captured_kwargs["min_height"] == 760
     assert captured_kwargs["start_maximized"] is True
     assert captured_kwargs["window_state_path"] == "demo-window-state.json"
+    assert captured_kwargs["single_instance"] is True
+    assert captured_kwargs["instance_lock_path"] is None
     assert captured_kwargs["remember_window"] is True
     assert captured_kwargs["window_title"] == "Demo"
     assert captured_kwargs["debug"] is True
@@ -219,3 +298,25 @@ def test_main_can_disable_window_state(monkeypatch):
 
     assert exit_code == 0
     assert captured_kwargs["remember_window"] is False
+
+
+def test_main_can_disable_single_instance(monkeypatch):
+    captured_kwargs = {}
+
+    def _fake_run_desktop(**kwargs):
+        captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(desktop, "run_desktop", _fake_run_desktop)
+    exit_code = desktop.main(
+        [
+            "--database-url",
+            "demo.db",
+            "--allow-multiple-instances",
+            "--instance-lock-path",
+            "custom-desktop.lock",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["single_instance"] is False
+    assert captured_kwargs["instance_lock_path"] == "custom-desktop.lock"
