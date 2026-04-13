@@ -198,6 +198,17 @@ Signing behavior in CI:
 - Else, if `DESKTOP_SIGN_CERT_THUMBPRINT` is present, artifacts are signed via certificate thumbprint.
 - Else, packaging runs unsigned (same artifact layout).
 
+GitHub release publishing on tag builds:
+- On `v*` tag pushes, workflow also creates/updates a GitHub Release and uploads all `artifacts/*` files as release assets.
+- Re-running the workflow for the same tag overwrites release asset files (`overwrite_files: true`).
+
+Release trigger example:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
 ## Stop And Restart
 
 Stop the server in the terminal where `uvicorn` is running:
