@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import shutil
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1470,3 +1472,31 @@ def test_66_system_database_integrity_endpoint_reports_status(client):
 def test_67_system_database_integrity_rejects_invalid_mode(client):
     response = client.get("/system/database/integrity?mode=invalid")
     assert response.status_code == 422
+
+
+def test_68_release_gate_probe_reports_memory_database():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-probe.py"),
+        "--database-url",
+        ":memory:",
+        "--expected-db-kind",
+        "memory",
+        "--label",
+        "pytest-memory",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["database_kind"] == "memory"
+    assert payload["readiness_ready"] is True
+    assert payload["integrity_quick_ok"] is True
+    assert payload["integrity_full_ok"] is True
+    assert payload["pending_migrations"] == []
