@@ -371,7 +371,7 @@ def run_drill(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run migration rehearsal across small/medium/large DB copies, measure backup+restore+migration "
+            "Run migration rehearsal across small/medium/large/(optional xlarge) DB copies, measure backup+restore+migration "
             "durations, and enforce release abort thresholds."
         )
     )
@@ -380,6 +380,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--small-runs", type=int, default=500)
     parser.add_argument("--medium-runs", type=int, default=2500)
     parser.add_argument("--large-runs", type=int, default=6000)
+    parser.add_argument("--xlarge-runs", type=int, default=0)
     parser.add_argument("--payload-bytes", type=int, default=1024)
     parser.add_argument("--max-backup-ms", type=int, default=15_000)
     parser.add_argument("--max-restore-ms", type=int, default=15_000)
@@ -397,6 +398,9 @@ def main(argv: list[str] | None = None) -> int:
     if any(value <= 0 for value in scenario_values):
         print("[migration-rehearsal] ERROR: scenario run counts must be positive integers.", file=sys.stderr)
         return 2
+    if int(args.xlarge_runs) < 0:
+        print("[migration-rehearsal] ERROR: --xlarge-runs must be >= 0.", file=sys.stderr)
+        return 2
     if int(args.payload_bytes) <= 0:
         print("[migration-rehearsal] ERROR: --payload-bytes must be positive.", file=sys.stderr)
         return 2
@@ -411,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
         ScenarioSpec(name="medium", run_rows=int(args.medium_runs), payload_bytes=int(args.payload_bytes)),
         ScenarioSpec(name="large", run_rows=int(args.large_runs), payload_bytes=int(args.payload_bytes)),
     ]
+    if int(args.xlarge_runs) > 0:
+        scenarios.append(
+            ScenarioSpec(name="xlarge", run_rows=int(args.xlarge_runs), payload_bytes=int(args.payload_bytes))
+        )
 
     try:
         report = run_drill(

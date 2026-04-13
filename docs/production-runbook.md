@@ -22,14 +22,14 @@ This gate covers:
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
-- migration rehearsal across small/medium/large DB copies with explicit backup/restore/migration runtime thresholds
+- migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
 - backup/restore drill with row-count and integrity verification on restored DB
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 
 Manual migration rehearsal invocation (same thresholds as gate defaults):
 
 ```powershell
-.\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000
+.\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000 -XLargeRuns 9000
 ```
 
 Manual auto-rollback policy invocation (live endpoint, stable ring):
