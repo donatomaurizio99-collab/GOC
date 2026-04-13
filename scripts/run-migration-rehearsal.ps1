@@ -4,6 +4,7 @@ param(
     [int]$SmallRuns = 500,
     [int]$MediumRuns = 2500,
     [int]$LargeRuns = 6000,
+    [int]$XLargeRuns = 0,
     [int]$PayloadBytes = 1024,
     [int]$MaxBackupMs = 15000,
     [int]$MaxRestoreMs = 15000,
@@ -28,6 +29,9 @@ $args = @(
     "--max-restore-ms", [string]$MaxRestoreMs,
     "--max-migration-ms", [string]$MaxMigrationMs
 )
+if ($XLargeRuns -gt 0) {
+    $args += @("--xlarge-runs", [string]$XLargeRuns)
+}
 if ($KeepArtifacts) {
     $args += "--keep-artifacts"
 }

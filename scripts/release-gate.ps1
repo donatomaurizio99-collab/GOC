@@ -189,13 +189,14 @@ if (-not $SkipFileDatabaseProbe) {
 }
 
 if (-not $SkipMigrationRehearsal) {
-    Invoke-GateStep -Name "Migration rehearsal (S/M/L DB copies)" -Action {
+    Invoke-GateStep -Name "Migration rehearsal (S/M/L/XL DB copies)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\migration-rehearsals"
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\migration-rehearsal.py",
                 "--workspace", $workspace,
-                "--label", "release-gate"
+                "--label", "release-gate",
+                "--xlarge-runs", "9000"
             )
         } catch {
             if ($StrictMigrationRehearsal) {

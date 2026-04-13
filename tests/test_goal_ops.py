@@ -1818,3 +1818,43 @@ def test_79_recovery_hard_abort_drill_reports_success():
     assert payload["recovery"]["error_type_after_restart"] == "ProcessAbortRecovery"
     assert payload["recovery"]["readiness_ready"] is True
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_80_migration_rehearsal_supports_optional_xlarge_scenario():
+    workspace = _local_test_dir("pytest-migration-rehearsal-xlarge")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "migration-rehearsal.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-xlarge",
+        "--small-runs",
+        "80",
+        "--medium-runs",
+        "160",
+        "--large-runs",
+        "240",
+        "--xlarge-runs",
+        "320",
+        "--payload-bytes",
+        "128",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    scenario_names = [scenario["scenario"] for scenario in payload["scenarios"]]
+    assert payload["success"] is True
+    assert scenario_names == ["small", "medium", "large", "xlarge"]
+    shutil.rmtree(workspace, ignore_errors=True)
