@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import shutil
+import time
+from pathlib import Path
+
 import goal_ops_console.desktop as desktop
 
 
@@ -20,8 +25,118 @@ def test_parse_args_defaults():
     assert args.port == 0
     assert args.width == 1440
     assert args.height == 900
+    assert args.min_width == 1024
+    assert args.min_height == 720
+    assert args.maximized is False
+    assert args.window_state_path is None
+    assert args.no_window_state is False
     assert args.title == "Goal Ops Console"
     assert args.debug is False
+
+
+def _local_test_dir() -> Path:
+    base = Path(".tmp") / "pytest-local-window-state"
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / f"case-{time.time_ns()}"
+    target.mkdir(parents=True, exist_ok=False)
+    return target
+
+
+def test_load_window_state_uses_defaults_when_file_missing():
+    test_dir = _local_test_dir()
+    try:
+        state = desktop._load_window_state(
+            path=test_dir / "missing.json",
+            width=1400,
+            height=880,
+            min_width=1024,
+            min_height=720,
+            start_maximized=False,
+        )
+        assert state["width"] == 1400
+        assert state["height"] == 880
+        assert state["x"] is None
+        assert state["y"] is None
+        assert state["maximized"] is False
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_load_window_state_reads_saved_geometry():
+    test_dir = _local_test_dir()
+    try:
+        state_file = test_dir / "window_state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "width": 1600,
+                    "height": 1000,
+                    "x": 120,
+                    "y": 80,
+                    "maximized": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        state = desktop._load_window_state(
+            path=state_file,
+            width=1300,
+            height=820,
+            min_width=1024,
+            min_height=720,
+            start_maximized=False,
+        )
+        assert state["width"] == 1600
+        assert state["height"] == 1000
+        assert state["x"] == 120
+        assert state["y"] == 80
+        assert state["maximized"] is True
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
+
+
+def test_capture_window_state_applies_minimums():
+    class _Window:
+        width = 800
+        height = 640
+        x = 50
+        y = 40
+
+    state = desktop._capture_window_state(
+        window=_Window(),
+        min_width=1024,
+        min_height=720,
+        maximized=False,
+    )
+    assert state["width"] == 1024
+    assert state["height"] == 720
+    assert state["x"] == 50
+    assert state["y"] == 40
+    assert state["maximized"] is False
+
+
+def test_save_window_state_writes_json():
+    test_dir = _local_test_dir()
+    try:
+        state_file = test_dir / "nested" / "window_state.json"
+        desktop._save_window_state(
+            path=state_file,
+            state={
+                "width": 1200,
+                "height": 800,
+                "x": 30,
+                "y": 40,
+                "maximized": False,
+            },
+        )
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        assert payload["width"] == 1200
+        assert payload["height"] == 800
+        assert payload["x"] == 30
+        assert payload["y"] == 40
+        assert payload["maximized"] is False
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
 
 
 def test_main_returns_nonzero_when_launch_fails(monkeypatch, capsys):
@@ -53,6 +168,13 @@ def test_main_maps_port_zero_to_none(monkeypatch):
             "1200",
             "--height",
             "800",
+            "--min-width",
+            "1100",
+            "--min-height",
+            "760",
+            "--maximized",
+            "--window-state-path",
+            "demo-window-state.json",
             "--title",
             "Demo",
             "--debug",
@@ -64,6 +186,11 @@ def test_main_maps_port_zero_to_none(monkeypatch):
     assert captured_kwargs["port"] is None
     assert captured_kwargs["width"] == 1200
     assert captured_kwargs["height"] == 800
+    assert captured_kwargs["min_width"] == 1100
+    assert captured_kwargs["min_height"] == 760
+    assert captured_kwargs["start_maximized"] is True
+    assert captured_kwargs["window_state_path"] == "demo-window-state.json"
+    assert captured_kwargs["remember_window"] is True
     assert captured_kwargs["window_title"] == "Demo"
     assert captured_kwargs["debug"] is True
 
@@ -79,3 +206,16 @@ def test_main_passes_explicit_port(monkeypatch):
 
     assert exit_code == 0
     assert captured_kwargs["port"] == 8124
+
+
+def test_main_can_disable_window_state(monkeypatch):
+    captured_kwargs = {}
+
+    def _fake_run_desktop(**kwargs):
+        captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(desktop, "run_desktop", _fake_run_desktop)
+    exit_code = desktop.main(["--database-url", "demo.db", "--no-window-state"])
+
+    assert exit_code == 0
+    assert captured_kwargs["remember_window"] is False
