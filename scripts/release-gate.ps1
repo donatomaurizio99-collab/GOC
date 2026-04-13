@@ -6,6 +6,8 @@ param(
     [switch]$SkipSloAlertCheck,
     [switch]$SkipFileDatabaseProbe,
     [switch]$StrictFileDatabaseProbe,
+    [switch]$SkipMigrationRehearsal,
+    [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
     [switch]$SkipIncidentRollbackDrill,
@@ -101,6 +103,27 @@ if (-not $SkipFileDatabaseProbe) {
             }
             Write-Warning (
                 "File-backed DB probe failed but StrictFileDatabaseProbe is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipMigrationRehearsal) {
+    Invoke-GateStep -Name "Migration rehearsal (S/M/L DB copies)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\migration-rehearsals"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\migration-rehearsal.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictMigrationRehearsal) {
+                throw
+            }
+            Write-Warning (
+                "Migration rehearsal failed but StrictMigrationRehearsal is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

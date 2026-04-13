@@ -1623,3 +1623,49 @@ def test_74_incident_rollback_drill_reports_success():
     assert payload["incident"]["slo_status"] in {"degraded", "critical"}
     assert payload["incident"]["load"]["throttled_count"] > 0
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_75_migration_rehearsal_reports_success():
+    workspace = _local_test_dir("pytest-migration-rehearsal")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "migration-rehearsal.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--small-runs",
+        "120",
+        "--medium-runs",
+        "360",
+        "--large-runs",
+        "720",
+        "--payload-bytes",
+        "256",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert payload["decision"]["recommended_action"] == "proceed"
+    assert len(payload["scenarios"]) == 3
+    for scenario in payload["scenarios"]:
+        assert scenario["success"] is True
+        assert scenario["checks"]["migration_backup_created"] is True
+        assert scenario["checks"]["pending_migrations_cleared"] is True
+        assert scenario["checks"]["backup_within_threshold"] is True
+        assert scenario["checks"]["restore_within_threshold"] is True
+        assert scenario["checks"]["migration_within_threshold"] is True
+    shutil.rmtree(workspace, ignore_errors=True)
