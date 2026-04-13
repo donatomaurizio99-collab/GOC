@@ -191,6 +191,19 @@ class WorkflowCatalog:
             "startup_recovery": dict(self._startup_recovery_state),
         }
 
+    def ensure_worker_running(self) -> dict[str, Any]:
+        status = self.worker_status()
+        if bool(status.get("is_running")):
+            return status
+
+        self.start_worker()
+        status = self.worker_status()
+        if not bool(status.get("is_running")):
+            raise ConflictError("Workflow worker failed to start")
+
+        self._metric("workflows.worker.restarted")
+        return status
+
     def list_runs(self, *, limit: int = 100, workflow_id: str | None = None) -> list[dict[str, Any]]:
         params: list[Any] = []
         where = ""
@@ -263,6 +276,7 @@ class WorkflowCatalog:
                 f"Workflow {workflow_id} has unknown entrypoint '{definition['entrypoint']}'"
             )
 
+        self.ensure_worker_running()
         stale = self.reap_stuck_runs(
             timeout_seconds=self.run_timeout_seconds,
             limit=self.reaper_batch_size,

@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -22,6 +22,7 @@ This gate covers:
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
+- workflow worker restart drill (stop worker, enqueue run, and verify self-healing restart path)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
@@ -62,6 +63,12 @@ Manual workflow soak drill invocation:
 
 ```powershell
 .\scripts\run-workflow-soak-drill.ps1 -RunCount 40
+```
+
+Manual workflow worker restart drill invocation:
+
+```powershell
+.\scripts\run-workflow-worker-restart-drill.ps1
 ```
 
 Verify before release:
@@ -338,6 +345,23 @@ Actions:
    Invoke-RestMethod http://127.0.0.1:8000/workflows/runs
    ```
 3. If hanging runs remain, trigger incident and hold release promotion.
+
+### 3.12 Workflow worker does not recover after stop/crash
+
+Symptoms:
+- readiness check shows `workflow_worker.ok = false`
+- workflow starts remain queued because worker thread is not running
+
+Actions:
+1. Run worker restart drill:
+   ```powershell
+   .\scripts\run-workflow-worker-restart-drill.ps1
+   ```
+2. Verify readiness recovers to `ready=true`:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/readiness
+   ```
+3. If drill fails or `startup_recovery_error` is set, block release and escalate with diagnostics snapshot.
 
 ## 4. Operational Defaults
 
