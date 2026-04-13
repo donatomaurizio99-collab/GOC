@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictRecoveryHardCrashDrill
 ```
 
 This gate covers:
@@ -21,6 +21,7 @@ This gate covers:
 - schema migration pending-version check (`pending_versions` must be empty)
 - backup/restore drill with row-count and integrity verification on restored DB
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
+- hard-abort recovery drill validating stale desktop lock reclaim path
 
 Verify before release:
 - CI checks green:
@@ -182,7 +183,11 @@ Symptoms:
 Actions:
 1. Confirm no active app process.
 2. Retry launch once (stale lock auto-recovery is enabled).
-3. If still blocked, collect crash/diagnostics and escalate.
+3. Validate local recovery path:
+   ```powershell
+   .\scripts\run-recovery-hard-crash-drill.ps1
+   ```
+4. If still blocked, collect crash/diagnostics and escalate.
 
 ### 3.6 Crash-loop protection triggered
 

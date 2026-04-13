@@ -1623,3 +1623,31 @@ def test_74_incident_rollback_drill_reports_success():
     assert payload["incident"]["slo_status"] in {"degraded", "critical"}
     assert payload["incident"]["load"]["throttled_count"] > 0
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_75_recovery_hard_crash_drill_reports_success():
+    workspace = _local_test_dir("pytest-recovery-hard-crash-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "recovery-hard-crash-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["recovery"]["reclaimed_stale_lock"] is True
+    assert payload["recovery"]["release_marker_ok"] is True
+    assert payload["hard_abort"]["first_worker_pid"] != payload["recovery"]["second_worker_pid"]
+    shutil.rmtree(workspace, ignore_errors=True)

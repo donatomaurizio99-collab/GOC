@@ -9,7 +9,9 @@ param(
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
     [switch]$SkipIncidentRollbackDrill,
-    [switch]$StrictIncidentRollbackDrill
+    [switch]$StrictIncidentRollbackDrill,
+    [switch]$SkipRecoveryHardCrashDrill,
+    [switch]$StrictRecoveryHardCrashDrill
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,6 +146,27 @@ if (-not $SkipIncidentRollbackDrill) {
             }
             Write-Warning (
                 "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipRecoveryHardCrashDrill) {
+    Invoke-GateStep -Name "Recovery drill (hard process abort + stale lock reclaim)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\recovery-hard-crash-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\recovery-hard-crash-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictRecoveryHardCrashDrill) {
+                throw
+            }
+            Write-Warning (
+                "Recovery hard-crash drill failed but StrictRecoveryHardCrashDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

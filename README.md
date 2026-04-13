@@ -404,11 +404,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + backup/restore drill + incident/rollback drill under burst load + hard-abort recovery drill for stale-lock reclaim):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictRecoveryHardCrashDrill
 ```
 
 Standalone backup/restore drill:
@@ -430,6 +430,13 @@ Standalone incident/rollback drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
+```
+
+Standalone hard-abort recovery drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-recovery-hard-crash-drill.ps1
 ```
 
 Current result during implementation:
@@ -610,5 +617,7 @@ If a value is rejected:
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
 - [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
 - [run-incident-rollback-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-rollback-drill.ps1)
+- [recovery-hard-crash-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-crash-drill.py)
+- [run-recovery-hard-crash-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-crash-drill.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)
