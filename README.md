@@ -406,11 +406,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -446,6 +446,20 @@ Standalone recovery hard-abort drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-recovery-hard-abort-drill.ps1
+```
+
+Standalone workflow lock-resilience drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-workflow-lock-resilience-drill.ps1
+```
+
+Standalone workflow soak drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-workflow-soak-drill.ps1 -RunCount 40
 ```
 
 Standalone SLO alert check:
@@ -644,6 +658,10 @@ If a value is rejected:
 - [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
 - [recovery-hard-abort-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-target.py)
 - [run-recovery-hard-abort-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-abort-drill.ps1)
+- [workflow-lock-resilience-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-lock-resilience-drill.py)
+- [run-workflow-lock-resilience-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-lock-resilience-drill.ps1)
+- [workflow-soak-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-soak-drill.py)
+- [run-workflow-soak-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-soak-drill.ps1)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)

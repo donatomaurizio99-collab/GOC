@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -20,6 +20,8 @@ This gate covers:
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
+- workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
+- workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
@@ -48,6 +50,18 @@ Manual recovery hard-abort drill invocation:
 
 ```powershell
 .\scripts\run-recovery-hard-abort-drill.ps1
+```
+
+Manual workflow lock-resilience drill invocation:
+
+```powershell
+.\scripts\run-workflow-lock-resilience-drill.ps1
+```
+
+Manual workflow soak drill invocation:
+
+```powershell
+.\scripts\run-workflow-soak-drill.ps1 -RunCount 40
 ```
 
 Verify before release:
@@ -291,6 +305,39 @@ Actions:
    .\scripts\run-recovery-hard-abort-drill.ps1
    ```
 4. If drill fails, block rollout and escalate with drill JSON output + diagnostics snapshot.
+
+### 3.10 Workflow lock contention spikes
+
+Symptoms:
+- intermittent SQLite lock-conflict errors under concurrent workflow activity
+- worker appears healthy but throughput jitters
+
+Actions:
+1. Run lock-resilience drill:
+   ```powershell
+   .\scripts\run-workflow-lock-resilience-drill.ps1
+   ```
+2. Confirm worker remains healthy in readiness payload:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/readiness
+   ```
+3. If drill fails, block rollout and investigate DB contention before retrying release.
+
+### 3.11 Post-burst hanging run check
+
+Symptoms:
+- large queue bursts are processed, but some runs remain `queued`/`running`
+
+Actions:
+1. Run soak drill:
+   ```powershell
+   .\scripts\run-workflow-soak-drill.ps1 -RunCount 40
+   ```
+2. Verify workflow run list contains only terminal states:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/workflows/runs
+   ```
+3. If hanging runs remain, trigger incident and hold release promotion.
 
 ## 4. Operational Defaults
 

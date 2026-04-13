@@ -12,6 +12,10 @@ param(
     [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipRecoveryHardAbortDrill,
     [switch]$StrictRecoveryHardAbortDrill,
+    [switch]$SkipWorkflowLockResilienceDrill,
+    [switch]$StrictWorkflowLockResilienceDrill,
+    [switch]$SkipWorkflowSoakDrill,
+    [switch]$StrictWorkflowSoakDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -153,6 +157,46 @@ if (-not $SkipRecoveryHardAbortDrill) {
             }
             Write-Warning (
                 "Recovery hard-abort drill failed but StrictRecoveryHardAbortDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipWorkflowLockResilienceDrill) {
+    Invoke-GateStep -Name "Workflow lock resilience drill (transient SQLite lock conflicts)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\workflow-lock-resilience-drill.py",
+                "--lock-failures", "8",
+                "--timeout-seconds", "12"
+            )
+        } catch {
+            if ($StrictWorkflowLockResilienceDrill) {
+                throw
+            }
+            Write-Warning (
+                "Workflow lock resilience drill failed but StrictWorkflowLockResilienceDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipWorkflowSoakDrill) {
+    Invoke-GateStep -Name "Workflow soak drill (no hanging runs after burst enqueue)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\workflow-soak-drill.py",
+                "--run-count", "40",
+                "--timeout-seconds", "25"
+            )
+        } catch {
+            if ($StrictWorkflowSoakDrill) {
+                throw
+            }
+            Write-Warning (
+                "Workflow soak drill failed but StrictWorkflowSoakDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
