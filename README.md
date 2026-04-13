@@ -401,6 +401,15 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-tests.ps1
 ```
 
+## Run Release Gate
+
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + migration state):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe
+```
+
 Current result during implementation:
 
 ```text
@@ -430,6 +439,7 @@ Recommended branch protection on `master`:
 5. Enable `Require status checks to pass before merging`.
 6. Select required check: `Pytest (Python 3.11)` and `Pytest (Python 3.12)`.
 7. Select required check: `Desktop Smoke (Windows)`.
+8. Select required check: `Release Gate (Windows)`.
 
 Local desktop smoke command:
 
@@ -570,5 +580,7 @@ If a value is rejected:
 - [manage-desktop-rings.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/manage-desktop-rings.ps1)
 - [reset-db.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/reset-db.ps1)
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
+- [release-gate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate.ps1)
+- [release-gate-probe.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-probe.py)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)

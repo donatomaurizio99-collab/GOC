@@ -9,12 +9,19 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-python -m pytest -q
-python .\scripts\desktop-smoke.py
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe
 ```
+
+This gate covers:
+- full `pytest` suite
+- desktop smoke boot path
+- `GET /system/readiness`
+- `GET /system/database/integrity?mode=quick|full`
+- schema migration pending-version check (`pending_versions` must be empty)
 
 Verify before release:
 - CI checks green:
+  - `Release Gate (Windows)`
   - `Pytest (Python 3.11)`
   - `Pytest (Python 3.12)`
   - `Desktop Smoke (Windows)`
