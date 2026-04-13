@@ -143,6 +143,23 @@ class WorkflowCatalog:
             raise NotFoundError(f"Workflow {workflow_id} not found")
         return self._definition_to_dict(row)
 
+    def worker_status(self) -> dict[str, Any]:
+        with self._worker_lock:
+            thread = self._worker_thread
+            is_running = bool(thread is not None and thread.is_alive())
+        queued_runs = int(
+            self.db.fetch_scalar("SELECT COUNT(*) FROM workflow_runs WHERE status = 'queued'") or 0
+        )
+        running_runs = int(
+            self.db.fetch_scalar("SELECT COUNT(*) FROM workflow_runs WHERE status = 'running'") or 0
+        )
+        return {
+            "is_running": is_running,
+            "stop_requested": self._worker_stop.is_set(),
+            "queued_runs": queued_runs,
+            "running_runs": running_runs,
+        }
+
     def list_runs(self, *, limit: int = 100, workflow_id: str | None = None) -> list[dict[str, Any]]:
         params: list[Any] = []
         where = ""

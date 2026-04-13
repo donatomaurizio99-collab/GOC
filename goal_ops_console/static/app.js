@@ -1036,6 +1036,11 @@ async function runOperatorAction(action) {
       + `event_processing=${result.event_processing_deleted}, `
       + `failure_log=${result.failure_log_deleted}.`
     );
+  } else if (action === "diagnostics") {
+    result = await api("/system/diagnostics", { method: "POST" });
+    document.getElementById("system-feedback").textContent = (
+      `Diagnostics snapshot exported to ${result.file_path}.`
+    );
   }
   await refreshAll();
 }

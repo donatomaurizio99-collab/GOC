@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import shutil
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,6 +31,14 @@ def create_active_goal(client, title: str = "Goal") -> dict:
 def create_task(client, goal_id: str, title: str = "Task") -> dict:
     response = client.post("/tasks", json={"goal_id": goal_id, "title": title})
     return response.json()
+
+
+def _local_test_dir(prefix: str) -> Path:
+    base = Path(".tmp") / prefix
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / f"case-{time.time_ns()}"
+    target.mkdir(parents=True, exist_ok=False)
+    return target
 
 
 def test_01_goal_creation_inserts_goal_and_queue_atomically(client):
@@ -1317,3 +1328,56 @@ def test_60_cancel_terminal_workflow_run_returns_409(client):
         json={"requested_by": "workflow-test", "reason": "too late"},
     )
     assert cancel.status_code == 409
+
+
+def test_61_system_readiness_reports_ready(client):
+    deadline = time.time() + 2.0
+    payload: dict | None = None
+    while time.time() < deadline:
+        response = client.get("/system/readiness")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["ready"]:
+            break
+        time.sleep(0.05)
+
+    assert payload is not None
+    assert payload["ready"] is True
+    assert payload["checks"]["database"]["ok"] is True
+    assert payload["checks"]["workflow_worker"]["ok"] is True
+    assert payload["checks"]["workflow_worker"]["is_running"] is True
+
+
+def test_62_system_readiness_reports_not_ready_when_worker_stopped():
+    app = create_app(Settings(database_url=":memory:"))
+    with TestClient(app) as local_client:
+        local_client.app.state.services.workflow_catalog.stop_worker()
+        response = local_client.get("/system/readiness")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ready"] is False
+        assert payload["checks"]["database"]["ok"] is True
+        assert payload["checks"]["workflow_worker"]["ok"] is False
+        assert payload["checks"]["workflow_worker"]["is_running"] is False
+
+
+def test_63_system_diagnostics_exports_snapshot():
+    diagnostics_dir = _local_test_dir("pytest-system-diagnostics")
+    try:
+        app = create_app(Settings(database_url=":memory:", diagnostics_dir=str(diagnostics_dir)))
+        with TestClient(app) as local_client:
+            response = local_client.post("/system/diagnostics")
+            assert response.status_code == 200
+            payload = response.json()
+
+            file_path = Path(payload["file_path"])
+            assert file_path.exists()
+            assert file_path.parent == diagnostics_dir
+            assert payload["ready"] is True
+
+            snapshot = json.loads(file_path.read_text(encoding="utf-8"))
+            assert snapshot["readiness"]["ready"] is True
+            assert "health" in snapshot
+            assert "recent_workflow_runs" in snapshot
+    finally:
+        shutil.rmtree(diagnostics_dir, ignore_errors=True)
