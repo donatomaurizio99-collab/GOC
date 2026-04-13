@@ -89,15 +89,80 @@ jobs:
           "channel=$channel" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Resolve signing inputs
+        id: signing
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.DESKTOP_SIGN_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.DESKTOP_SIGN_PFX_PASSWORD }}
+          SIGN_CERT_THUMBPRINT: ${{ secrets.DESKTOP_SIGN_CERT_THUMBPRINT }}
+          SIGN_TIMESTAMP_URL: ${{ secrets.DESKTOP_SIGN_TIMESTAMP_URL }}
+        run: |
+          $signMode = "none"
+          $signPfxPath = ""
+          $signTimestamp = if (-not [string]::IsNullOrWhiteSpace($env:SIGN_TIMESTAMP_URL)) {
+            $env:SIGN_TIMESTAMP_URL
+          } else {
+            "https://timestamp.digicert.com"
+          }
+
+          if (
+            -not [string]::IsNullOrWhiteSpace($env:SIGN_PFX_BASE64) -and
+            -not [string]::IsNullOrWhiteSpace($env:SIGN_PFX_PASSWORD)
+          ) {
+            $signMode = "pfx"
+            $signPfxPath = Join-Path $env:RUNNER_TEMP "goal-ops-codesign.pfx"
+            $bytes = [Convert]::FromBase64String($env:SIGN_PFX_BASE64)
+            [IO.File]::WriteAllBytes($signPfxPath, $bytes)
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:SIGN_CERT_THUMBPRINT)) {
+            $signMode = "thumbprint"
+          }
+
+          "sign_mode=$signMode" >> $env:GITHUB_OUTPUT
+          "sign_pfx_path=$signPfxPath" >> $env:GITHUB_OUTPUT
+          "sign_timestamp=$signTimestamp" >> $env:GITHUB_OUTPUT
+
       - name: Package desktop release artifacts
         shell: pwsh
         run: |
-          .\scripts\package-desktop-release.ps1 `
-            -Name GoalOpsConsole `
-            -Version "${{ steps.release.outputs.version }}" `
-            -Channel "${{ steps.release.outputs.channel }}" `
-            -Mode "${{ steps.release.outputs.package_mode }}" `
-            -OutputDir "artifacts"
+          if ("${{ steps.signing.outputs.sign_mode }}" -eq "pfx") {
+            .\scripts\package-desktop-release.ps1 `
+              -Name GoalOpsConsole `
+              -Version "${{ steps.release.outputs.version }}" `
+              -Channel "${{ steps.release.outputs.channel }}" `
+              -Mode "${{ steps.release.outputs.package_mode }}" `
+              -OutputDir "artifacts" `
+              -Sign `
+              -PfxPath "${{ steps.signing.outputs.sign_pfx_path }}" `
+              -PfxPassword "${{ secrets.DESKTOP_SIGN_PFX_PASSWORD }}" `
+              -TimeStampUrl "${{ steps.signing.outputs.sign_timestamp }}"
+          } elseif ("${{ steps.signing.outputs.sign_mode }}" -eq "thumbprint") {
+            .\scripts\package-desktop-release.ps1 `
+              -Name GoalOpsConsole `
+              -Version "${{ steps.release.outputs.version }}" `
+              -Channel "${{ steps.release.outputs.channel }}" `
+              -Mode "${{ steps.release.outputs.package_mode }}" `
+              -OutputDir "artifacts" `
+              -Sign `
+              -CertThumbprint "${{ secrets.DESKTOP_SIGN_CERT_THUMBPRINT }}" `
+              -TimeStampUrl "${{ steps.signing.outputs.sign_timestamp }}"
+          } else {
+            .\scripts\package-desktop-release.ps1 `
+              -Name GoalOpsConsole `
+              -Version "${{ steps.release.outputs.version }}" `
+              -Channel "${{ steps.release.outputs.channel }}" `
+              -Mode "${{ steps.release.outputs.package_mode }}" `
+              -OutputDir "artifacts"
+          }
+
+      - name: Cleanup signing material
+        if: always()
+        shell: pwsh
+        run: |
+          $pfxPath = "${{ steps.signing.outputs.sign_pfx_path }}"
+          if (-not [string]::IsNullOrWhiteSpace($pfxPath) -and (Test-Path -LiteralPath $pfxPath)) {
+            Remove-Item -LiteralPath $pfxPath -Force
+          }
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
