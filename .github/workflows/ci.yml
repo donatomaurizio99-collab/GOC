@@ -38,7 +38,7 @@ jobs:
       - name: Run release gate
         shell: pwsh
         run: |
-          .\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+          .\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 
   test:
     name: Pytest (Python ${{ matrix.python-version }})

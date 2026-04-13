@@ -6,6 +6,8 @@ param(
     [switch]$SkipSloAlertCheck,
     [switch]$SkipFileDatabaseProbe,
     [switch]$StrictFileDatabaseProbe,
+    [switch]$SkipAutoRollbackPolicyDrill,
+    [switch]$StrictAutoRollbackPolicyDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -77,6 +79,37 @@ if (-not $SkipSloAlertCheck) {
             "--database-url", ":memory:",
             "--allowed-status", "ok"
         )
+    }
+}
+
+if (-not $SkipAutoRollbackPolicyDrill) {
+    Invoke-GateStep -Name "Auto rollback policy drill (sustained critical => ring rollback)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\auto-rollback-policy-drills"
+        $manifestPath = Join-Path $workspace "desktop-rings.json"
+        New-Item -ItemType Directory -Force -Path $workspace | Out-Null
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\auto-rollback-policy.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--manifest-path", $manifestPath,
+                "--ring", "stable",
+                "--mock-slo-statuses", "critical,critical,critical,critical",
+                "--critical-window-seconds", "2",
+                "--poll-interval-seconds", "1",
+                "--max-observation-seconds", "8",
+                "--seed-previous-version", "0.0.1",
+                "--seed-incident-version", "0.0.2"
+            )
+        } catch {
+            if ($StrictAutoRollbackPolicyDrill) {
+                throw
+            }
+            Write-Warning (
+                "Auto rollback policy drill failed but StrictAutoRollbackPolicyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
     }
 }
 

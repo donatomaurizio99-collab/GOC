@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -17,6 +17,7 @@ This gate covers:
 - desktop smoke boot path
 - `GET /system/readiness`
 - `GET /system/slo` (`status` must be `ok`)
+- auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large DB copies with explicit backup/restore/migration runtime thresholds
@@ -27,6 +28,12 @@ Manual migration rehearsal invocation (same thresholds as gate defaults):
 
 ```powershell
 .\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000
+```
+
+Manual auto-rollback policy invocation (live endpoint, stable ring):
+
+```powershell
+.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Verify before release:
@@ -178,7 +185,10 @@ Actions:
    ```powershell
    .\scripts\run-slo-alert-check.ps1 -BaseUrl "http://127.0.0.1:8000" -AllowedStatus degraded
    ```
-3. If status is `critical`, treat as release blocker or trigger rollback.
+3. If status is `critical`, enforce sustained-window policy check:
+   ```powershell
+   .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+   ```
 4. Export diagnostics snapshot and attach to incident ticket.
 
 ### 3.5 Desktop startup conflicts (single-instance lock)
