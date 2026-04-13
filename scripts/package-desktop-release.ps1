@@ -10,7 +10,9 @@ param(
     [switch]$Sign,
     [string]$SignToolPath = "signtool.exe",
     [string]$CertThumbprint = "",
-    [string]$TimeStampUrl = "http://timestamp.digicert.com"
+    [string]$PfxPath = "",
+    [string]$PfxPassword = "",
+    [string]$TimeStampUrl = "https://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +27,10 @@ $oneDirExe = Join-Path $oneDirRoot "$Name.exe"
 $oneFileExe = Join-Path $ProjectRoot "dist/$Name.exe"
 $includeOneDir = $Mode -in @("onedir", "both")
 $includeOneFile = $Mode -in @("onefile", "both")
+$resolvedPfxPath = ""
+if (-not [string]::IsNullOrWhiteSpace($PfxPath)) {
+    $resolvedPfxPath = (Resolve-Path -LiteralPath $PfxPath).Path
+}
 
 function Invoke-SignBinary {
     param(
@@ -34,25 +40,40 @@ function Invoke-SignBinary {
     if (-not $Sign) {
         return
     }
-    if ([string]::IsNullOrWhiteSpace($CertThumbprint)) {
-        throw "Signing requested but -CertThumbprint is empty."
-    }
 
     $arguments = @(
         "sign",
-        "/sha1", $CertThumbprint,
         "/fd", "SHA256",
         "/tr", $TimeStampUrl,
         "/td", "SHA256",
         "/d", $Name,
-        "/v",
-        $PathToSign
+        "/v"
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($resolvedPfxPath)) {
+        $arguments += @("/f", $resolvedPfxPath)
+        if (-not [string]::IsNullOrWhiteSpace($PfxPassword)) {
+            $arguments += @("/p", $PfxPassword)
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($CertThumbprint)) {
+        $arguments += @("/sha1", $CertThumbprint)
+    } else {
+        throw "Signing requested but no certificate source provided. Use -CertThumbprint or -PfxPath."
+    }
+
+    $arguments += $PathToSign
+
     Write-Host "Signing $PathToSign" -ForegroundColor Cyan
     & $SignToolPath @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Signing failed for $PathToSign (exit code $LASTEXITCODE)."
     }
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $PathToSign
+    if ($signature.Status -ne "Valid") {
+        throw "Signature verification failed for $PathToSign. Status=$($signature.Status). $($signature.StatusMessage)"
+    }
+    Write-Host "Signature valid for $PathToSign" -ForegroundColor Green
 }
 
 if ($includeOneDir -and -not (Test-Path -LiteralPath $oneDirExe)) {

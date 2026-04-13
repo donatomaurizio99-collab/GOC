@@ -130,7 +130,20 @@ Optional signing during packaging:
   -Sign `
   -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" `
   -CertThumbprint "<CERT_THUMBPRINT>" `
-  -TimeStampUrl "http://timestamp.digicert.com"
+  -TimeStampUrl "https://timestamp.digicert.com"
+```
+
+Alternative signing via PFX file:
+
+```powershell
+.\scripts\package-desktop-release.ps1 `
+  -Version "0.1.0" `
+  -Channel stable `
+  -Mode both `
+  -Sign `
+  -PfxPath ".\codesign\goal-ops.pfx" `
+  -PfxPassword "<PFX_PASSWORD>" `
+  -TimeStampUrl "https://timestamp.digicert.com"
 ```
 
 Optional:
@@ -173,6 +186,17 @@ Published artifacts:
 - `GoalOpsConsole-install-<version>.ps1` (if `onefile` was built)
 - `desktop-update-manifest.json` (version/channel + artifact hashes)
 - `SHA256SUMS.txt` (checksums for uploaded files)
+
+Optional CI signing (GitHub Secrets):
+- `DESKTOP_SIGN_PFX_BASE64`: base64-encoded PFX certificate payload.
+- `DESKTOP_SIGN_PFX_PASSWORD`: password for the PFX file.
+- `DESKTOP_SIGN_CERT_THUMBPRINT`: optional fallback for self-hosted runners with cert in store.
+- `DESKTOP_SIGN_TIMESTAMP_URL`: optional timestamp URL override (default: `https://timestamp.digicert.com`).
+
+Signing behavior in CI:
+- If `DESKTOP_SIGN_PFX_BASE64` + `DESKTOP_SIGN_PFX_PASSWORD` are present, artifacts are signed via PFX.
+- Else, if `DESKTOP_SIGN_CERT_THUMBPRINT` is present, artifacts are signed via certificate thumbprint.
+- Else, packaging runs unsigned (same artifact layout).
 
 ## Stop And Restart
 
