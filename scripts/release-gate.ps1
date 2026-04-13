@@ -7,7 +7,9 @@ param(
     [switch]$SkipFileDatabaseProbe,
     [switch]$StrictFileDatabaseProbe,
     [switch]$SkipBackupRestoreDrill,
-    [switch]$StrictBackupRestoreDrill
+    [switch]$StrictBackupRestoreDrill,
+    [switch]$SkipIncidentRollbackDrill,
+    [switch]$StrictIncidentRollbackDrill
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,6 +122,28 @@ if (-not $SkipBackupRestoreDrill) {
             }
             Write-Warning (
                 "Backup/restore drill failed but StrictBackupRestoreDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipIncidentRollbackDrill) {
+    Invoke-GateStep -Name "Incident/rollback drill (burst load + ring rollback)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\incident-rollback-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\incident-rollback-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--load-requests", "30"
+            )
+        } catch {
+            if ($StrictIncidentRollbackDrill) {
+                throw
+            }
+            Write-Warning (
+                "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

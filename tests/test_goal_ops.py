@@ -1589,3 +1589,37 @@ def test_73_slo_alert_check_reports_ok_memory():
     payload = json.loads(output_lines[-1])
     assert payload["observed_status"] == "ok"
     assert payload["allowed_status"] == "ok"
+
+
+def test_74_incident_rollback_drill_reports_success():
+    workspace = _local_test_dir("pytest-incident-rollback-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "incident-rollback-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--load-requests",
+        "30",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["incident"]["detected"] is True
+    assert payload["rollback"]["ok"] is True
+    assert payload["incident"]["slo_status"] in {"degraded", "critical"}
+    assert payload["incident"]["load"]["throttled_count"] > 0
+    shutil.rmtree(workspace, ignore_errors=True)

@@ -404,11 +404,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + backup/restore drill):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -423,6 +423,13 @@ Standalone SLO alert check:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-slo-alert-check.ps1 -AllowedStatus ok
+```
+
+Standalone incident/rollback drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
 ```
 
 Current result during implementation:
@@ -601,5 +608,7 @@ If a value is rejected:
 - [run-slo-alert-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-slo-alert-check.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
+- [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
+- [run-incident-rollback-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-rollback-drill.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)
