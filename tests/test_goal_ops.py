@@ -1911,3 +1911,75 @@ def test_82_workflow_soak_drill_reports_success():
     assert payload["status_counts"]["succeeded"] == 30
     assert payload["readiness"]["ready"] is True
     assert payload["slo_status"] == "ok"
+
+
+def test_83_start_workflow_restarts_worker_if_stopped(client):
+    catalog = client.app.state.services.workflow_catalog
+    catalog.stop_worker()
+    assert catalog.worker_status()["is_running"] is False
+
+    started = client.post(
+        "/workflows/maintenance.retention_cleanup/start",
+        json={"requested_by": "workflow-test", "payload": {"source": "worker-restart"}},
+    )
+    assert started.status_code == 201
+    run_id = started.json()["run"]["run_id"]
+
+    final_run = _wait_for_run_in_states(
+        client,
+        run_id,
+        {"succeeded", "failed", "timed_out", "cancelled"},
+        timeout_seconds=3.0,
+    )
+    assert final_run["status"] == "succeeded"
+    assert catalog.worker_status()["is_running"] is True
+
+
+def test_84_system_readiness_reports_not_ready_on_startup_recovery_error(client):
+    catalog = client.app.state.services.workflow_catalog
+    catalog.ensure_worker_running()
+    catalog._startup_recovery_state = {
+        "executed": True,
+        "recovered_count": 0,
+        "run_ids": [],
+        "error": "startup recovery failed in test",
+        "at_utc": now_utc(),
+        "max_age_seconds": 0,
+    }
+
+    response = client.get("/system/readiness")
+    assert response.status_code == 200
+    payload = response.json()
+    worker = payload["checks"]["workflow_worker"]
+
+    assert payload["ready"] is False
+    assert worker["is_running"] is True
+    assert worker["ok"] is False
+    assert worker["startup_recovery_ok"] is False
+    assert worker["startup_recovery_error"] == "startup recovery failed in test"
+
+
+def test_85_workflow_worker_restart_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "workflow-worker-restart-drill.py"),
+        "--timeout-seconds",
+        "12",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["before"]["ready"] is False
+    assert payload["before"]["worker_running"] is False
+    assert payload["after"]["ready"] is True
+    assert payload["after"]["worker_running"] is True
+    assert payload["run"]["status"] == "succeeded"

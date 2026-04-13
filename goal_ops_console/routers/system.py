@@ -68,13 +68,33 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
         "stop_requested": False,
         "queued_runs": 0,
         "running_runs": 0,
+        "startup_recovery": {
+            "executed": False,
+            "recovered_count": 0,
+            "run_ids": [],
+            "error": None,
+            "at_utc": None,
+            "max_age_seconds": 0,
+        },
     }
     try:
         worker_status = services.workflow_catalog.worker_status()
     except Exception as exc:
         worker_error = str(exc)
 
-    worker_ok = bool(worker_status.get("is_running")) and worker_error is None
+    startup_recovery = worker_status.get("startup_recovery")
+    startup_recovery_error: str | None = None
+    if isinstance(startup_recovery, dict):
+        raw_error = startup_recovery.get("error")
+        if raw_error is not None:
+            startup_recovery_error = str(raw_error)
+    startup_recovery_ok = startup_recovery_error is None
+
+    worker_ok = (
+        bool(worker_status.get("is_running"))
+        and worker_error is None
+        and startup_recovery_ok
+    )
     return {
         "ready": bool(db_ok and worker_ok),
         "spec_version": SPEC_VERSION,
@@ -88,6 +108,8 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
                 **worker_status,
                 "ok": worker_ok,
                 "error": worker_error,
+                "startup_recovery_ok": startup_recovery_ok,
+                "startup_recovery_error": startup_recovery_error,
             },
         },
     }

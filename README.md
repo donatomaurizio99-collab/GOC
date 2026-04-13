@@ -406,11 +406,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -460,6 +460,13 @@ Standalone workflow soak drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-workflow-soak-drill.ps1 -RunCount 40
+```
+
+Standalone workflow worker restart drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-workflow-worker-restart-drill.ps1
 ```
 
 Standalone SLO alert check:
@@ -662,6 +669,8 @@ If a value is rejected:
 - [run-workflow-lock-resilience-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-lock-resilience-drill.ps1)
 - [workflow-soak-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-soak-drill.py)
 - [run-workflow-soak-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-soak-drill.ps1)
+- [workflow-worker-restart-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-worker-restart-drill.py)
+- [run-workflow-worker-restart-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-worker-restart-drill.ps1)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)

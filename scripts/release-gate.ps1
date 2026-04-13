@@ -16,6 +16,8 @@ param(
     [switch]$StrictWorkflowLockResilienceDrill,
     [switch]$SkipWorkflowSoakDrill,
     [switch]$StrictWorkflowSoakDrill,
+    [switch]$SkipWorkflowWorkerRestartDrill,
+    [switch]$StrictWorkflowWorkerRestartDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -197,6 +199,25 @@ if (-not $SkipWorkflowSoakDrill) {
             }
             Write-Warning (
                 "Workflow soak drill failed but StrictWorkflowSoakDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipWorkflowWorkerRestartDrill) {
+    Invoke-GateStep -Name "Workflow worker restart drill (self-heal after worker stop)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\workflow-worker-restart-drill.py",
+                "--timeout-seconds", "12"
+            )
+        } catch {
+            if ($StrictWorkflowWorkerRestartDrill) {
+                throw
+            }
+            Write-Warning (
+                "Workflow worker restart drill failed but StrictWorkflowWorkerRestartDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
