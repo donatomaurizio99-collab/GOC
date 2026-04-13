@@ -385,6 +385,7 @@ Observability endpoints:
 
 - `GET /system/metrics`
 - `GET /system/audit`
+- `GET /system/slo`
 - `GET /system/database/integrity?mode=quick|full`
 - `GET /system/faults`
 - `GET /system/faults/summary`
@@ -403,7 +404,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + migration state + backup/restore drill):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + migration state + backup/restore drill):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -415,6 +416,13 @@ Standalone backup/restore drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-backup-restore-drill.ps1
+```
+
+Standalone SLO alert check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-slo-alert-check.ps1 -AllowedStatus ok
 ```
 
 Current result during implementation:
@@ -589,6 +597,8 @@ If a value is rejected:
 - [run-tests.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-tests.ps1)
 - [release-gate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate.ps1)
 - [release-gate-probe.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-probe.py)
+- [slo-alert-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/slo-alert-check.py)
+- [run-slo-alert-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-slo-alert-check.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)

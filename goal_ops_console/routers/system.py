@@ -93,6 +93,195 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
     }
 
 
+def _metric_counter_value(services: AppServices, metric_name: str) -> int:
+    value = services.db.fetch_scalar(
+        "SELECT value FROM metrics_counters WHERE metric_name = ?",
+        metric_name,
+    )
+    return int(value or 0)
+
+
+def _status_from_alerts(alerts: list[dict[str, Any]]) -> str:
+    if any(alert["severity"] == "critical" for alert in alerts):
+        return "critical"
+    if any(alert["severity"] == "warning" for alert in alerts):
+        return "degraded"
+    return "ok"
+
+
+def _build_slo_payload(services: AppServices) -> dict[str, Any]:
+    readiness = _build_readiness_payload(services)
+    db_integrity = services.db.integrity_check(mode="quick")
+    backpressure = services.event_bus.backpressure_snapshot()
+    stuck_events_count = len(services.event_bus.stuck_events())
+
+    http_total = _metric_counter_value(services, "http.requests.total")
+    http_429 = _metric_counter_value(services, "http.requests.status.429")
+
+    status_rows = services.observability.list_metrics(prefix="http.requests.status.", limit=1000)
+    http_5xx = 0
+    for item in status_rows:
+        metric_name = str(item.get("metric_name") or "")
+        suffix = metric_name.rsplit(".", 1)[-1]
+        if not suffix.isdigit():
+            continue
+        status_code = int(suffix)
+        if 500 <= status_code <= 599:
+            http_5xx += int(item.get("value") or 0)
+
+    events_processed = _metric_counter_value(services, "events.processed")
+    events_failed = _metric_counter_value(services, "events.failed")
+    event_attempts = events_processed + events_failed
+
+    max_pending_events = max(1, int(backpressure.get("max_pending_events") or 1))
+    pending_events = int(backpressure.get("pending_events") or 0)
+    backlog_utilization_percent = (pending_events / max_pending_events) * 100.0
+
+    http_success_rate_percent: float | None = None
+    http_429_rate_percent: float | None = None
+    if http_total > 0:
+        http_success_rate_percent = ((http_total - http_5xx) / http_total) * 100.0
+        http_429_rate_percent = (http_429 / http_total) * 100.0
+
+    event_failure_rate_percent: float | None = None
+    if event_attempts > 0:
+        event_failure_rate_percent = (events_failed / event_attempts) * 100.0
+
+    thresholds = {
+        "min_http_request_sample": int(services.settings.slo_min_http_request_sample),
+        "min_http_success_rate_percent": float(services.settings.slo_min_http_success_rate_percent),
+        "max_http_429_rate_percent": float(services.settings.slo_max_http_429_rate_percent),
+        "min_event_attempt_sample": int(services.settings.slo_min_event_attempt_sample),
+        "max_event_failure_rate_percent": float(services.settings.slo_max_event_failure_rate_percent),
+        "max_backlog_utilization_percent": float(services.settings.slo_max_backlog_utilization_percent),
+        "max_stuck_events": int(services.settings.slo_max_stuck_events),
+    }
+
+    alerts: list[dict[str, Any]] = []
+
+    def add_alert(
+        code: str,
+        severity: Literal["warning", "critical"],
+        message: str,
+        *,
+        observed: Any = None,
+        threshold: Any = None,
+    ) -> None:
+        alerts.append(
+            {
+                "code": code,
+                "severity": severity,
+                "message": message,
+                "observed": observed,
+                "threshold": threshold,
+            }
+        )
+
+    if not readiness["ready"]:
+        add_alert(
+            "readiness.not_ready",
+            "critical",
+            "System readiness is false.",
+            observed=readiness,
+            threshold=True,
+        )
+
+    if not bool(db_integrity.get("ok")):
+        add_alert(
+            "database.integrity.failed",
+            "critical",
+            "Database quick integrity check failed.",
+            observed=db_integrity.get("result"),
+            threshold="ok",
+        )
+
+    if backlog_utilization_percent >= thresholds["max_backlog_utilization_percent"]:
+        severity: Literal["warning", "critical"] = (
+            "critical" if bool(backpressure.get("is_throttled")) else "warning"
+        )
+        add_alert(
+            "backpressure.utilization_high",
+            severity,
+            "Event backlog utilization exceeds configured threshold.",
+            observed=round(backlog_utilization_percent, 3),
+            threshold=thresholds["max_backlog_utilization_percent"],
+        )
+
+    if stuck_events_count > thresholds["max_stuck_events"]:
+        add_alert(
+            "events.stuck_processing",
+            "warning",
+            "Stuck processing events exceed configured threshold.",
+            observed=stuck_events_count,
+            threshold=thresholds["max_stuck_events"],
+        )
+
+    if http_total >= thresholds["min_http_request_sample"]:
+        if (
+            http_success_rate_percent is not None
+            and http_success_rate_percent < thresholds["min_http_success_rate_percent"]
+        ):
+            add_alert(
+                "http.success_rate_low",
+                "critical",
+                "HTTP success rate is below SLO.",
+                observed=round(http_success_rate_percent, 3),
+                threshold=thresholds["min_http_success_rate_percent"],
+            )
+        if (
+            http_429_rate_percent is not None
+            and http_429_rate_percent > thresholds["max_http_429_rate_percent"]
+        ):
+            add_alert(
+                "http.429_rate_high",
+                "warning",
+                "HTTP 429 rate exceeds configured threshold.",
+                observed=round(http_429_rate_percent, 3),
+                threshold=thresholds["max_http_429_rate_percent"],
+            )
+
+    if event_attempts >= thresholds["min_event_attempt_sample"]:
+        if (
+            event_failure_rate_percent is not None
+            and event_failure_rate_percent > thresholds["max_event_failure_rate_percent"]
+        ):
+            add_alert(
+                "events.failure_rate_high",
+                "warning",
+                "Event processing failure rate exceeds configured threshold.",
+                observed=round(event_failure_rate_percent, 3),
+                threshold=thresholds["max_event_failure_rate_percent"],
+            )
+
+    status = _status_from_alerts(alerts)
+    indicators = {
+        "http_total_requests": http_total,
+        "http_5xx_requests": http_5xx,
+        "http_429_requests": http_429,
+        "http_success_rate_percent": http_success_rate_percent,
+        "http_429_rate_percent": http_429_rate_percent,
+        "event_attempts": event_attempts,
+        "event_failed": events_failed,
+        "event_failure_rate_percent": event_failure_rate_percent,
+        "backlog_utilization_percent": backlog_utilization_percent,
+        "stuck_events_count": stuck_events_count,
+    }
+    return {
+        "timestamp_utc": _utc_iso(),
+        "spec_version": SPEC_VERSION,
+        "status": status,
+        "alert_count": len(alerts),
+        "alerts": alerts,
+        "thresholds": thresholds,
+        "indicators": indicators,
+        "checks": {
+            "readiness": readiness,
+            "database_integrity": db_integrity,
+            "backpressure": backpressure,
+        },
+    }
+
+
 def _resolve_diagnostics_dir(configured_path: str) -> Path:
     normalized = configured_path.strip()
     if normalized:
@@ -141,6 +330,11 @@ def system_readiness(services: AppServices = Depends(get_services)) -> dict:
     return _build_readiness_payload(services)
 
 
+@router.get("/system/slo")
+def system_slo(services: AppServices = Depends(get_services)) -> dict:
+    return _build_slo_payload(services)
+
+
 @router.get("/system/database/integrity")
 def database_integrity(
     mode: Literal["quick", "full"] = "quick",
@@ -176,6 +370,7 @@ def export_system_diagnostics(services: AppServices = Depends(get_services)) -> 
             "migrations": services.db.migration_status(),
         },
         "readiness": _build_readiness_payload(services),
+        "slo": _build_slo_payload(services),
         "health": _build_health_payload(services),
         "queue": _queue_snapshot(services, limit=200),
         "recent_workflow_runs": services.workflow_catalog.list_runs(limit=50),

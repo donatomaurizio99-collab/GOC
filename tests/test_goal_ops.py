@@ -1379,6 +1379,7 @@ def test_63_system_diagnostics_exports_snapshot():
 
             snapshot = json.loads(file_path.read_text(encoding="utf-8"))
             assert snapshot["readiness"]["ready"] is True
+            assert snapshot["slo"]["status"] == "ok"
             assert "health" in snapshot
             assert "recent_workflow_runs" in snapshot
             assert snapshot["database"]["integrity"]["ok"] is True
@@ -1532,3 +1533,59 @@ def test_69_backup_restore_drill_reports_success():
     assert payload["restored_integrity"]["full_ok"] is True
     assert payload["seed_validation"]["ok"] is True
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_70_system_slo_reports_ok_by_default(client):
+    response = client.get("/system/slo")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["alert_count"] == 0
+    assert payload["checks"]["readiness"]["ready"] is True
+    assert payload["checks"]["database_integrity"]["ok"] is True
+
+
+def test_71_system_slo_reports_degraded_when_429_rate_exceeds_threshold(client):
+    services = client.app.state.services
+    services.observability.increment_metric("http.requests.total", delta=200)
+    services.observability.increment_metric("http.requests.status.429", delta=20)
+
+    response = client.get("/system/slo")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert any(alert["code"] == "http.429_rate_high" for alert in payload["alerts"])
+
+
+def test_72_system_slo_reports_critical_when_readiness_fails():
+    app = create_app(Settings(database_url=":memory:"))
+    with TestClient(app) as local_client:
+        local_client.app.state.services.workflow_catalog.stop_worker()
+        response = local_client.get("/system/slo")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "critical"
+        assert any(alert["code"] == "readiness.not_ready" for alert in payload["alerts"])
+
+
+def test_73_slo_alert_check_reports_ok_memory():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "slo-alert-check.py"),
+        "--database-url",
+        ":memory:",
+        "--allowed-status",
+        "ok",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["observed_status"] == "ok"
+    assert payload["allowed_status"] == "ok"
