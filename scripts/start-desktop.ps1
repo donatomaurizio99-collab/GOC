@@ -2,7 +2,12 @@ param(
     [string]$DatabaseUrl = "goal_ops.db",
     [int]$Port = 0,
     [int]$Width = 1440,
-    [int]$Height = 900
+    [int]$Height = 900,
+    [int]$MinWidth = 1024,
+    [int]$MinHeight = 720,
+    [switch]$Maximized,
+    [switch]$NoWindowState,
+    [string]$WindowStatePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,10 +29,21 @@ $args = @(
     "-m", "goal_ops_console.desktop",
     "--database-url", $DatabaseUrl,
     "--width", $Width,
-    "--height", $Height
+    "--height", $Height,
+    "--min-width", $MinWidth,
+    "--min-height", $MinHeight
 )
 if ($Port -gt 0) {
     $args += @("--port", $Port)
+}
+if ($Maximized) {
+    $args += "--maximized"
+}
+if ($NoWindowState) {
+    $args += "--no-window-state"
+}
+if (-not [string]::IsNullOrWhiteSpace($WindowStatePath)) {
+    $args += @("--window-state-path", $WindowStatePath)
 }
 
 python @args

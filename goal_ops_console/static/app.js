@@ -12,6 +12,7 @@ const SECTION_IDS = [
   "health-section",
   "states-section",
 ];
+const IS_DESKTOP_MODE = new URLSearchParams(window.location.search).get("desktop") === "1";
 const VISUAL_PRESETS = [
   {
     id: "warm",
@@ -169,7 +170,10 @@ function updateToolbarStatus() {
   const densityPart = `Density: ${densityMode}.`;
   const activeVisualPreset = VISUAL_PRESETS.find((preset) => preset.id === visualMode) || VISUAL_PRESETS[0];
   const visualPart = `Visual: ${activeVisualPreset.label}.`;
-  status.textContent = `${filterPart} ${refreshPart} ${densityPart} ${visualPart}`;
+  const desktopPart = IS_DESKTOP_MODE
+    ? "Desktop shortcuts: Ctrl+1/2/3 visual, Ctrl+Shift+F filter, Ctrl+Shift+R refresh."
+    : "";
+  status.textContent = `${filterPart} ${refreshPart} ${densityPart} ${visualPart}${desktopPart ? ` ${desktopPart}` : ""}`;
 }
 
 function setDensityMode(mode) {
@@ -1100,6 +1104,41 @@ document.getElementById("toggle-visual-mode").addEventListener("click", () => {
   toggleVisualMode();
 });
 
+function isTextInputTarget(target) {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target?.isContentEditable;
+}
+
+function handleDesktopShortcut(event) {
+  if (!IS_DESKTOP_MODE || !event.ctrlKey || event.altKey) {
+    return false;
+  }
+  const key = String(event.key || "").toLowerCase();
+  if (event.shiftKey && key === "f") {
+    event.preventDefault();
+    const filterInput = document.getElementById("global-filter");
+    filterInput?.focus();
+    filterInput?.select();
+    return true;
+  }
+  if (event.shiftKey && key === "r") {
+    event.preventDefault();
+    refreshAll().catch((error) => {
+      showError("system-feedback", error);
+    });
+    return true;
+  }
+  if (!event.shiftKey && ["1", "2", "3"].includes(key) && !isTextInputTarget(event.target)) {
+    event.preventDefault();
+    const presetByShortcut = { "1": "warm", "2": "graphite", "3": "signal" };
+    setVisualMode(presetByShortcut[key]);
+    return true;
+  }
+  return false;
+}
+
 window.addEventListener("scroll", () => {
   if (jumpScrollScheduled) {
     return;
@@ -1112,15 +1151,13 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 
 document.addEventListener("keydown", (event) => {
+  if (handleDesktopShortcut(event)) {
+    return;
+  }
   if (event.key !== "/") {
     return;
   }
-  const target = event.target;
-  const isTextInput = target instanceof HTMLInputElement
-    || target instanceof HTMLTextAreaElement
-    || target instanceof HTMLSelectElement
-    || target?.isContentEditable;
-  if (isTextInput) {
+  if (isTextInputTarget(event.target)) {
     return;
   }
   event.preventDefault();

@@ -69,11 +69,16 @@ Optional startup parameters:
 ```powershell
 .\scripts\start-desktop.ps1 -DatabaseUrl "goal_ops.db" -Width 1600 -Height 1000
 .\scripts\start-desktop.ps1 -Port 8010
+.\scripts\start-desktop.ps1 -Maximized
+.\scripts\start-desktop.ps1 -MinWidth 1200 -MinHeight 800
+.\scripts\start-desktop.ps1 -NoWindowState
+.\scripts\start-desktop.ps1 -WindowStatePath ".\custom-window-state.json"
 ```
 
 Behavior:
 - starts an embedded local FastAPI server (`127.0.0.1`)
 - opens the same dashboard UI in a native window via `pywebview`
+- remembers window size/position across launches (disable with `-NoWindowState`)
 - shuts down the embedded server when the desktop window closes
 
 ## Operator Command Bar (UI)
@@ -86,6 +91,7 @@ The dashboard header now includes a command bar for faster operator workflows:
 - `Density` toggle switches between `Comfy` and `Compact` layout.
 - `Visual` toggle cycles through `Warm`, `Graphite`, and `Signal` presets.
 - `Quick jump` buttons scroll directly to major panels (`Goals`, `Tasks`, `Operator`, `Events`, `Trace`, `Audit`, `Faults`, `Health`, `States`).
+- Desktop mode shortcuts: `Ctrl+1/2/3` (preset), `Ctrl+Shift+F` (focus global filter), `Ctrl+Shift+R` (manual refresh).
 
 ## Build Windows Desktop EXE (Preview)
 
