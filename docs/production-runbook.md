@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictDiskPressureFaultInjectionDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -22,6 +22,7 @@ This gate covers:
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - power-loss durability drill (abort transaction process before commit and after commit, validate rollback + durable persistence)
+- WAL checkpoint crash drill (hard-abort after commit but before checkpoint completion, verify durability + checkpoint recovery)
 - disk-pressure fault-injection drill (SQLITE_FULL/IOERR/readonly signatures trigger deterministic safe-mode degradation and recovery)
 - real SQLite FULL drill (actual `max_page_count` saturation to force natural write failure + controlled recovery)
 - DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
@@ -80,6 +81,12 @@ Manual power-loss durability drill invocation:
 
 ```powershell
 .\scripts\run-power-loss-durability-drill.ps1 -TransactionRows 240 -PayloadBytes 256
+```
+
+Manual WAL checkpoint crash drill invocation:
+
+```powershell
+.\scripts\run-wal-checkpoint-crash-drill.ps1 -Rows 240 -PayloadBytes 1024 -CheckpointMode TRUNCATE
 ```
 
 Manual disk-pressure fault-injection drill invocation:
@@ -619,7 +626,26 @@ Actions:
    - `app_probe.slo_status = ok`
 3. If durability checks fail, block release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
 
-### 3.22 Disk pressure, IO errors, or permission-flip uncertainty
+### 3.22 WAL checkpoint crash durability uncertainty
+
+Symptoms:
+- process crash/power-loss concern after a transaction commit but before WAL checkpoint completion
+- uncertainty whether committed rows remain durable and whether recovery checkpoint returns the DB to a clean steady state
+
+Actions:
+1. Run WAL checkpoint crash drill:
+   ```powershell
+   .\scripts\run-wal-checkpoint-crash-drill.ps1 -Rows 240 -PayloadBytes 1024 -CheckpointMode TRUNCATE
+   ```
+2. Confirm drill outputs:
+   - `scenario.rows_persisted_before_crash = rows`
+   - `scenario.rows_observed_after_crash = rows`
+   - `checkpoint_recovery.busy = 0`
+   - `app_probe.readiness_ready = true`
+   - `app_probe.slo_status = ok`
+3. If durability, integrity, or checkpoint recovery checks fail, hold release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
+
+### 3.23 Disk pressure, IO errors, or permission-flip uncertainty
 
 Symptoms:
 - intermittent writes fail with SQLite errors such as `database or disk is full`, `disk i/o error`, or `attempt to write a readonly database`
@@ -639,7 +665,7 @@ Actions:
    - `slo.after_recovery = ok`
 3. If any case fails, hold release and escalate with drill JSON + diagnostics snapshot before retrying rollout.
 
-### 3.23 Real SQLite FULL saturation uncertainty
+### 3.24 Real SQLite FULL saturation uncertainty
 
 Symptoms:
 - uncertainty whether the app handles true file-backed `SQLITE_FULL` behavior (not only simulated exceptions)

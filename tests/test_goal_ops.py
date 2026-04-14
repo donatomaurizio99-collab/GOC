@@ -2592,3 +2592,53 @@ def test_100_sqlite_real_full_drill_reports_success():
     assert payload["workflow_runs"]["running_during_fault"] == []
     assert payload["workflow_runs"]["running_after_recovery"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_101_wal_checkpoint_crash_drill_reports_success():
+    workspace = _local_test_dir("pytest-wal-checkpoint-crash-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "wal-checkpoint-crash-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--rows",
+        "60",
+        "--payload-bytes",
+        "128",
+        "--startup-timeout-seconds",
+        "15",
+        "--sleep-before-checkpoint-seconds",
+        "30",
+        "--checkpoint-mode",
+        "TRUNCATE",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["scenario"]["rows_persisted_before_crash"] == 60
+    assert payload["scenario"]["rows_observed_after_crash"] == 60
+    assert payload["checkpoint_recovery"]["busy"] == 0
+    assert payload["integrity"]["after_crash"]["quick_ok"] is True
+    assert payload["integrity"]["after_crash"]["full_ok"] is True
+    assert payload["integrity"]["after_recovery_checkpoint"]["quick_ok"] is True
+    assert payload["integrity"]["after_recovery_checkpoint"]["full_ok"] is True
+    assert payload["app_probe"]["readiness_ready"] is True
+    assert payload["app_probe"]["slo_status"] == "ok"
+    assert payload["app_probe"]["safe_mode_active"] is False
+    assert payload["app_probe"]["post_recovery_goal_status_code"] == 201
+    assert payload["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)

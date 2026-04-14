@@ -16,6 +16,8 @@ param(
     [switch]$StrictRecoveryHardAbortDrill,
     [switch]$SkipPowerLossDurabilityDrill,
     [switch]$StrictPowerLossDurabilityDrill,
+    [switch]$SkipWalCheckpointCrashDrill,
+    [switch]$StrictWalCheckpointCrashDrill,
     [switch]$SkipDiskPressureFaultInjectionDrill,
     [switch]$StrictDiskPressureFaultInjectionDrill,
     [switch]$SkipSqliteRealFullDrill,
@@ -239,6 +241,32 @@ if (-not $SkipPowerLossDurabilityDrill) {
             }
             Write-Warning (
                 "Power-loss durability drill failed but StrictPowerLossDurabilityDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipWalCheckpointCrashDrill) {
+    Invoke-GateStep -Name "WAL checkpoint crash drill (hard-abort before checkpoint + post-restart recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\wal-checkpoint-crash-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\wal-checkpoint-crash-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--rows", "240",
+                "--payload-bytes", "1024",
+                "--startup-timeout-seconds", "15",
+                "--sleep-before-checkpoint-seconds", "30",
+                "--checkpoint-mode", "TRUNCATE"
+            )
+        } catch {
+            if ($StrictWalCheckpointCrashDrill) {
+                throw
+            }
+            Write-Warning (
+                "WAL checkpoint crash drill failed but StrictWalCheckpointCrashDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
