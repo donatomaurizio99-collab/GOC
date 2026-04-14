@@ -2493,3 +2493,51 @@ def test_98_power_loss_durability_drill_reports_success():
     assert payload["app_probe"]["integrity_ok"] is True
     assert payload["post_recovery_write_rows"] == 1
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_99_disk_pressure_fault_injection_drill_reports_success():
+    workspace = _local_test_dir("pytest-disk-pressure-fault-injection-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disk-pressure-fault-injection-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--fault-injections",
+        "2",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == ["sqlite_full", "sqlite_ioerr", "readonly_permission_flip"]
+    for case in payload["cases"]:
+        assert case["success"] is True
+        assert case["safe_mode"]["active_after_faults"] is True
+        assert case["safe_mode"]["active_after_disable"] is False
+        assert case["status_codes"]["blocked_mutation"] == 503
+        assert case["status_codes"]["post_recovery_goal_create"] == 201
+        assert case["readiness"]["during_fault"] is False
+        assert case["readiness"]["after_recovery"] is True
+        assert case["slo"]["during_fault"] == "critical"
+        assert case["slo"]["after_recovery"] == "ok"
+        assert case["integrity"]["during_fault_quick_ok"] is True
+        assert case["integrity"]["during_fault_full_ok"] is True
+        assert case["integrity"]["after_recovery_quick_ok"] is True
+        assert case["integrity"]["after_recovery_full_ok"] is True
+        assert case["workflow_runs"]["running_during_fault"] == []
+        assert case["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)

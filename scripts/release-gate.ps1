@@ -16,6 +16,8 @@ param(
     [switch]$StrictRecoveryHardAbortDrill,
     [switch]$SkipPowerLossDurabilityDrill,
     [switch]$StrictPowerLossDurabilityDrill,
+    [switch]$SkipDiskPressureFaultInjectionDrill,
+    [switch]$StrictDiskPressureFaultInjectionDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
     [switch]$StrictDbCorruptionQuarantineDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
@@ -235,6 +237,28 @@ if (-not $SkipPowerLossDurabilityDrill) {
             }
             Write-Warning (
                 "Power-loss durability drill failed but StrictPowerLossDurabilityDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDiskPressureFaultInjectionDrill) {
+    Invoke-GateStep -Name "Disk-pressure fault-injection drill (SQLITE_FULL/IOERR/readonly safe-mode recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\disk-pressure-fault-injection-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\disk-pressure-fault-injection-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--fault-injections", "2"
+            )
+        } catch {
+            if ($StrictDiskPressureFaultInjectionDrill) {
+                throw
+            }
+            Write-Warning (
+                "Disk-pressure fault-injection drill failed but StrictDiskPressureFaultInjectionDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictDiskPressureFaultInjectionDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -22,6 +22,7 @@ This gate covers:
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - power-loss durability drill (abort transaction process before commit and after commit, validate rollback + durable persistence)
+- disk-pressure fault-injection drill (SQLITE_FULL/IOERR/readonly signatures trigger deterministic safe-mode degradation and recovery)
 - DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
@@ -78,6 +79,12 @@ Manual power-loss durability drill invocation:
 
 ```powershell
 .\scripts\run-power-loss-durability-drill.ps1 -TransactionRows 240 -PayloadBytes 256
+```
+
+Manual disk-pressure fault-injection drill invocation:
+
+```powershell
+.\scripts\run-disk-pressure-fault-injection-drill.ps1 -FaultInjections 2
 ```
 
 Manual DB corruption quarantine drill invocation:
@@ -604,6 +611,26 @@ Actions:
    - `app_probe.readiness_ready = true`
    - `app_probe.slo_status = ok`
 3. If durability checks fail, block release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
+
+### 3.22 Disk pressure, IO errors, or permission-flip uncertainty
+
+Symptoms:
+- intermittent writes fail with SQLite errors such as `database or disk is full`, `disk i/o error`, or `attempt to write a readonly database`
+- release confidence is unclear for safe degradation/recovery behavior under write-path storage faults
+
+Actions:
+1. Run disk-pressure fault-injection drill:
+   ```powershell
+   .\scripts\run-disk-pressure-fault-injection-drill.ps1 -FaultInjections 2
+   ```
+2. Confirm per-case outputs:
+   - `safe_mode.active_after_faults = true`
+   - `status_codes.blocked_mutation = 503`
+   - `readiness.during_fault = false`
+   - `slo.during_fault = critical`
+   - `readiness.after_recovery = true`
+   - `slo.after_recovery = ok`
+3. If any case fails, hold release and escalate with drill JSON + diagnostics snapshot before retrying rollout.
 
 ## 4. Operational Defaults
 
