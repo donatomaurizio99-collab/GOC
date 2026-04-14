@@ -34,6 +34,8 @@ param(
     [switch]$StrictLongSoakBudgetDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
+    [switch]$SkipUpgradeDowngradeCompatibilityDrill,
+    [switch]$StrictUpgradeDowngradeCompatibilityDrill,
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
     [switch]$SkipIncidentRollbackDrill,
@@ -444,6 +446,32 @@ if (-not $SkipMigrationRehearsal) {
             }
             Write-Warning (
                 "Migration rehearsal failed but StrictMigrationRehearsal is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipUpgradeDowngradeCompatibilityDrill) {
+    Invoke-GateStep -Name "Upgrade/downgrade compatibility drill (N-1 -> N -> N-1 rollback path)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\upgrade-downgrade-compatibility-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\upgrade-downgrade-compatibility-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--n-minus-1-runs", "800",
+                "--payload-bytes", "512",
+                "--max-upgrade-ms", "10000",
+                "--max-rollback-restore-ms", "10000",
+                "--max-reupgrade-ms", "10000"
+            )
+        } catch {
+            if ($StrictUpgradeDowngradeCompatibilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Upgrade/downgrade compatibility drill failed but StrictUpgradeDowngradeCompatibilityDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

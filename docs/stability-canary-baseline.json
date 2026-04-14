@@ -7,6 +7,9 @@
     "db_corruption_quarantine": {
       "baseline_duration_seconds": 5.0
     },
+    "upgrade_downgrade_compatibility": {
+      "baseline_duration_seconds": 8.0
+    },
     "db_safe_mode_watchdog": {
       "baseline_duration_seconds": 3.0
     },

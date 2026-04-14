@@ -221,9 +221,6 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_status_created_at
 ON workflow_runs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_correlation_id
 ON workflow_runs(correlation_id, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency
-ON workflow_runs(workflow_id, idempotency_key)
-WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS audit_log (
   audit_id        TEXT PRIMARY KEY,
@@ -449,6 +446,7 @@ class Database:
         try:
             conn.executescript(SCHEMA)
             self._apply_migrations(conn)
+            self._ensure_post_migration_indexes(conn)
         finally:
             if conn is not self._keeper:
                 conn.close()
@@ -544,6 +542,15 @@ class Database:
         self._create_migration_backup(conn, [version for version, _ in pending])
         for _, script in pending:
             conn.executescript(script)
+
+    def _ensure_post_migration_indexes(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency
+ON workflow_runs(workflow_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+"""
+        )
 
     def _pending_migrations(self, conn: sqlite3.Connection) -> list[tuple[int, str]]:
         applied_rows = conn.execute("SELECT version FROM schema_migrations").fetchall()

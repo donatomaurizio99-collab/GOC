@@ -2256,6 +2256,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                 "drills": {
                     "release_freeze_policy": {"baseline_duration_seconds": 0.1},
                     "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
                     "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
                     "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
@@ -2405,4 +2406,49 @@ def test_96_db_corruption_quarantine_drill_reports_success():
     assert payload["startup_recovery"]["recovered"] is True
     assert payload["blocked_status_code"] == 503
     assert payload["post_disable_goal_create_status_code"] == 201
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_97_upgrade_downgrade_compatibility_drill_reports_success():
+    workspace = _local_test_dir("pytest-upgrade-downgrade-compatibility-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "upgrade-downgrade-compatibility-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--n-minus-1-runs",
+        "120",
+        "--payload-bytes",
+        "128",
+        "--max-upgrade-ms",
+        "15000",
+        "--max-rollback-restore-ms",
+        "15000",
+        "--max-reupgrade-ms",
+        "15000",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["probes"]["upgrade"]["readiness_ready"] is True
+    assert payload["probes"]["upgrade"]["slo_status"] == "ok"
+    assert payload["probes"]["reupgrade"]["readiness_ready"] is True
+    assert payload["probes"]["reupgrade"]["slo_status"] == "ok"
+    assert payload["snapshots"]["n_minus_1"]["schema"]["has_idempotency_key"] is False
+    assert payload["snapshots"]["upgrade"]["schema"]["has_idempotency_key"] is True
+    assert payload["snapshots"]["rollback"]["schema"]["has_idempotency_key"] is False
     shutil.rmtree(workspace, ignore_errors=True)

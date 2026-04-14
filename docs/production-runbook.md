@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -33,6 +33,7 @@ This gate covers:
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
+- upgrade/downgrade compatibility drill (N-1 -> N upgrade + rollback restore to N-1 + legacy schema probe)
 - backup/restore drill with row-count and integrity verification on restored DB
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 
@@ -40,6 +41,12 @@ Manual migration rehearsal invocation (same thresholds as gate defaults):
 
 ```powershell
 .\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000 -XLargeRuns 9000
+```
+
+Manual upgrade/downgrade compatibility drill invocation:
+
+```powershell
+.\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
 ```
 
 Manual auto-rollback policy invocation (live endpoint, stable ring):
@@ -178,7 +185,7 @@ After release is live:
 
 ### 1.6 Nightly stability canary
 
-The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including DB corruption quarantine startup recovery.
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including DB corruption quarantine startup recovery and upgrade/downgrade compatibility.
 
 Manual canary invocation:
 
@@ -554,6 +561,24 @@ Actions:
    ```powershell
    Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/system/safe-mode/disable -ContentType "application/json" -Body '{"reason":"DB quarantine validated and recovery complete"}'
    ```
+
+### 3.20 Upgrade or rollback compatibility uncertainty
+
+Symptoms:
+- migration rehearsal passes, but there is no fresh proof for N-1 -> N -> N-1 compatibility on current build
+- release decision depends on safe rollback confidence under real data copy
+
+Actions:
+1. Run compatibility drill:
+   ```powershell
+   .\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
+   ```
+2. Confirm drill outputs:
+   - `probes.upgrade.readiness_ready = true`
+   - `probes.upgrade.slo_status = ok`
+   - `probes.reupgrade.readiness_ready = true`
+   - `probes.reupgrade.slo_status = ok`
+3. If drill fails any threshold or data-preservation check, hold release and keep rollback path ready using migration backup.
 
 ## 4. Operational Defaults
 

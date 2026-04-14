@@ -410,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -429,6 +429,13 @@ Standalone migration rehearsal drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000 -XLargeRuns 9000
+```
+
+Standalone upgrade/downgrade compatibility drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
 ```
 
 Standalone auto-rollback policy check (live service):
@@ -579,7 +586,7 @@ python .\scripts\desktop-smoke.py
 
 ## Nightly Stability Canary
 
-Run the full canary profile locally (includes release-freeze policy, DB corruption quarantine, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
+Run the full canary profile locally (includes release-freeze policy, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -756,6 +763,8 @@ If a value is rejected:
 - [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
+- [upgrade-downgrade-compatibility-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/upgrade-downgrade-compatibility-drill.py)
+- [run-upgrade-downgrade-compatibility-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-upgrade-downgrade-compatibility-drill.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
 - [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
