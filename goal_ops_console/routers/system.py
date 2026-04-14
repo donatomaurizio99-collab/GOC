@@ -58,12 +58,14 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
         "invariant_violations": services.state_manager.find_invariant_violations(),
         "invariant_monitor": services.invariant_monitor.status(),
         "safe_mode": services.runtime_guard.safe_mode_snapshot(),
+        "database_startup_recovery": services.db.startup_recovery_status(),
     }
 
 
 def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
     db_ok = True
     db_error: str | None = None
+    db_startup_recovery = services.db.startup_recovery_status()
     try:
         services.db.fetch_scalar("SELECT 1")
     except Exception as exc:
@@ -158,6 +160,7 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
             "database": {
                 "ok": db_ok,
                 "error": db_error,
+                "startup_recovery": db_startup_recovery,
             },
             "workflow_worker": {
                 **worker_status,
@@ -198,6 +201,8 @@ def _status_from_alerts(alerts: list[dict[str, Any]]) -> str:
 
 def _build_slo_payload(services: AppServices) -> dict[str, Any]:
     readiness = _build_readiness_payload(services)
+    database_check = readiness["checks"].get("database", {})
+    db_startup_recovery = database_check.get("startup_recovery", {})
     safe_mode = readiness["checks"].get("safe_mode", {})
     invariant_monitor = readiness["checks"].get("invariant_monitor", {})
     db_integrity = services.db.integrity_check(mode="quick")
@@ -282,6 +287,15 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
             "Database quick integrity check failed.",
             observed=db_integrity.get("result"),
             threshold="ok",
+        )
+
+    if bool(db_startup_recovery.get("triggered")):
+        add_alert(
+            "database.startup_recovery.triggered",
+            "critical",
+            "Startup corruption recovery quarantined the database and requires operator validation.",
+            observed=db_startup_recovery,
+            threshold=False,
         )
 
     if bool(safe_mode.get("active")):
@@ -373,6 +387,7 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
         "event_failure_rate_percent": event_failure_rate_percent,
         "backlog_utilization_percent": backlog_utilization_percent,
         "stuck_events_count": stuck_events_count,
+        "database_startup_recovery_triggered": bool(db_startup_recovery.get("triggered")),
         "safe_mode_active": bool(safe_mode.get("active")),
         "invariant_violation_count": invariant_violation_count,
     }
@@ -457,6 +472,7 @@ def database_integrity(
         "timestamp_utc": _utc_iso(),
         "integrity": check,
         "file": services.db.database_file_info(),
+        "startup_recovery": services.db.startup_recovery_status(),
         "migrations": services.db.migration_status(),
     }
 
@@ -479,6 +495,7 @@ def export_system_diagnostics(services: AppServices = Depends(get_services)) -> 
             "normalized_url": services.db.database_url,
             "file": services.db.database_file_info(),
             "integrity": services.db.integrity_check(mode="quick"),
+            "startup_recovery": services.db.startup_recovery_status(),
             "migrations": services.db.migration_status(),
         },
         "readiness": _build_readiness_payload(services),

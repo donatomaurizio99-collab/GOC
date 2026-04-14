@@ -91,6 +91,11 @@ WORKFLOW_STARTUP_RECOVERY_MAX_AGE_SECONDS = _env_int(
 )
 DIAGNOSTICS_DIR = os.getenv("GOAL_OPS_DIAGNOSTICS_DIR", "")
 DB_MIGRATION_BACKUP_DIR = os.getenv("GOAL_OPS_DB_MIGRATION_BACKUP_DIR", "")
+DB_QUARANTINE_DIR = os.getenv("GOAL_OPS_DB_QUARANTINE_DIR", "")
+DB_STARTUP_CORRUPTION_RECOVERY_ENABLED = _env_bool(
+    "GOAL_OPS_DB_STARTUP_CORRUPTION_RECOVERY_ENABLED",
+    True,
+)
 
 # SLO / Alerting
 SLO_MIN_HTTP_REQUEST_SAMPLE = _env_int("GOAL_OPS_SLO_MIN_HTTP_REQUEST_SAMPLE", 20)
@@ -169,6 +174,8 @@ class Settings:
     workflow_startup_recovery_max_age_seconds: int = WORKFLOW_STARTUP_RECOVERY_MAX_AGE_SECONDS
     diagnostics_dir: str = DIAGNOSTICS_DIR
     db_migration_backup_dir: str = DB_MIGRATION_BACKUP_DIR
+    db_quarantine_dir: str = DB_QUARANTINE_DIR
+    db_startup_corruption_recovery_enabled: bool = DB_STARTUP_CORRUPTION_RECOVERY_ENABLED
     slo_min_http_request_sample: int = SLO_MIN_HTTP_REQUEST_SAMPLE
     slo_min_event_attempt_sample: int = SLO_MIN_EVENT_ATTEMPT_SAMPLE
     slo_min_http_success_rate_percent: float = SLO_MIN_HTTP_SUCCESS_RATE_PERCENT

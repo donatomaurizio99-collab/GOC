@@ -39,6 +39,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
     db = Database(
         app_settings.database_url,
         migration_backup_dir=app_settings.db_migration_backup_dir,
+        quarantine_dir=app_settings.db_quarantine_dir,
+        startup_corruption_recovery_enabled=app_settings.db_startup_corruption_recovery_enabled,
     )
     db.initialize()
     observability = ObservabilityService(db)
@@ -50,6 +52,19 @@ def build_services(settings: Settings | None = None) -> AppServices:
         auto_disable_after_seconds=app_settings.safe_mode_auto_disable_after_seconds,
         observability=observability,
     )
+    startup_recovery = db.startup_recovery_status()
+    if bool(startup_recovery.get("triggered")) and bool(startup_recovery.get("recovered")):
+        quarantined_path = str(startup_recovery.get("quarantined_path") or "")
+        runtime_guard.activate_safe_mode(
+            reason=(
+                "Startup detected SQLite corruption; file was quarantined"
+                + (f" at {quarantined_path}." if quarantined_path else ".")
+                + " Verify backup/restore plan before re-enabling mutating API operations."
+            ),
+            source="db_startup_recovery",
+            auto=True,
+        )
+        observability.increment_metric("runtime.db_startup_recovery.quarantined")
     event_bus = EventBus(
         db,
         default_consumer_id=app_settings.consumer_id,

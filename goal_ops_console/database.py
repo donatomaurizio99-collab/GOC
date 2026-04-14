@@ -1,4 +1,5 @@
 import contextlib
+import shutil
 import sqlite3
 import time
 import uuid
@@ -249,6 +250,13 @@ CREATE INDEX IF NOT EXISTS idx_metrics_updated_at ON metrics_counters(updated_at
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 LOCK_RETRY_ATTEMPTS = 8
 LOCK_RETRY_BASE_SECONDS = 0.01
+SQLITE_CORRUPTION_SIGNATURES = (
+    "database disk image is malformed",
+    "file is not a database",
+    "malformed database schema",
+    "database malformed",
+    "file is encrypted or is not a database",
+)
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
         1,
@@ -341,11 +349,15 @@ class Database:
         database_url: str,
         *,
         migration_backup_dir: str = "",
+        quarantine_dir: str = "",
+        startup_corruption_recovery_enabled: bool = True,
     ):
         self.original_url = database_url
         self.database_url = self._normalize_database_url(database_url)
         self._uri = self.database_url.startswith("file:")
         self.migration_backup_dir = migration_backup_dir.strip()
+        self.quarantine_dir = quarantine_dir.strip()
+        self.startup_corruption_recovery_enabled = bool(startup_corruption_recovery_enabled)
         self._database_path = self._resolve_database_file_path(self.database_url)
         self._database_existed_at_startup = bool(
             self._database_path is not None and self._database_path.exists()
@@ -353,6 +365,18 @@ class Database:
         self._last_migration_backup_path: str | None = None
         self._last_migration_backup_created_at: str | None = None
         self._last_migration_backup_versions: list[int] = []
+        quarantine_root = self._resolve_quarantine_root()
+        self._startup_recovery_state: dict[str, object] = {
+            "triggered": False,
+            "recovered": False,
+            "error": None,
+            "reason": None,
+            "at_utc": None,
+            "original_path": str(self._database_path) if self._database_path is not None else None,
+            "quarantined_path": None,
+            "quarantine_dir": str(quarantine_root) if quarantine_root is not None else None,
+            "operator_action": None,
+        }
         self._keeper = None
         if "mode=memory" in self.database_url:
             self._keeper = self._connect()
@@ -369,6 +393,13 @@ class Database:
         if normalized.name == ":memory:":
             return None
         return normalized
+
+    def _resolve_quarantine_root(self) -> Path | None:
+        if self._database_path is None:
+            return None
+        if self.quarantine_dir:
+            return Path(self.quarantine_dir).expanduser()
+        return self._database_path.parent / "db_quarantine"
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(
@@ -390,6 +421,12 @@ class Database:
             or "database schema is locked" in message
         )
 
+    def _is_corruption_error(self, error: Exception) -> bool:
+        message = str(error).strip().lower()
+        if not message:
+            return False
+        return any(signature in message for signature in SQLITE_CORRUPTION_SIGNATURES)
+
     def _run_with_retry(self, operation: Callable[[sqlite3.Connection], T]) -> T:
         last_error: sqlite3.OperationalError | None = None
         for attempt in range(LOCK_RETRY_ATTEMPTS):
@@ -407,7 +444,7 @@ class Database:
             raise last_error
         raise RuntimeError("SQLite retry loop exited unexpectedly")
 
-    def initialize(self) -> None:
+    def _initialize_once(self) -> None:
         conn = self._keeper or self._connect()
         try:
             conn.executescript(SCHEMA)
@@ -415,6 +452,90 @@ class Database:
         finally:
             if conn is not self._keeper:
                 conn.close()
+
+    def _quarantine_corrupted_database(self, *, reason: str) -> dict[str, object]:
+        if self._database_path is None:
+            raise RuntimeError("Corruption quarantine requires a file-backed database path.")
+        if not self._database_path.exists():
+            raise RuntimeError(f"Corrupted database file not found: {self._database_path}")
+
+        quarantine_root = self._resolve_quarantine_root()
+        if quarantine_root is None:
+            raise RuntimeError("Failed to resolve quarantine directory for corrupted database.")
+
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        suffix = self._database_path.suffix or ".sqlite3"
+        quarantined_path = quarantine_root / (
+            f"{self._database_path.stem}-corrupt-{timestamp}-{uuid.uuid4().hex[:8]}{suffix}"
+        )
+
+        quarantine_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(self._database_path), str(quarantined_path))
+        return {
+            "triggered": True,
+            "recovered": True,
+            "error": None,
+            "reason": reason,
+            "at_utc": datetime.now(UTC).isoformat(),
+            "original_path": str(self._database_path),
+            "quarantined_path": str(quarantined_path),
+            "quarantine_dir": str(quarantine_root),
+            "operator_action": (
+                "Inspect quarantined DB, restore from known-good backup if needed, "
+                "then disable safe mode with operator reason."
+            ),
+        }
+
+    def startup_recovery_status(self) -> dict[str, object]:
+        snapshot = dict(self._startup_recovery_state)
+        quarantined_path = snapshot.get("quarantined_path")
+        if isinstance(quarantined_path, str) and quarantined_path:
+            snapshot["quarantined_exists"] = Path(quarantined_path).exists()
+        else:
+            snapshot["quarantined_exists"] = False
+        return snapshot
+
+    def initialize(self) -> None:
+        startup_error: Exception | None = None
+        try:
+            self._initialize_once()
+            return
+        except Exception as exc:
+            startup_error = exc
+            can_attempt_recovery = (
+                self.startup_corruption_recovery_enabled
+                and self._database_path is not None
+                and self._database_path.exists()
+                and self._is_corruption_error(exc)
+            )
+            if not can_attempt_recovery:
+                raise
+
+        try:
+            self._startup_recovery_state = self._quarantine_corrupted_database(
+                reason=str(startup_error),
+            )
+        except Exception as quarantine_error:
+            self._startup_recovery_state = {
+                **self._startup_recovery_state,
+                "triggered": True,
+                "recovered": False,
+                "error": str(quarantine_error),
+                "reason": str(startup_error),
+                "at_utc": datetime.now(UTC).isoformat(),
+                "operator_action": (
+                    "Manually quarantine or replace the database file before restarting the service."
+                ),
+            }
+            raise RuntimeError(
+                "Detected SQLite corruption but quarantine recovery failed during startup."
+            ) from quarantine_error
+
+        self._database_existed_at_startup = False
+        self._last_migration_backup_path = None
+        self._last_migration_backup_created_at = None
+        self._last_migration_backup_versions = []
+        self._initialize_once()
 
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
         pending = self._pending_migrations(conn)

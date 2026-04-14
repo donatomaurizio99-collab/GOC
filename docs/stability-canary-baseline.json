@@ -4,6 +4,9 @@
     "release_freeze_policy": {
       "baseline_duration_seconds": 6.0
     },
+    "db_corruption_quarantine": {
+      "baseline_duration_seconds": 5.0
+    },
     "db_safe_mode_watchdog": {
       "baseline_duration_seconds": 3.0
     },

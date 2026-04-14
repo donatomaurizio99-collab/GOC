@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -21,6 +21,7 @@ This gate covers:
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
+- DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
 - workflow worker restart drill (stop worker, enqueue run, and verify self-healing restart path)
@@ -63,6 +64,12 @@ Manual recovery hard-abort drill invocation:
 
 ```powershell
 .\scripts\run-recovery-hard-abort-drill.ps1
+```
+
+Manual DB corruption quarantine drill invocation:
+
+```powershell
+.\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
 ```
 
 Manual workflow lock-resilience drill invocation:
@@ -171,7 +178,7 @@ After release is live:
 
 ### 1.6 Nightly stability canary
 
-The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json).
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including DB corruption quarantine startup recovery.
 
 Manual canary invocation:
 
@@ -216,6 +223,7 @@ Actions:
    ```
 2. Check failing check:
    - `checks.database.ok = false`: inspect DB path/permissions/locking.
+   - `checks.database.startup_recovery.triggered = true`: validate quarantined DB file and keep safe mode active until recovery validation is complete.
    - `checks.workflow_worker.ok = false`: worker thread failed to start.
 3. If the database check fails, run integrity probe:
    ```powershell
@@ -524,6 +532,28 @@ Actions:
    .\scripts\run-invariant-monitor-watchdog-drill.ps1 -TimeoutSeconds 8
    ```
 3. If violations persist, keep safe mode enabled and hold promotion until root cause is fixed.
+
+### 3.19 Startup DB corruption quarantine was triggered
+
+Symptoms:
+- readiness shows `checks.database.startup_recovery.triggered = true`
+- SLO includes `database.startup_recovery.triggered` alert
+- mutating endpoints are blocked by safe mode until operator validation
+
+Actions:
+1. Inspect startup recovery payload and quarantined file path:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/database/integrity?mode=quick
+   ```
+2. Run DB corruption quarantine drill to confirm recovery flow remains healthy:
+   ```powershell
+   .\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
+   ```
+3. Validate restored runtime state and backup posture before re-enabling mutations.
+4. Disable safe mode with explicit operator reason only after validation:
+   ```powershell
+   Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/system/safe-mode/disable -ContentType "application/json" -Body '{"reason":"DB quarantine validated and recovery complete"}'
+   ```
 
 ## 4. Operational Defaults
 
