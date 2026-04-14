@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -17,12 +17,18 @@ This gate covers:
 - desktop smoke boot path
 - `GET /system/readiness`
 - `GET /system/slo` (`status` must be `ok`)
+- release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
 - workflow worker restart drill (stop worker, enqueue run, and verify self-healing restart path)
+- DB safe-mode watchdog drill (database lock bursts trigger guarded mutating API mode)
+- invariant monitor watchdog drill (periodic invariant scanner detects drift and can force safe mode)
+- event-consumer recovery chaos drill (stale `processing` rows reclaimed and drained to clean `processed` state)
+- invariant burst drill (mixed goal/task state transitions under burst load with zero invariant violations)
+- long soak budget drill (sustained mixed load with latency/429/error budgets enforced)
 - `GET /system/database/integrity?mode=quick|full`
 - schema migration pending-version check (`pending_versions` must be empty)
 - migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
@@ -39,6 +45,12 @@ Manual auto-rollback policy invocation (live endpoint, stable ring):
 
 ```powershell
 .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+```
+
+Manual release-freeze policy invocation (live endpoint, stable ring):
+
+```powershell
+.\scripts\run-release-freeze-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -NonOkWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Manual desktop-update safety drill invocation:
@@ -69,6 +81,36 @@ Manual workflow worker restart drill invocation:
 
 ```powershell
 .\scripts\run-workflow-worker-restart-drill.ps1
+```
+
+Manual event-consumer recovery chaos drill invocation:
+
+```powershell
+.\scripts\run-event-consumer-recovery-chaos-drill.ps1
+```
+
+Manual invariant burst drill invocation:
+
+```powershell
+.\scripts\run-invariant-burst-drill.ps1
+```
+
+Manual long soak budget drill invocation (15-minute pre-release profile):
+
+```powershell
+.\scripts\run-long-soak-budget-drill.ps1 -DurationSeconds 900
+```
+
+Manual DB safe-mode watchdog drill invocation:
+
+```powershell
+.\scripts\run-db-safe-mode-watchdog-drill.ps1 -LockErrorInjections 4
+```
+
+Manual invariant monitor watchdog drill invocation:
+
+```powershell
+.\scripts\run-invariant-monitor-watchdog-drill.ps1 -TimeoutSeconds 8
 ```
 
 Verify before release:
@@ -126,6 +168,16 @@ After release is live:
 - Confirm `GET /system/database/integrity?mode=quick` returns `"ok": true`.
 - Trigger `Export Diagnostics` once from Operator Controls and confirm snapshot file exists.
 - Verify one workflow run can be queued and completed from UI.
+
+### 1.6 Nightly stability canary
+
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json).
+
+Manual canary invocation:
+
+```powershell
+python .\scripts\stability-canary.py --baseline-file .\docs\stability-canary-baseline.json --long-soak-duration-seconds 120 --output-file .\.tmp\stability-canary-report.json
+```
 
 ## 2. Rollback
 
@@ -223,9 +275,13 @@ Actions:
    ```
 3. If status is `critical`, enforce sustained-window policy check:
    ```powershell
+   .\scripts\run-release-freeze-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -NonOkWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+   ```
+4. If status remains `critical`, enforce sustained-window rollback policy check:
+   ```powershell
    .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
    ```
-4. Export diagnostics snapshot and attach to incident ticket.
+5. Export diagnostics snapshot and attach to incident ticket.
 
 ### 3.5 Desktop startup conflicts (single-instance lock)
 
@@ -362,6 +418,112 @@ Actions:
    Invoke-RestMethod http://127.0.0.1:8000/system/readiness
    ```
 3. If drill fails or `startup_recovery_error` is set, block release and escalate with diagnostics snapshot.
+
+### 3.13 Event consumer backlog stuck in `processing`
+
+Symptoms:
+- consumer stats show persistent `processing` rows
+- pending backlog does not shrink despite repeated drain attempts
+
+Actions:
+1. Run event-consumer recovery chaos drill:
+   ```powershell
+   .\scripts\run-event-consumer-recovery-chaos-drill.ps1
+   ```
+2. Verify consumer status no longer includes stale `processing` rows:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/health
+   ```
+3. If reclaim/drain cannot clear backlog, block rollout and escalate with diagnostics + backlog snapshot.
+
+### 3.14 Queue/goal/task consistency drift after burst activity
+
+Symptoms:
+- dashboard/system health reports invariant violations
+- archived/cancelled goals appear unexpectedly in queue-related views
+
+Actions:
+1. Run invariant burst drill:
+   ```powershell
+   .\scripts\run-invariant-burst-drill.ps1
+   ```
+2. Re-check invariants:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/health
+   ```
+3. If violations persist, stop promotion and investigate state transition paths before release.
+
+### 3.15 Sustained-load budget regression
+
+Symptoms:
+- throughput appears fine in short tests but degrades in longer sustained runs
+- release candidate shows rising latency, throttling, or server errors under prolonged activity
+
+Actions:
+1. Run long soak budget drill with release profile:
+   ```powershell
+   .\scripts\run-long-soak-budget-drill.ps1 -DurationSeconds 900
+   ```
+2. Confirm budget thresholds stay within limits (`p95 latency`, `HTTP 429 rate`, `error rate`).
+3. If budgets fail, hold release, attach soak JSON output + diagnostics to incident ticket, and require remediation before retry.
+
+### 3.16 Release freeze prevents ring promotion
+
+Symptoms:
+- stable ring promotion command fails with active freeze message
+- `/system/slo` stays non-ok beyond allowed window
+
+Actions:
+1. Inspect freeze state:
+   ```powershell
+   Get-Content .\artifacts\desktop-rings.json
+   ```
+2. Validate current runtime state:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/slo
+   ```
+3. If freeze should remain active, do not override and keep rollout paused.
+4. If issue is mitigated and override is approved, clear freeze with documented reason:
+   ```powershell
+   .\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action unfreeze -Reason "Mitigated incident INC-<ID>"
+   ```
+
+### 3.17 Runtime safe mode active (mutations blocked)
+
+Symptoms:
+- mutating API calls return `503` with safe-mode details
+- readiness reports `checks.safe_mode.ok = false`
+
+Actions:
+1. Inspect guard state:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/safe-mode
+   ```
+2. Run DB safe-mode watchdog drill to verify lock/io handling:
+   ```powershell
+   .\scripts\run-db-safe-mode-watchdog-drill.ps1 -LockErrorInjections 4
+   ```
+3. If cause is mitigated, disable safe mode with operator reason:
+   ```powershell
+   Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/system/safe-mode/disable -ContentType "application/json" -Body '{"reason":"Mitigated lock burst"}'
+   ```
+
+### 3.18 Invariant monitor reports violations
+
+Symptoms:
+- readiness reports `checks.invariant_monitor.ok = false`
+- `/system/invariants` returns non-empty violation list
+
+Actions:
+1. Fetch monitor and violation details:
+   ```powershell
+   Invoke-RestMethod http://127.0.0.1:8000/system/invariants
+   ```
+2. Run invariant monitor watchdog drill:
+   ```powershell
+   .\scripts\run-invariant-monitor-watchdog-drill.ps1 -TimeoutSeconds 8
+   ```
+3. If violations persist, keep safe mode enabled and hold promotion until root cause is fixed.
 
 ## 4. Operational Defaults
 

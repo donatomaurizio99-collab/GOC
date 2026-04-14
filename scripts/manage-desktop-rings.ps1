@@ -1,11 +1,13 @@
 param(
     [string]$ManifestPath = "artifacts/desktop-rings.json",
-    [ValidateSet("show", "promote", "rollback")]
+    [ValidateSet("show", "promote", "rollback", "freeze", "unfreeze")]
     [string]$Action = "show",
     [ValidateSet("stable", "canary")]
     [string]$Ring = "stable",
     [string]$Version = "",
-    [string]$ReleaseManifestPath = ""
+    [string]$ReleaseManifestPath = "",
+    [string]$Reason = "",
+    [switch]$IgnoreReleaseFreeze
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +47,13 @@ function New-RingsState {
             }
         }
         releases = [ordered]@{}
+        release_freeze = [ordered]@{
+            active = $false
+            reason = $null
+            source = $null
+            activated_at_utc = $null
+            updated_at_utc = $null
+        }
     }
 }
 
@@ -109,6 +118,14 @@ function Read-RingsState {
                 artifacts = @($entry.Value.artifacts)
             }
         }
+    }
+
+    if ($loaded.release_freeze) {
+        $state.release_freeze.active = [bool]$loaded.release_freeze.active
+        $state.release_freeze.reason = To-NullableString $loaded.release_freeze.reason
+        $state.release_freeze.source = To-NullableString $loaded.release_freeze.source
+        $state.release_freeze.activated_at_utc = To-NullableString $loaded.release_freeze.activated_at_utc
+        $state.release_freeze.updated_at_utc = To-NullableString $loaded.release_freeze.updated_at_utc
     }
 
     return $state
@@ -218,6 +235,18 @@ if ($Action -eq "promote") {
     if ([string]::IsNullOrWhiteSpace($Version)) {
         throw "Version is required for Action=promote."
     }
+    if ([bool]$state.release_freeze.active -and -not $IgnoreReleaseFreeze) {
+        $freezeReason = [string]$state.release_freeze.reason
+        if ([string]::IsNullOrWhiteSpace($freezeReason)) {
+            $freezeReason = "unspecified"
+        }
+        throw (
+            "Release freeze is active; promotion blocked. " +
+            "Use -IgnoreReleaseFreeze only for supervised emergency overrides. " +
+            "Reason: $freezeReason"
+        )
+    }
+
     $target = [string]$Version
     Ensure-ReleaseStub -State $state -VersionValue $target -RingValue $Ring
 
@@ -252,6 +281,38 @@ if ($Action -eq "rollback") {
     Write-Host "Ring '$Ring' rolled back to version '$rollbackTarget'." -ForegroundColor Green
     if (-not [string]::IsNullOrWhiteSpace($current)) {
         Write-Host "Previous current version stored as rollback target: $current" -ForegroundColor Yellow
+    }
+    Write-Host "Manifest: $resolvedManifestPath" -ForegroundColor Cyan
+    exit 0
+}
+
+if ($Action -eq "freeze") {
+    $freezeReason = [string]$Reason
+    if ([string]::IsNullOrWhiteSpace($freezeReason)) {
+        $freezeReason = "Manual release freeze."
+    }
+    $state.release_freeze.active = $true
+    $state.release_freeze.reason = $freezeReason
+    $state.release_freeze.source = "operator"
+    $state.release_freeze.activated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    $state.release_freeze.updated_at_utc = $state.release_freeze.activated_at_utc
+    Save-RingsState -PathValue $resolvedManifestPath -State $state
+    Write-Host "Release freeze activated." -ForegroundColor Yellow
+    Write-Host "Reason: $freezeReason"
+    Write-Host "Manifest: $resolvedManifestPath" -ForegroundColor Cyan
+    exit 0
+}
+
+if ($Action -eq "unfreeze") {
+    $state.release_freeze.active = $false
+    $state.release_freeze.reason = To-NullableString $Reason
+    $state.release_freeze.source = "operator"
+    $state.release_freeze.activated_at_utc = $null
+    $state.release_freeze.updated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    Save-RingsState -PathValue $resolvedManifestPath -State $state
+    Write-Host "Release freeze cleared." -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        Write-Host "Reason: $Reason"
     }
     Write-Host "Manifest: $resolvedManifestPath" -ForegroundColor Cyan
     exit 0

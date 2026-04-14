@@ -27,6 +27,7 @@ class EventBus:
         events_retention_days: int,
         event_processing_retention_days: int,
         failure_log_retention_days: int,
+        idempotency_retention_days: int,
         observability: "ObservabilityService | None" = None,
     ):
         self.db = db
@@ -37,6 +38,7 @@ class EventBus:
         self.events_retention_days = events_retention_days
         self.event_processing_retention_days = event_processing_retention_days
         self.failure_log_retention_days = failure_log_retention_days
+        self.idempotency_retention_days = idempotency_retention_days
         self.observability = observability
 
     def record_event(
@@ -139,6 +141,11 @@ class EventBus:
                    WHERE created_at < datetime('now', ? || ' days')""",
                 f"-{self.failure_log_retention_days}",
             )
+            idempotency_deleted = tx.execute(
+                """DELETE FROM idempotency_keys
+                   WHERE updated_at < datetime('now', ? || ' days')""",
+                f"-{self.idempotency_retention_days}",
+            )
             if events_deleted:
                 self._metric("maintenance.retention.events_deleted", events_deleted, tx=tx)
             if event_processing_deleted:
@@ -149,10 +156,13 @@ class EventBus:
                 )
             if failures_deleted:
                 self._metric("maintenance.retention.failure_log_deleted", failures_deleted, tx=tx)
+            if idempotency_deleted:
+                self._metric("maintenance.retention.idempotency_deleted", idempotency_deleted, tx=tx)
         return {
             "events_deleted": events_deleted,
             "event_processing_deleted": event_processing_deleted,
             "failure_log_deleted": failures_deleted,
+            "idempotency_deleted": idempotency_deleted,
         }
 
     def list_events(

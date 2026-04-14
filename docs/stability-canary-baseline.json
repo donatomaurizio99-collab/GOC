@@ -1,0 +1,25 @@
+{
+  "max_duration_regression_percent": 25.0,
+  "drills": {
+    "release_freeze_policy": {
+      "baseline_duration_seconds": 6.0
+    },
+    "db_safe_mode_watchdog": {
+      "baseline_duration_seconds": 3.0
+    },
+    "invariant_monitor_watchdog": {
+      "baseline_duration_seconds": 6.0
+    },
+    "event_consumer_recovery_chaos": {
+      "baseline_duration_seconds": 8.0
+    },
+    "invariant_burst": {
+      "baseline_duration_seconds": 8.0
+    },
+    "long_soak_budget": {
+      "baseline_duration_seconds": 140.0,
+      "max_http_429_rate_percent": 1.0,
+      "max_error_rate_percent": 1.0
+    }
+  }
+}

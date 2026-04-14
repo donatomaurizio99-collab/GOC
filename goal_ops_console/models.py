@@ -115,3 +115,7 @@ class WorkflowStartRequest(BaseModel):
 class WorkflowCancelRequest(BaseModel):
     requested_by: str = Field(default="operator", min_length=1, max_length=120)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class SafeModeToggleRequest(BaseModel):
+    reason: str = Field(default="Operator override", min_length=3, max_length=500)

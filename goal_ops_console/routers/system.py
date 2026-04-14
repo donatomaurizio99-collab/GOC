@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from goal_ops_console.config import CONSUMER_BATCH_SIZE, MAX_TOTAL_RETRIES_PER_CYCLE, SPEC_VERSION
-from goal_ops_console.models import BackpressureError, FaultBulkResolveRequest, FaultRemediationRequest
+from goal_ops_console.models import (
+    BackpressureError,
+    FaultBulkResolveRequest,
+    FaultRemediationRequest,
+    SafeModeToggleRequest,
+)
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(tags=["system"])
@@ -40,6 +45,7 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
             "events_days": services.settings.events_retention_days,
             "event_processing_days": services.settings.event_processing_retention_days,
             "failure_log_days": services.settings.failure_log_retention_days,
+            "idempotency_keys_days": services.settings.idempotency_retention_days,
         },
         "metrics": services.observability.metrics_summary(),
         "audit": {
@@ -50,6 +56,8 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
         "consumer_stats": services.event_bus.consumer_stats(),
         "stuck_events": services.event_bus.stuck_events(),
         "invariant_violations": services.state_manager.find_invariant_violations(),
+        "invariant_monitor": services.invariant_monitor.status(),
+        "safe_mode": services.runtime_guard.safe_mode_snapshot(),
     }
 
 
@@ -95,8 +103,55 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
         and worker_error is None
         and startup_recovery_ok
     )
+
+    safe_mode_error: str | None = None
+    safe_mode: dict[str, Any] = {
+        "active": False,
+        "reason": None,
+        "source": None,
+        "auto": False,
+        "activated_at_utc": None,
+        "error_counters": {
+            "lock_errors_in_window": 0,
+            "lock_error_window_seconds": 0,
+            "io_errors_in_window": 0,
+            "io_error_window_seconds": 0,
+        },
+        "thresholds": {
+            "lock_error_threshold": 0,
+            "io_error_threshold": 0,
+            "auto_disable_after_seconds": 0,
+        },
+    }
+    try:
+        safe_mode = services.runtime_guard.safe_mode_snapshot()
+    except Exception as exc:
+        safe_mode_error = str(exc)
+    safe_mode_ok = safe_mode_error is None and not bool(safe_mode.get("active"))
+
+    invariant_monitor_error: str | None = None
+    invariant_monitor: dict[str, Any] = {
+        "is_running": False,
+        "scan_interval_seconds": int(services.settings.invariant_monitor_interval_seconds),
+        "auto_safe_mode": bool(services.settings.invariant_monitor_auto_safe_mode),
+        "last_scan_at_utc": None,
+        "last_error": None,
+        "violation_count": 0,
+        "violations": [],
+    }
+    try:
+        invariant_monitor = services.invariant_monitor.status()
+    except Exception as exc:
+        invariant_monitor_error = str(exc)
+    invariant_monitor_ok = (
+        invariant_monitor_error is None
+        and bool(invariant_monitor.get("is_running"))
+        and int(invariant_monitor.get("violation_count") or 0) == 0
+        and not invariant_monitor.get("last_error")
+    )
+
     return {
-        "ready": bool(db_ok and worker_ok),
+        "ready": bool(db_ok and worker_ok and safe_mode_ok and invariant_monitor_ok),
         "spec_version": SPEC_VERSION,
         "timestamp_utc": _utc_iso(),
         "checks": {
@@ -110,6 +165,16 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
                 "error": worker_error,
                 "startup_recovery_ok": startup_recovery_ok,
                 "startup_recovery_error": startup_recovery_error,
+            },
+            "safe_mode": {
+                **safe_mode,
+                "ok": safe_mode_ok,
+                "error": safe_mode_error,
+            },
+            "invariant_monitor": {
+                **invariant_monitor,
+                "ok": invariant_monitor_ok,
+                "error": invariant_monitor_error,
             },
         },
     }
@@ -133,6 +198,8 @@ def _status_from_alerts(alerts: list[dict[str, Any]]) -> str:
 
 def _build_slo_payload(services: AppServices) -> dict[str, Any]:
     readiness = _build_readiness_payload(services)
+    safe_mode = readiness["checks"].get("safe_mode", {})
+    invariant_monitor = readiness["checks"].get("invariant_monitor", {})
     db_integrity = services.db.integrity_check(mode="quick")
     backpressure = services.event_bus.backpressure_snapshot()
     stuck_events_count = len(services.event_bus.stuck_events())
@@ -217,6 +284,25 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
             threshold="ok",
         )
 
+    if bool(safe_mode.get("active")):
+        add_alert(
+            "runtime.safe_mode_active",
+            "critical",
+            "Runtime safe mode is active and mutating API operations are restricted.",
+            observed=safe_mode,
+            threshold=False,
+        )
+
+    invariant_violation_count = int(invariant_monitor.get("violation_count") or 0)
+    if invariant_violation_count > 0:
+        add_alert(
+            "invariants.violations_detected",
+            "critical",
+            "Invariant monitor detected queue/state consistency violations.",
+            observed=invariant_violation_count,
+            threshold=0,
+        )
+
     if backlog_utilization_percent >= thresholds["max_backlog_utilization_percent"]:
         severity: Literal["warning", "critical"] = (
             "critical" if bool(backpressure.get("is_throttled")) else "warning"
@@ -287,6 +373,8 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
         "event_failure_rate_percent": event_failure_rate_percent,
         "backlog_utilization_percent": backlog_utilization_percent,
         "stuck_events_count": stuck_events_count,
+        "safe_mode_active": bool(safe_mode.get("active")),
+        "invariant_violation_count": invariant_violation_count,
     }
     return {
         "timestamp_utc": _utc_iso(),
@@ -300,6 +388,8 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
             "readiness": readiness,
             "database_integrity": db_integrity,
             "backpressure": backpressure,
+            "safe_mode": safe_mode,
+            "invariant_monitor": invariant_monitor,
         },
     }
 
@@ -473,6 +563,44 @@ def backpressure_status(services: AppServices = Depends(get_services)) -> dict:
     return services.event_bus.backpressure_snapshot()
 
 
+@router.get("/system/safe-mode")
+def safe_mode_status(services: AppServices = Depends(get_services)) -> dict:
+    return services.runtime_guard.safe_mode_snapshot()
+
+
+@router.post("/system/safe-mode/enable")
+def enable_safe_mode(
+    request: SafeModeToggleRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.runtime_guard.activate_safe_mode(
+        reason=request.reason,
+        source="operator",
+        auto=False,
+    )
+
+
+@router.post("/system/safe-mode/disable")
+def disable_safe_mode(
+    request: SafeModeToggleRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return services.runtime_guard.deactivate_safe_mode(
+        reason=request.reason,
+        source="operator",
+    )
+
+
+@router.get("/system/invariants")
+def invariants_status(services: AppServices = Depends(get_services)) -> dict:
+    monitor = services.invariant_monitor.status()
+    return {
+        "timestamp_utc": _utc_iso(),
+        "monitor": monitor,
+        "violations": services.state_manager.find_invariant_violations(),
+    }
+
+
 @router.get("/system/metrics")
 def metrics_status(
     prefix: str | None = None,
@@ -617,5 +745,6 @@ def run_retention_cleanup(services: AppServices = Depends(get_services)) -> dict
             "events": services.settings.events_retention_days,
             "event_processing": services.settings.event_processing_retention_days,
             "failure_log": services.settings.failure_log_retention_days,
+            "idempotency_keys": services.settings.idempotency_retention_days,
         },
     }

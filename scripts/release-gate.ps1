@@ -4,6 +4,8 @@ param(
     [switch]$SkipDesktopSmoke,
     [switch]$SkipApiProbe,
     [switch]$SkipSloAlertCheck,
+    [switch]$SkipReleaseFreezePolicyDrill,
+    [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
     [switch]$StrictFileDatabaseProbe,
     [switch]$SkipAutoRollbackPolicyDrill,
@@ -18,6 +20,16 @@ param(
     [switch]$StrictWorkflowSoakDrill,
     [switch]$SkipWorkflowWorkerRestartDrill,
     [switch]$StrictWorkflowWorkerRestartDrill,
+    [switch]$SkipDbSafeModeWatchdogDrill,
+    [switch]$StrictDbSafeModeWatchdogDrill,
+    [switch]$SkipInvariantMonitorWatchdogDrill,
+    [switch]$StrictInvariantMonitorWatchdogDrill,
+    [switch]$SkipEventConsumerRecoveryChaosDrill,
+    [switch]$StrictEventConsumerRecoveryChaosDrill,
+    [switch]$SkipInvariantBurstDrill,
+    [switch]$StrictInvariantBurstDrill,
+    [switch]$SkipLongSoakBudgetDrill,
+    [switch]$StrictLongSoakBudgetDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
     [switch]$SkipBackupRestoreDrill,
@@ -89,6 +101,40 @@ if (-not $SkipSloAlertCheck) {
             "--database-url", ":memory:",
             "--allowed-status", "ok"
         )
+    }
+}
+
+if (-not $SkipReleaseFreezePolicyDrill) {
+    Invoke-GateStep -Name "Release freeze policy drill (sustained non-ok/burn-rate => promotion block)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\release-freeze-policy"
+        $manifestPath = Join-Path $workspace "desktop-rings.json"
+        New-Item -ItemType Directory -Force -Path $workspace | Out-Null
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-freeze-policy.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--manifest-path", $manifestPath,
+                "--ring", "stable",
+                "--mock-slo-statuses", "degraded,critical,critical,critical",
+                "--mock-error-budget-burn-rates", "0.5,1.0,2.5,2.5",
+                "--non-ok-window-seconds", "2",
+                "--poll-interval-seconds", "1",
+                "--max-observation-seconds", "8",
+                "--max-error-budget-burn-rate-percent", "2.0",
+                "--seed-previous-version", "0.0.1",
+                "--seed-incident-version", "0.0.2",
+                "--promotion-test-version", "0.0.3"
+            )
+        } catch {
+            if ($StrictReleaseFreezePolicyDrill) {
+                throw
+            }
+            Write-Warning (
+                "Release freeze policy drill failed but StrictReleaseFreezePolicyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
     }
 }
 
@@ -218,6 +264,112 @@ if (-not $SkipWorkflowWorkerRestartDrill) {
             }
             Write-Warning (
                 "Workflow worker restart drill failed but StrictWorkflowWorkerRestartDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDbSafeModeWatchdogDrill) {
+    Invoke-GateStep -Name "DB safe-mode watchdog drill (lock burst => guarded API mode)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\db-safe-mode-watchdog-drill.py",
+                "--lock-error-injections", "4"
+            )
+        } catch {
+            if ($StrictDbSafeModeWatchdogDrill) {
+                throw
+            }
+            Write-Warning (
+                "DB safe-mode watchdog drill failed but StrictDbSafeModeWatchdogDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipInvariantMonitorWatchdogDrill) {
+    Invoke-GateStep -Name "Invariant monitor watchdog drill (periodic detector + auto-safe-mode)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\invariant-monitor-watchdog-drill.py",
+                "--timeout-seconds", "8"
+            )
+        } catch {
+            if ($StrictInvariantMonitorWatchdogDrill) {
+                throw
+            }
+            Write-Warning (
+                "Invariant monitor watchdog drill failed but StrictInvariantMonitorWatchdogDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipEventConsumerRecoveryChaosDrill) {
+    Invoke-GateStep -Name "Event consumer recovery chaos drill (stale processing reclaim + drain)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\event-consumer-recovery-chaos-drill.py",
+                "--goal-count", "50",
+                "--stale-processing-count", "20",
+                "--drain-batch-size", "120",
+                "--timeout-seconds", "25"
+            )
+        } catch {
+            if ($StrictEventConsumerRecoveryChaosDrill) {
+                throw
+            }
+            Write-Warning (
+                "Event consumer recovery chaos drill failed but StrictEventConsumerRecoveryChaosDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipInvariantBurstDrill) {
+    Invoke-GateStep -Name "Invariant burst drill (queue/goal/task consistency under load)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\invariant-burst-drill.py",
+                "--goal-count", "60"
+            )
+        } catch {
+            if ($StrictInvariantBurstDrill) {
+                throw
+            }
+            Write-Warning (
+                "Invariant burst drill failed but StrictInvariantBurstDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipLongSoakBudgetDrill) {
+    Invoke-GateStep -Name "Long soak budget drill (latency/429/error budget gate)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\long-soak-budget-drill.py",
+                "--duration-seconds", "120",
+                "--max-p95-latency-ms", "300",
+                "--max-p99-latency-ms", "500",
+                "--max-max-latency-ms", "10000",
+                "--max-http-429-rate-percent", "2.0",
+                "--max-error-rate-percent", "1.0",
+                "--min-requests", "350",
+                "--drain-batch-size", "180",
+                "--workflow-start-every-cycles", "0"
+            )
+        } catch {
+            if ($StrictLongSoakBudgetDrill) {
+                throw
+            }
+            Write-Warning (
+                "Long soak budget drill failed but StrictLongSoakBudgetDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
