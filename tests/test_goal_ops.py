@@ -2255,6 +2255,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                 "max_duration_regression_percent": 10_000.0,
                 "drills": {
                     "release_freeze_policy": {"baseline_duration_seconds": 0.1},
+                    "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
                     "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
                     "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
@@ -2296,4 +2297,112 @@ def test_94_stability_canary_reports_success_with_short_soak():
     payload = json.loads(output_lines[-1])
     assert payload["success"] is True
     assert report_file.exists()
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_95_startup_db_corruption_quarantine_activates_safe_mode():
+    workspace = _local_test_dir("pytest-db-corruption-startup-recovery")
+    db_path = workspace / "corrupted.db"
+    quarantine_dir = workspace / "quarantine"
+    db_path.write_bytes(b"this is not a sqlite database file")
+
+    app = create_app(
+        Settings(
+            database_url=str(db_path),
+            db_quarantine_dir=str(quarantine_dir),
+            db_startup_corruption_recovery_enabled=True,
+            workflow_worker_poll_interval_seconds=0.05,
+        )
+    )
+    with TestClient(app) as local_client:
+        readiness_before = local_client.get("/system/readiness")
+        assert readiness_before.status_code == 200
+        readiness_before_payload = readiness_before.json()
+
+        startup_recovery = readiness_before_payload["checks"]["database"]["startup_recovery"]
+        assert readiness_before_payload["ready"] is False
+        assert startup_recovery["triggered"] is True
+        assert startup_recovery["recovered"] is True
+        assert startup_recovery["quarantined_exists"] is True
+        assert startup_recovery["quarantined_path"]
+
+        safe_mode = local_client.get("/system/safe-mode").json()
+        assert safe_mode["active"] is True
+        assert safe_mode["source"] == "db_startup_recovery"
+
+        blocked = local_client.post(
+            "/goals",
+            json={
+                "title": "Blocked by startup recovery safe mode",
+                "description": "mutation should be blocked",
+                "urgency": 0.4,
+                "value": 0.5,
+                "deadline_score": 0.2,
+            },
+        )
+        assert blocked.status_code == 503
+
+        disable = local_client.post(
+            "/system/safe-mode/disable",
+            json={"reason": "Startup corruption recovered and validated in test."},
+        )
+        assert disable.status_code == 200
+
+        created = local_client.post(
+            "/goals",
+            json={
+                "title": "Allowed after startup recovery",
+                "description": "safe mode disabled",
+                "urgency": 0.6,
+                "value": 0.7,
+                "deadline_score": 0.3,
+            },
+        )
+        assert created.status_code == 201
+
+        readiness_after = local_client.get("/system/readiness")
+        assert readiness_after.status_code == 200
+        assert readiness_after.json()["ready"] is True
+
+        integrity = local_client.get("/system/database/integrity?mode=quick")
+        assert integrity.status_code == 200
+        startup_recovery_integrity = integrity.json()["startup_recovery"]
+        assert startup_recovery_integrity["triggered"] is True
+        assert startup_recovery_integrity["recovered"] is True
+        assert startup_recovery_integrity["quarantined_exists"] is True
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_96_db_corruption_quarantine_drill_reports_success():
+    workspace = _local_test_dir("pytest-db-corruption-quarantine-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "db-corruption-quarantine-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--corruption-bytes",
+        "192",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["startup_recovery"]["triggered"] is True
+    assert payload["startup_recovery"]["recovered"] is True
+    assert payload["blocked_status_code"] == 503
+    assert payload["post_disable_goal_create_status_code"] == 201
     shutil.rmtree(workspace, ignore_errors=True)

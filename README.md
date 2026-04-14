@@ -410,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -457,6 +457,13 @@ Standalone recovery hard-abort drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-recovery-hard-abort-drill.ps1
+```
+
+Standalone DB corruption quarantine drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
 ```
 
 Standalone workflow lock-resilience drill:
@@ -572,7 +579,7 @@ python .\scripts\desktop-smoke.py
 
 ## Nightly Stability Canary
 
-Run the full canary profile locally (includes release-freeze policy, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
+Run the full canary profile locally (includes release-freeze policy, DB corruption quarantine, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -696,6 +703,8 @@ If a value is rejected:
 - If you see old goals or tasks, reset the local database.
 - In this sandboxed environment, file-backed SQLite can behave differently than in a normal local shell. For normal local use, keep `GOAL_OPS_DATABASE_URL="goal_ops.db"` set before starting the server.
 - Optional: set `GOAL_OPS_DB_MIGRATION_BACKUP_DIR` to control where pre-migration SQLite backups are written.
+- Optional: set `GOAL_OPS_DB_QUARANTINE_DIR` to control where corrupted DB files are quarantined on startup recovery.
+- Optional: set `GOAL_OPS_DB_STARTUP_CORRUPTION_RECOVERY_ENABLED=false` to disable automatic startup quarantine recovery.
 - If you start `uvicorn` from outside the project directory, keep the `--app-dir` flag.
 
 ## Key Files
@@ -725,6 +734,8 @@ If a value is rejected:
 - [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
 - [recovery-hard-abort-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-target.py)
 - [run-recovery-hard-abort-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-abort-drill.ps1)
+- [db-corruption-quarantine-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/db-corruption-quarantine-drill.py)
+- [run-db-corruption-quarantine-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-db-corruption-quarantine-drill.ps1)
 - [workflow-lock-resilience-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-lock-resilience-drill.py)
 - [run-workflow-lock-resilience-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-lock-resilience-drill.ps1)
 - [workflow-soak-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-soak-drill.py)

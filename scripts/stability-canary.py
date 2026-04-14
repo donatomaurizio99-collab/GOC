@@ -92,6 +92,16 @@ def run_canary(
             "--promotion-test-version",
             "0.0.3",
         ],
+        "db_corruption_quarantine": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "db-corruption-quarantine-drill.py"),
+            "--workspace",
+            str(PROJECT_ROOT / ".tmp" / "stability-canary-db-corruption"),
+            "--label",
+            "stability-canary",
+            "--corruption-bytes",
+            "256",
+        ],
         "db_safe_mode_watchdog": [
             sys.executable,
             str(PROJECT_ROOT / "scripts" / "db-safe-mode-watchdog-drill.py"),

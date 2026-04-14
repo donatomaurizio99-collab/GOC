@@ -62,6 +62,7 @@ class ObservabilityService:
             "runtime.safe_mode.activated",
             "runtime.db_errors.lock",
             "runtime.db_errors.io",
+            "runtime.db_startup_recovery.quarantined",
             "invariants.violations.detected",
         )
         summary: dict[str, int] = {}

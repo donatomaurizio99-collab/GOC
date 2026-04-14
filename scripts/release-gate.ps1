@@ -14,6 +14,8 @@ param(
     [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipRecoveryHardAbortDrill,
     [switch]$StrictRecoveryHardAbortDrill,
+    [switch]$SkipDbCorruptionQuarantineDrill,
+    [switch]$StrictDbCorruptionQuarantineDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
     [switch]$StrictWorkflowLockResilienceDrill,
     [switch]$SkipWorkflowSoakDrill,
@@ -205,6 +207,27 @@ if (-not $SkipRecoveryHardAbortDrill) {
             }
             Write-Warning (
                 "Recovery hard-abort drill failed but StrictRecoveryHardAbortDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDbCorruptionQuarantineDrill) {
+    Invoke-GateStep -Name "DB corruption quarantine drill (startup quarantine + safe-mode recovery path)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\db-corruption-quarantine-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\db-corruption-quarantine-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate"
+            )
+        } catch {
+            if ($StrictDbCorruptionQuarantineDrill) {
+                throw
+            }
+            Write-Warning (
+                "DB corruption quarantine drill failed but StrictDbCorruptionQuarantineDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
