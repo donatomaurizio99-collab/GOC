@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
 ```
 
 This gate covers:
@@ -21,9 +21,11 @@ This gate covers:
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
+- recovery idempotence drill (repeated restarts keep startup recovery one-shot/idempotent for interrupted runs)
 - power-loss durability drill (abort transaction process before commit and after commit, validate rollback + durable persistence)
 - WAL checkpoint crash drill (hard-abort after commit but before checkpoint completion, verify durability + checkpoint recovery)
 - disk-pressure fault-injection drill (SQLITE_FULL/IOERR/readonly signatures trigger deterministic safe-mode degradation and recovery)
+- fsync/I/O stall drill (bounded write stall + I/O error path with deterministic safe-mode degradation/recovery)
 - real SQLite FULL drill (actual `max_page_count` saturation to force natural write failure + controlled recovery)
 - DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
@@ -77,6 +79,12 @@ Manual recovery hard-abort drill invocation:
 .\scripts\run-recovery-hard-abort-drill.ps1
 ```
 
+Manual recovery idempotence drill invocation:
+
+```powershell
+.\scripts\run-recovery-idempotence-drill.ps1 -RecoveryCycles 3
+```
+
 Manual power-loss durability drill invocation:
 
 ```powershell
@@ -93,6 +101,12 @@ Manual disk-pressure fault-injection drill invocation:
 
 ```powershell
 .\scripts\run-disk-pressure-fault-injection-drill.ps1 -FaultInjections 2
+```
+
+Manual fsync/I/O stall drill invocation:
+
+```powershell
+.\scripts\run-fsync-io-stall-drill.ps1 -FaultInjections 2 -StallSeconds 0.35 -MaxStallRequestSeconds 3.0
 ```
 
 Manual real SQLite FULL drill invocation:
@@ -147,6 +161,12 @@ Manual DB safe-mode watchdog drill invocation:
 
 ```powershell
 .\scripts\run-db-safe-mode-watchdog-drill.ps1 -LockErrorInjections 4
+```
+
+Manual critical drill flake gate invocation:
+
+```powershell
+.\scripts\run-critical-drill-flake-gate.ps1 -Repeats 2 -MaxFailedIterations 0
 ```
 
 Manual invariant monitor watchdog drill invocation:
@@ -412,7 +432,24 @@ Actions:
    ```
 4. If drill fails, block rollout and escalate with drill JSON output + diagnostics snapshot.
 
-### 3.10 Workflow lock contention spikes
+### 3.10 Recovery idempotence uncertainty after repeated restarts
+
+Symptoms:
+- interrupted runs are recovered once, but restart behavior is unclear across multiple successive process restarts
+- concern about duplicate `workflow.run.recovered_after_abort` events or repeated state churn
+
+Actions:
+1. Run recovery idempotence drill:
+   ```powershell
+   .\scripts\run-recovery-idempotence-drill.ps1 -RecoveryCycles 3
+   ```
+2. Confirm drill outputs:
+   - first cycle shows `startup_recovery.recovered_count >= 1`
+   - subsequent cycles show `startup_recovery.recovered_count = 0`
+   - `recovered_event_count` for the interrupted run remains constant (no duplicates)
+3. If idempotence fails, hold release and escalate with drill JSON + diagnostics snapshot.
+
+### 3.11 Workflow lock contention spikes
 
 Symptoms:
 - intermittent SQLite lock-conflict errors under concurrent workflow activity
@@ -429,7 +466,7 @@ Actions:
    ```
 3. If drill fails, block rollout and investigate DB contention before retrying release.
 
-### 3.11 Post-burst hanging run check
+### 3.12 Post-burst hanging run check
 
 Symptoms:
 - large queue bursts are processed, but some runs remain `queued`/`running`
@@ -445,7 +482,7 @@ Actions:
    ```
 3. If hanging runs remain, trigger incident and hold release promotion.
 
-### 3.12 Workflow worker does not recover after stop/crash
+### 3.13 Workflow worker does not recover after stop/crash
 
 Symptoms:
 - readiness check shows `workflow_worker.ok = false`
@@ -462,7 +499,7 @@ Actions:
    ```
 3. If drill fails or `startup_recovery_error` is set, block release and escalate with diagnostics snapshot.
 
-### 3.13 Event consumer backlog stuck in `processing`
+### 3.14 Event consumer backlog stuck in `processing`
 
 Symptoms:
 - consumer stats show persistent `processing` rows
@@ -479,7 +516,7 @@ Actions:
    ```
 3. If reclaim/drain cannot clear backlog, block rollout and escalate with diagnostics + backlog snapshot.
 
-### 3.14 Queue/goal/task consistency drift after burst activity
+### 3.15 Queue/goal/task consistency drift after burst activity
 
 Symptoms:
 - dashboard/system health reports invariant violations
@@ -496,7 +533,7 @@ Actions:
    ```
 3. If violations persist, stop promotion and investigate state transition paths before release.
 
-### 3.15 Sustained-load budget regression
+### 3.16 Sustained-load budget regression
 
 Symptoms:
 - throughput appears fine in short tests but degrades in longer sustained runs
@@ -510,7 +547,7 @@ Actions:
 2. Confirm budget thresholds stay within limits (`p95 latency`, `HTTP 429 rate`, `error rate`).
 3. If budgets fail, hold release, attach soak JSON output + diagnostics to incident ticket, and require remediation before retry.
 
-### 3.16 Release freeze prevents ring promotion
+### 3.17 Release freeze prevents ring promotion
 
 Symptoms:
 - stable ring promotion command fails with active freeze message
@@ -531,7 +568,7 @@ Actions:
    .\scripts\manage-desktop-rings.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -Action unfreeze -Reason "Mitigated incident INC-<ID>"
    ```
 
-### 3.17 Runtime safe mode active (mutations blocked)
+### 3.18 Runtime safe mode active (mutations blocked)
 
 Symptoms:
 - mutating API calls return `503` with safe-mode details
@@ -551,7 +588,7 @@ Actions:
    Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/system/safe-mode/disable -ContentType "application/json" -Body '{"reason":"Mitigated lock burst"}'
    ```
 
-### 3.18 Invariant monitor reports violations
+### 3.19 Invariant monitor reports violations
 
 Symptoms:
 - readiness reports `checks.invariant_monitor.ok = false`
@@ -568,7 +605,7 @@ Actions:
    ```
 3. If violations persist, keep safe mode enabled and hold promotion until root cause is fixed.
 
-### 3.19 Startup DB corruption quarantine was triggered
+### 3.20 Startup DB corruption quarantine was triggered
 
 Symptoms:
 - readiness shows `checks.database.startup_recovery.triggered = true`
@@ -590,7 +627,7 @@ Actions:
    Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/system/safe-mode/disable -ContentType "application/json" -Body '{"reason":"DB quarantine validated and recovery complete"}'
    ```
 
-### 3.20 Upgrade or rollback compatibility uncertainty
+### 3.21 Upgrade or rollback compatibility uncertainty
 
 Symptoms:
 - migration rehearsal passes, but there is no fresh proof for N-1 -> N -> N-1 compatibility on current build
@@ -608,7 +645,7 @@ Actions:
    - `probes.reupgrade.slo_status = ok`
 3. If drill fails any threshold or data-preservation check, hold release and keep rollback path ready using migration backup.
 
-### 3.21 Power-loss durability uncertainty
+### 3.22 Power-loss durability uncertainty
 
 Symptoms:
 - crash/reboot concerns around SQLite commit boundaries under release-candidate load
@@ -626,7 +663,7 @@ Actions:
    - `app_probe.slo_status = ok`
 3. If durability checks fail, block release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
 
-### 3.22 WAL checkpoint crash durability uncertainty
+### 3.23 WAL checkpoint crash durability uncertainty
 
 Symptoms:
 - process crash/power-loss concern after a transaction commit but before WAL checkpoint completion
@@ -645,7 +682,7 @@ Actions:
    - `app_probe.slo_status = ok`
 3. If durability, integrity, or checkpoint recovery checks fail, hold release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
 
-### 3.23 Disk pressure, IO errors, or permission-flip uncertainty
+### 3.24 Disk pressure, IO errors, or permission-flip uncertainty
 
 Symptoms:
 - intermittent writes fail with SQLite errors such as `database or disk is full`, `disk i/o error`, or `attempt to write a readonly database`
@@ -665,7 +702,25 @@ Actions:
    - `slo.after_recovery = ok`
 3. If any case fails, hold release and escalate with drill JSON + diagnostics snapshot before retrying rollout.
 
-### 3.24 Real SQLite FULL saturation uncertainty
+### 3.25 fsync/I/O stall degradation uncertainty
+
+Symptoms:
+- write operations intermittently stall and then fail with I/O-like signatures under storage pressure
+- uncertainty whether stall behavior remains bounded and whether recovery returns to deterministic readiness/SLO
+
+Actions:
+1. Run fsync/I/O stall drill:
+   ```powershell
+   .\scripts\run-fsync-io-stall-drill.ps1 -FaultInjections 2 -StallSeconds 0.35 -MaxStallRequestSeconds 3.0
+   ```
+2. Confirm drill outputs:
+   - `stall_observations.request_latencies_ms` are bounded by configured max
+   - `safe_mode.active_after_faults = true`
+   - `readiness.after_recovery = true`
+   - `slo.after_recovery = ok`
+3. If stall latency budget or recovery checks fail, hold release and escalate with drill JSON + diagnostics snapshot.
+
+### 3.26 Real SQLite FULL saturation uncertainty
 
 Symptoms:
 - uncertainty whether the app handles true file-backed `SQLITE_FULL` behavior (not only simulated exceptions)

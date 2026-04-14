@@ -410,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + real SQLite FULL saturation drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + incident/rollback drill under burst load + critical drill flake gate):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
 ```
 
 Standalone backup/restore drill:
@@ -466,6 +466,13 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-recovery-hard-abort-drill.ps1
 ```
 
+Standalone recovery idempotence drill (restart cycles must not duplicate startup recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-recovery-idempotence-drill.ps1 -RecoveryCycles 3
+```
+
 Standalone power-loss durability drill:
 
 ```powershell
@@ -485,6 +492,13 @@ Standalone disk-pressure fault-injection drill (SQLITE_FULL, IOERR, readonly/per
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-disk-pressure-fault-injection-drill.ps1 -FaultInjections 2
+```
+
+Standalone fsync/I/O stall drill (bounded write stall + I/O error degradation/recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-fsync-io-stall-drill.ps1 -FaultInjections 2 -StallSeconds 0.35 -MaxStallRequestSeconds 3.0
 ```
 
 Standalone real SQLite FULL drill (actual `max_page_count` saturation + recovery):
@@ -569,6 +583,13 @@ Standalone incident/rollback drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
+```
+
+Standalone critical drill flake gate (repeat critical drill tests):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-critical-drill-flake-gate.ps1 -Repeats 2 -MaxFailedIterations 0
 ```
 
 Current result during implementation:
@@ -769,6 +790,8 @@ If a value is rejected:
 - [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
 - [recovery-hard-abort-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-target.py)
 - [run-recovery-hard-abort-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-abort-drill.ps1)
+- [recovery-idempotence-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-idempotence-drill.py)
+- [run-recovery-idempotence-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-idempotence-drill.ps1)
 - [power-loss-durability-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/power-loss-durability-drill.py)
 - [power-loss-durability-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/power-loss-durability-target.py)
 - [run-power-loss-durability-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-power-loss-durability-drill.ps1)
@@ -777,6 +800,8 @@ If a value is rejected:
 - [run-wal-checkpoint-crash-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-wal-checkpoint-crash-drill.ps1)
 - [disk-pressure-fault-injection-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/disk-pressure-fault-injection-drill.py)
 - [run-disk-pressure-fault-injection-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-disk-pressure-fault-injection-drill.ps1)
+- [fsync-io-stall-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/fsync-io-stall-drill.py)
+- [run-fsync-io-stall-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-fsync-io-stall-drill.ps1)
 - [sqlite-real-full-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/sqlite-real-full-drill.py)
 - [run-sqlite-real-full-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-sqlite-real-full-drill.ps1)
 - [db-corruption-quarantine-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/db-corruption-quarantine-drill.py)
@@ -807,5 +832,7 @@ If a value is rejected:
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
 - [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
 - [run-incident-rollback-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-rollback-drill.ps1)
+- [critical-drill-flake-gate.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/critical-drill-flake-gate.py)
+- [run-critical-drill-flake-gate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-critical-drill-flake-gate.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)

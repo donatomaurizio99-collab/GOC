@@ -14,12 +14,16 @@ param(
     [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipRecoveryHardAbortDrill,
     [switch]$StrictRecoveryHardAbortDrill,
+    [switch]$SkipRecoveryIdempotenceDrill,
+    [switch]$StrictRecoveryIdempotenceDrill,
     [switch]$SkipPowerLossDurabilityDrill,
     [switch]$StrictPowerLossDurabilityDrill,
     [switch]$SkipWalCheckpointCrashDrill,
     [switch]$StrictWalCheckpointCrashDrill,
     [switch]$SkipDiskPressureFaultInjectionDrill,
     [switch]$StrictDiskPressureFaultInjectionDrill,
+    [switch]$SkipFsyncIoStallDrill,
+    [switch]$StrictFsyncIoStallDrill,
     [switch]$SkipSqliteRealFullDrill,
     [switch]$StrictSqliteRealFullDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
@@ -47,7 +51,9 @@ param(
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
     [switch]$SkipIncidentRollbackDrill,
-    [switch]$StrictIncidentRollbackDrill
+    [switch]$StrictIncidentRollbackDrill,
+    [switch]$SkipCriticalDrillFlakeGate,
+    [switch]$StrictCriticalDrillFlakeGate
 )
 
 $ErrorActionPreference = "Stop"
@@ -223,6 +229,29 @@ if (-not $SkipRecoveryHardAbortDrill) {
     }
 }
 
+if (-not $SkipRecoveryIdempotenceDrill) {
+    Invoke-GateStep -Name "Recovery idempotence drill (restarts do not duplicate startup recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\recovery-idempotence-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\recovery-idempotence-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--recovery-cycles", "3",
+                "--startup-timeout-seconds", "15"
+            )
+        } catch {
+            if ($StrictRecoveryIdempotenceDrill) {
+                throw
+            }
+            Write-Warning (
+                "Recovery idempotence drill failed but StrictRecoveryIdempotenceDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
 if (-not $SkipPowerLossDurabilityDrill) {
     Invoke-GateStep -Name "Power-loss durability drill (pre/post-commit hard-abort persistence)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\power-loss-durability-drills"
@@ -289,6 +318,30 @@ if (-not $SkipDiskPressureFaultInjectionDrill) {
             }
             Write-Warning (
                 "Disk-pressure fault-injection drill failed but StrictDiskPressureFaultInjectionDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipFsyncIoStallDrill) {
+    Invoke-GateStep -Name "fsync/io stall drill (bounded write stalls + io-error safe-mode recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\fsync-io-stall-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\fsync-io-stall-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--fault-injections", "2",
+                "--stall-seconds", "0.35",
+                "--max-stall-request-seconds", "3.0"
+            )
+        } catch {
+            if ($StrictFsyncIoStallDrill) {
+                throw
+            }
+            Write-Warning (
+                "fsync/io stall drill failed but StrictFsyncIoStallDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
@@ -620,6 +673,27 @@ if (-not $SkipIncidentRollbackDrill) {
             }
             Write-Warning (
                 "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipCriticalDrillFlakeGate) {
+    Invoke-GateStep -Name "Critical drill flake gate (repeat critical drill tests)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\critical-drill-flake-gate.py",
+                "--repeats", "2",
+                "--max-failed-iterations", "0",
+                "--target-file", ".\tests\test_goal_ops.py"
+            )
+        } catch {
+            if ($StrictCriticalDrillFlakeGate) {
+                throw
+            }
+            Write-Warning (
+                "Critical drill flake gate failed but StrictCriticalDrillFlakeGate is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

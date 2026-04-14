@@ -2642,3 +2642,138 @@ def test_101_wal_checkpoint_crash_drill_reports_success():
     assert payload["app_probe"]["post_recovery_goal_status_code"] == 201
     assert payload["app_probe"]["running_run_ids"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_102_recovery_idempotence_drill_reports_success():
+    workspace = _local_test_dir("pytest-recovery-idempotence-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "recovery-idempotence-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--recovery-cycles",
+        "3",
+        "--startup-timeout-seconds",
+        "15",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["status_before_abort"] == "running"
+    assert payload["recovery_cycles"] == 3
+    assert len(payload["cycles"]) == 3
+    assert payload["cycles"][0]["startup_recovery"]["recovered_count"] >= 1
+    assert payload["cycles"][0]["recovered_event_count"] == 1
+    assert payload["cycles"][1]["startup_recovery"]["recovered_count"] == 0
+    assert payload["cycles"][1]["recovered_event_count"] == 1
+    assert payload["cycles"][2]["startup_recovery"]["recovered_count"] == 0
+    assert payload["cycles"][2]["recovered_event_count"] == 1
+    for cycle in payload["cycles"]:
+        assert cycle["run_status"] == "failed"
+        assert cycle["run_error_type"] == "ProcessAbortRecovery"
+        assert cycle["readiness_ready"] is True
+        assert cycle["slo_status"] == "ok"
+        assert cycle["goal_create_status_code"] == 201
+        assert cycle["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_103_fsync_io_stall_drill_reports_success():
+    workspace = _local_test_dir("pytest-fsync-io-stall-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "fsync-io-stall-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--fault-injections",
+        "2",
+        "--stall-seconds",
+        "0.15",
+        "--max-stall-request-seconds",
+        "2.0",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["safe_mode"]["active_after_faults"] is True
+    assert payload["safe_mode"]["active_after_disable"] is False
+    assert payload["status_codes"]["blocked_mutation"] == 503
+    assert payload["status_codes"]["post_recovery_goal_create"] == 201
+    assert payload["readiness"]["during_fault"] is False
+    assert payload["readiness"]["after_recovery"] is True
+    assert payload["slo"]["during_fault"] == "critical"
+    assert payload["slo"]["after_recovery"] == "ok"
+    assert payload["integrity"]["during_fault_quick_ok"] is True
+    assert payload["integrity"]["during_fault_full_ok"] is True
+    assert payload["integrity"]["after_recovery_quick_ok"] is True
+    assert payload["integrity"]["after_recovery_full_ok"] is True
+    assert payload["runtime_metrics"]["io_error_count"] >= 2
+    assert payload["workflow_runs"]["running_during_fault"] == []
+    assert payload["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_104_critical_drill_flake_gate_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "critical-drill-flake-gate.py"),
+        "--repeats",
+        "2",
+        "--max-failed-iterations",
+        "0",
+        "--target-file",
+        str(project_root / "tests" / "test_goal_ops.py"),
+        "--keyword-expression",
+        "test_100_sqlite_real_full_drill_reports_success or test_101_wal_checkpoint_crash_drill_reports_success",
+        "--timeout-seconds",
+        "600",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["repeats"] == 2
+    assert payload["summary"]["failed_iterations"] == 0
+    assert payload["summary"]["passed_iterations"] == 2
+    assert len(payload["iterations"]) == 2
+    for iteration in payload["iterations"]:
+        assert iteration["success"] is True
+        assert iteration["return_code"] == 0
