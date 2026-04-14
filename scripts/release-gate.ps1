@@ -14,6 +14,8 @@ param(
     [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipRecoveryHardAbortDrill,
     [switch]$StrictRecoveryHardAbortDrill,
+    [switch]$SkipPowerLossDurabilityDrill,
+    [switch]$StrictPowerLossDurabilityDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
     [switch]$StrictDbCorruptionQuarantineDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
@@ -209,6 +211,30 @@ if (-not $SkipRecoveryHardAbortDrill) {
             }
             Write-Warning (
                 "Recovery hard-abort drill failed but StrictRecoveryHardAbortDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipPowerLossDurabilityDrill) {
+    Invoke-GateStep -Name "Power-loss durability drill (pre/post-commit hard-abort persistence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\power-loss-durability-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\power-loss-durability-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--transaction-rows", "240",
+                "--payload-bytes", "256",
+                "--startup-timeout-seconds", "15"
+            )
+        } catch {
+            if ($StrictPowerLossDurabilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Power-loss durability drill failed but StrictPowerLossDurabilityDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

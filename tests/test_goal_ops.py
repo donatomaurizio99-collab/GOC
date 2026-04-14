@@ -2256,6 +2256,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                 "drills": {
                     "release_freeze_policy": {"baseline_duration_seconds": 0.1},
                     "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
+                    "power_loss_durability": {"baseline_duration_seconds": 0.1},
                     "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
                     "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
@@ -2451,4 +2452,44 @@ def test_97_upgrade_downgrade_compatibility_drill_reports_success():
     assert payload["snapshots"]["n_minus_1"]["schema"]["has_idempotency_key"] is False
     assert payload["snapshots"]["upgrade"]["schema"]["has_idempotency_key"] is True
     assert payload["snapshots"]["rollback"]["schema"]["has_idempotency_key"] is False
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_98_power_loss_durability_drill_reports_success():
+    workspace = _local_test_dir("pytest-power-loss-durability-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "power-loss-durability-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--transaction-rows",
+        "60",
+        "--payload-bytes",
+        "96",
+        "--startup-timeout-seconds",
+        "15",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["scenarios"]["abort_before_commit"]["observed_rows"] == 0
+    assert payload["scenarios"]["abort_after_commit"]["observed_rows"] == 60
+    assert payload["app_probe"]["readiness_ready"] is True
+    assert payload["app_probe"]["slo_status"] == "ok"
+    assert payload["app_probe"]["integrity_ok"] is True
+    assert payload["post_recovery_write_rows"] == 1
     shutil.rmtree(workspace, ignore_errors=True)

@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictPowerLossDurabilityDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 This gate covers:
@@ -21,6 +21,7 @@ This gate covers:
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
+- power-loss durability drill (abort transaction process before commit and after commit, validate rollback + durable persistence)
 - DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
@@ -71,6 +72,12 @@ Manual recovery hard-abort drill invocation:
 
 ```powershell
 .\scripts\run-recovery-hard-abort-drill.ps1
+```
+
+Manual power-loss durability drill invocation:
+
+```powershell
+.\scripts\run-power-loss-durability-drill.ps1 -TransactionRows 240 -PayloadBytes 256
 ```
 
 Manual DB corruption quarantine drill invocation:
@@ -185,7 +192,7 @@ After release is live:
 
 ### 1.6 Nightly stability canary
 
-The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including DB corruption quarantine startup recovery and upgrade/downgrade compatibility.
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including power-loss durability, DB corruption quarantine startup recovery, and upgrade/downgrade compatibility.
 
 Manual canary invocation:
 
@@ -579,6 +586,24 @@ Actions:
    - `probes.reupgrade.readiness_ready = true`
    - `probes.reupgrade.slo_status = ok`
 3. If drill fails any threshold or data-preservation check, hold release and keep rollback path ready using migration backup.
+
+### 3.21 Power-loss durability uncertainty
+
+Symptoms:
+- crash/reboot concerns around SQLite commit boundaries under release-candidate load
+- uncertainty whether interrupted transactions are fully rolled back while committed writes remain durable
+
+Actions:
+1. Run power-loss durability drill:
+   ```powershell
+   .\scripts\run-power-loss-durability-drill.ps1 -TransactionRows 240 -PayloadBytes 256
+   ```
+2. Confirm drill outputs:
+   - `scenarios.abort_before_commit.observed_rows = 0`
+   - `scenarios.abort_after_commit.observed_rows = transaction_rows`
+   - `app_probe.readiness_ready = true`
+   - `app_probe.slo_status = ok`
+3. If durability checks fail, block release, preserve artifacts (`-KeepArtifacts`), and escalate with drill JSON + diagnostics snapshot.
 
 ## 4. Operational Defaults
 

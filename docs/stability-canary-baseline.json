@@ -7,6 +7,9 @@
     "db_corruption_quarantine": {
       "baseline_duration_seconds": 5.0
     },
+    "power_loss_durability": {
+      "baseline_duration_seconds": 7.0
+    },
     "upgrade_downgrade_compatibility": {
       "baseline_duration_seconds": 8.0
     },
