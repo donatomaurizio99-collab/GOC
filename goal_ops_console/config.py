@@ -23,6 +23,18 @@ def _env_float(name: str, default: float) -> float:
     except ValueError:
         return default
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
 # Skill Selection
 MIN_RUNS = 5
 DEFAULT_BASELINE_SCORE = 0.60
@@ -92,6 +104,40 @@ SLO_MAX_BACKLOG_UTILIZATION_PERCENT = _env_float(
 )
 SLO_MAX_STUCK_EVENTS = _env_int("GOAL_OPS_SLO_MAX_STUCK_EVENTS", 0)
 
+# Runtime Stability Guards
+INVARIANT_MONITOR_INTERVAL_SECONDS = _env_int(
+    "GOAL_OPS_INVARIANT_MONITOR_INTERVAL_SECONDS",
+    30,
+)
+INVARIANT_MONITOR_AUTO_SAFE_MODE = _env_bool(
+    "GOAL_OPS_INVARIANT_MONITOR_AUTO_SAFE_MODE",
+    False,
+)
+SAFE_MODE_LOCK_ERROR_THRESHOLD = _env_int(
+    "GOAL_OPS_SAFE_MODE_LOCK_ERROR_THRESHOLD",
+    6,
+)
+SAFE_MODE_LOCK_ERROR_WINDOW_SECONDS = _env_int(
+    "GOAL_OPS_SAFE_MODE_LOCK_ERROR_WINDOW_SECONDS",
+    60,
+)
+SAFE_MODE_IO_ERROR_THRESHOLD = _env_int(
+    "GOAL_OPS_SAFE_MODE_IO_ERROR_THRESHOLD",
+    2,
+)
+SAFE_MODE_IO_ERROR_WINDOW_SECONDS = _env_int(
+    "GOAL_OPS_SAFE_MODE_IO_ERROR_WINDOW_SECONDS",
+    120,
+)
+SAFE_MODE_AUTO_DISABLE_AFTER_SECONDS = _env_int(
+    "GOAL_OPS_SAFE_MODE_AUTO_DISABLE_AFTER_SECONDS",
+    0,
+)
+IDEMPOTENCY_RETENTION_DAYS = _env_int(
+    "GOAL_OPS_IDEMPOTENCY_RETENTION_DAYS",
+    14,
+)
+
 # The sandbox in this workspace rejects file-backed SQLite locks, so the
 # persistent `goal_ops.db` path should be supplied via GOAL_OPS_DATABASE_URL.
 DEFAULT_DATABASE_URL = os.getenv("GOAL_OPS_DATABASE_URL", ":memory:")
@@ -130,3 +176,11 @@ class Settings:
     slo_max_event_failure_rate_percent: float = SLO_MAX_EVENT_FAILURE_RATE_PERCENT
     slo_max_backlog_utilization_percent: float = SLO_MAX_BACKLOG_UTILIZATION_PERCENT
     slo_max_stuck_events: int = SLO_MAX_STUCK_EVENTS
+    invariant_monitor_interval_seconds: int = INVARIANT_MONITOR_INTERVAL_SECONDS
+    invariant_monitor_auto_safe_mode: bool = INVARIANT_MONITOR_AUTO_SAFE_MODE
+    safe_mode_lock_error_threshold: int = SAFE_MODE_LOCK_ERROR_THRESHOLD
+    safe_mode_lock_error_window_seconds: int = SAFE_MODE_LOCK_ERROR_WINDOW_SECONDS
+    safe_mode_io_error_threshold: int = SAFE_MODE_IO_ERROR_THRESHOLD
+    safe_mode_io_error_window_seconds: int = SAFE_MODE_IO_ERROR_WINDOW_SECONDS
+    safe_mode_auto_disable_after_seconds: int = SAFE_MODE_AUTO_DISABLE_AFTER_SECONDS
+    idempotency_retention_days: int = IDEMPOTENCY_RETENTION_DAYS

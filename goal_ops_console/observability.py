@@ -59,6 +59,10 @@ class ObservabilityService:
             "tasks.created",
             "transition.rejected",
             "backpressure.throttled",
+            "runtime.safe_mode.activated",
+            "runtime.db_errors.lock",
+            "runtime.db_errors.io",
+            "invariants.violations.detected",
         )
         summary: dict[str, int] = {}
         for metric in watched:

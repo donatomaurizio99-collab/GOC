@@ -1983,3 +1983,317 @@ def test_85_workflow_worker_restart_drill_reports_success():
     assert payload["after"]["ready"] is True
     assert payload["after"]["worker_running"] is True
     assert payload["run"]["status"] == "succeeded"
+
+
+def test_86_event_consumer_recovery_chaos_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "event-consumer-recovery-chaos-drill.py"),
+        "--goal-count",
+        "20",
+        "--stale-processing-count",
+        "8",
+        "--drain-batch-size",
+        "80",
+        "--timeout-seconds",
+        "12",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["reclaimed_count"] >= payload["stale_processing_target"]
+    assert payload["status_counts"].get("processing", 0) == 0
+    assert payload["status_counts"].get("failed", 0) == 0
+    assert payload["readiness_ready"] is True
+    assert payload["slo_status"] == "ok"
+
+
+def test_87_invariant_burst_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "invariant-burst-drill.py"),
+        "--goal-count",
+        "24",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["goal_count"] == 24
+    assert payload["invariant_violations"]["direct"] == []
+    assert payload["invariant_violations"]["health"] == []
+    assert payload["readiness_ready"] is True
+
+
+def test_88_long_soak_budget_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "long-soak-budget-drill.py"),
+        "--duration-seconds",
+        "6",
+        "--max-p95-latency-ms",
+        "500",
+        "--max-p99-latency-ms",
+        "800",
+        "--max-max-latency-ms",
+        "5000",
+        "--max-http-429-rate-percent",
+        "1.0",
+        "--max-error-rate-percent",
+        "1.0",
+        "--min-requests",
+        "120",
+        "--drain-batch-size",
+        "120",
+        "--workflow-start-every-cycles",
+        "0",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["requests_total"] >= 120
+    assert payload["latency_ms"]["p95"] <= 500
+    assert payload["latency_ms"]["p99"] <= 800
+    assert payload["latency_ms"]["max"] <= 5000
+    assert payload["observed_rates_percent"]["http_429_rate"] <= 1.0
+    assert payload["observed_rates_percent"]["error_rate"] <= 1.0
+    assert payload["readiness_ready"] is True
+    assert payload["slo_status"] == "ok"
+
+
+def test_89_release_freeze_policy_drill_reports_success():
+    workspace = _local_test_dir("pytest-release-freeze-policy")
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-freeze-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "degraded,critical,critical,critical",
+        "--mock-error-budget-burn-rates",
+        "0.5,1.0,2.5,2.5",
+        "--non-ok-window-seconds",
+        "2",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--max-error-budget-burn-rate-percent",
+        "2.0",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+        "--promotion-test-version",
+        "0.0.3",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["freeze"]["executed"] is True
+    assert payload["promotion_block_verification"]["blocked"] is True
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_90_db_safe_mode_watchdog_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "db-safe-mode-watchdog-drill.py"),
+        "--lock-error-injections",
+        "4",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["safe_mode_active_after_injection"] is True
+    assert payload["blocked_status_code"] == 503
+    assert payload["allowed_reclaim_status_code"] == 200
+    assert payload["safe_mode_active_after_disable"] is False
+    assert payload["post_disable_goal_create_status_code"] == 201
+
+
+def test_91_invariant_monitor_watchdog_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "invariant-monitor-watchdog-drill.py"),
+        "--timeout-seconds",
+        "8",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["detected_violation_count"] > 0
+    assert payload["safe_mode_active_after_detection"] is True
+    assert payload["blocked_status_code"] == 503
+
+
+def test_92_mutation_idempotency_replays_goal_create_response(client):
+    headers = {"Idempotency-Key": "goal-create-idem-1"}
+    payload = {
+        "title": "Idempotent Goal",
+        "description": "ensure replay",
+        "urgency": 0.5,
+        "value": 0.5,
+        "deadline_score": 0.2,
+    }
+
+    first = client.post("/goals", json=payload, headers=headers)
+    second = client.post("/goals", json=payload, headers=headers)
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.headers.get("x-idempotency-replay") == "true"
+
+    first_goal = first.json()
+    second_goal = second.json()
+    assert first_goal["goal_id"] == second_goal["goal_id"]
+
+    rows = client.app.state.services.db.fetch_all("SELECT goal_id FROM goals WHERE title = ?", "Idempotent Goal")
+    assert len(rows) == 1
+
+
+def test_93_mutation_idempotency_rejects_payload_mismatch(client):
+    headers = {"Idempotency-Key": "goal-create-idem-2"}
+    first = client.post(
+        "/goals",
+        json={
+            "title": "Idempotent A",
+            "description": "first",
+            "urgency": 0.4,
+            "value": 0.5,
+            "deadline_score": 0.1,
+        },
+        headers=headers,
+    )
+    second = client.post(
+        "/goals",
+        json={
+            "title": "Idempotent B",
+            "description": "second",
+            "urgency": 0.7,
+            "value": 0.6,
+            "deadline_score": 0.3,
+        },
+        headers=headers,
+    )
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert "different payload" in second.json()["detail"].lower()
+
+
+def test_94_stability_canary_reports_success_with_short_soak():
+    workspace = _local_test_dir("pytest-stability-canary")
+    project_root = Path(__file__).resolve().parents[1]
+    baseline_file = workspace / "baseline.json"
+    report_file = workspace / "report.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "max_duration_regression_percent": 10_000.0,
+                "drills": {
+                    "release_freeze_policy": {"baseline_duration_seconds": 0.1},
+                    "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
+                    "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
+                    "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
+                    "invariant_burst": {"baseline_duration_seconds": 0.1},
+                    "long_soak_budget": {
+                        "baseline_duration_seconds": 0.1,
+                        "max_http_429_rate_percent": 1.0,
+                        "max_error_rate_percent": 1.0,
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "stability-canary.py"),
+        "--baseline-file",
+        str(baseline_file),
+        "--output-file",
+        str(report_file),
+        "--long-soak-duration-seconds",
+        "6",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert report_file.exists()
+    shutil.rmtree(workspace, ignore_errors=True)

@@ -7,7 +7,9 @@ from goal_ops_console.database import Database
 from goal_ops_console.event_bus import EventBus
 from goal_ops_console.execution_layer import ExecutionLayer
 from goal_ops_console.failure_intelligence import FailureIntelligence
+from goal_ops_console.invariant_monitor import InvariantMonitor
 from goal_ops_console.observability import ObservabilityService
+from goal_ops_console.runtime_guard import RuntimeGuard
 from goal_ops_console.scheduler import SchedulerService
 from goal_ops_console.state_manager import StateManager
 from goal_ops_console.stubs import PermissionManager, Planner, QdrantClientStub
@@ -25,6 +27,8 @@ class AppServices:
     failure_intelligence: FailureIntelligence
     scheduler: SchedulerService
     workflow_catalog: WorkflowCatalog
+    runtime_guard: RuntimeGuard
+    invariant_monitor: InvariantMonitor
     qdrant: QdrantClientStub
     planner: Planner
     permission_manager: PermissionManager
@@ -38,6 +42,14 @@ def build_services(settings: Settings | None = None) -> AppServices:
     )
     db.initialize()
     observability = ObservabilityService(db)
+    runtime_guard = RuntimeGuard(
+        lock_error_threshold=app_settings.safe_mode_lock_error_threshold,
+        lock_error_window_seconds=app_settings.safe_mode_lock_error_window_seconds,
+        io_error_threshold=app_settings.safe_mode_io_error_threshold,
+        io_error_window_seconds=app_settings.safe_mode_io_error_window_seconds,
+        auto_disable_after_seconds=app_settings.safe_mode_auto_disable_after_seconds,
+        observability=observability,
+    )
     event_bus = EventBus(
         db,
         default_consumer_id=app_settings.consumer_id,
@@ -46,6 +58,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         events_retention_days=app_settings.events_retention_days,
         event_processing_retention_days=app_settings.event_processing_retention_days,
         failure_log_retention_days=app_settings.failure_log_retention_days,
+        idempotency_retention_days=app_settings.idempotency_retention_days,
         observability=observability,
     )
     state_manager = StateManager(
@@ -74,6 +87,13 @@ def build_services(settings: Settings | None = None) -> AppServices:
         startup_recovery_max_age_seconds=app_settings.workflow_startup_recovery_max_age_seconds,
         observability=observability,
     )
+    invariant_monitor = InvariantMonitor(
+        state_manager,
+        scan_interval_seconds=app_settings.invariant_monitor_interval_seconds,
+        auto_safe_mode=app_settings.invariant_monitor_auto_safe_mode,
+        runtime_guard=runtime_guard,
+        observability=observability,
+    )
     return AppServices(
         settings=app_settings,
         db=db,
@@ -84,6 +104,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         failure_intelligence=failure_intelligence,
         scheduler=scheduler,
         workflow_catalog=workflow_catalog,
+        runtime_guard=runtime_guard,
+        invariant_monitor=invariant_monitor,
         qdrant=QdrantClientStub(),
         planner=Planner(),
         permission_manager=PermissionManager(),

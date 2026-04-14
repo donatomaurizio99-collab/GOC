@@ -125,6 +125,20 @@ CREATE TABLE IF NOT EXISTS event_processing (
   PRIMARY KEY (event_id, consumer_id)
 );
 
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  idempotency_key TEXT NOT NULL,
+  method          TEXT NOT NULL,
+  path            TEXT NOT NULL,
+  request_hash    TEXT NOT NULL,
+  response_status INTEGER NOT NULL,
+  response_body   TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (idempotency_key, method, path)
+);
+CREATE INDEX IF NOT EXISTS idx_idempotency_updated_at
+ON idempotency_keys(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS ephemeral_state (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,

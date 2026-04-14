@@ -388,6 +388,10 @@ Observability endpoints:
 - `GET /system/metrics`
 - `GET /system/audit`
 - `GET /system/slo`
+- `GET /system/safe-mode`
+- `POST /system/safe-mode/enable`
+- `POST /system/safe-mode/disable`
+- `GET /system/invariants`
 - `GET /system/database/integrity?mode=quick|full`
 - `GET /system/faults`
 - `GET /system/faults/summary`
@@ -406,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
 ```
 
 Standalone backup/restore drill:
@@ -432,6 +436,13 @@ Standalone auto-rollback policy check (live service):
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+```
+
+Standalone release-freeze policy check (live service):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-freeze-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -NonOkWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Standalone desktop-update safety drill:
@@ -469,6 +480,41 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-workflow-worker-restart-drill.ps1
 ```
 
+Standalone event-consumer recovery chaos drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-event-consumer-recovery-chaos-drill.ps1
+```
+
+Standalone invariant burst drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-invariant-burst-drill.ps1
+```
+
+Standalone long soak budget drill (15-minute default):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-long-soak-budget-drill.ps1 -DurationSeconds 900
+```
+
+Standalone DB safe-mode watchdog drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-db-safe-mode-watchdog-drill.ps1 -LockErrorInjections 4
+```
+
+Standalone invariant monitor watchdog drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-invariant-monitor-watchdog-drill.ps1 -TimeoutSeconds 8
+```
+
 Standalone SLO alert check:
 
 ```powershell
@@ -503,6 +549,9 @@ Workflow file:
 Desktop workflow file:
 [desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)
 
+Nightly stability canary workflow:
+[stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml)
+
 Recommended branch protection on `master`:
 
 1. Open repository settings on GitHub.
@@ -519,6 +568,15 @@ Local desktop smoke command:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 python .\scripts\desktop-smoke.py
+```
+
+## Nightly Stability Canary
+
+Run the full canary profile locally (includes release-freeze policy, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+python .\scripts\stability-canary.py --baseline-file .\docs\stability-canary-baseline.json --long-soak-duration-seconds 120 --output-file .\.tmp\stability-canary-report.json
 ```
 
 ## Production Runbook
@@ -660,6 +718,8 @@ If a value is rejected:
 - [run-slo-alert-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-slo-alert-check.ps1)
 - [auto-rollback-policy.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/auto-rollback-policy.py)
 - [run-auto-rollback-policy.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-auto-rollback-policy.ps1)
+- [release-freeze-policy.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-freeze-policy.py)
+- [run-release-freeze-policy.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-freeze-policy.ps1)
 - [desktop-update-safety-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/desktop-update-safety-drill.py)
 - [run-desktop-update-safety-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-desktop-update-safety-drill.ps1)
 - [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
@@ -671,6 +731,18 @@ If a value is rejected:
 - [run-workflow-soak-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-soak-drill.ps1)
 - [workflow-worker-restart-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-worker-restart-drill.py)
 - [run-workflow-worker-restart-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-worker-restart-drill.ps1)
+- [event-consumer-recovery-chaos-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/event-consumer-recovery-chaos-drill.py)
+- [run-event-consumer-recovery-chaos-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-event-consumer-recovery-chaos-drill.ps1)
+- [invariant-burst-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/invariant-burst-drill.py)
+- [run-invariant-burst-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-invariant-burst-drill.ps1)
+- [long-soak-budget-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/long-soak-budget-drill.py)
+- [run-long-soak-budget-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-long-soak-budget-drill.ps1)
+- [db-safe-mode-watchdog-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/db-safe-mode-watchdog-drill.py)
+- [run-db-safe-mode-watchdog-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-db-safe-mode-watchdog-drill.ps1)
+- [invariant-monitor-watchdog-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/invariant-monitor-watchdog-drill.py)
+- [run-invariant-monitor-watchdog-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-invariant-monitor-watchdog-drill.ps1)
+- [stability-canary.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/stability-canary.py)
+- [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
