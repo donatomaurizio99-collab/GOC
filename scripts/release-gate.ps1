@@ -18,6 +18,8 @@ param(
     [switch]$StrictPowerLossDurabilityDrill,
     [switch]$SkipDiskPressureFaultInjectionDrill,
     [switch]$StrictDiskPressureFaultInjectionDrill,
+    [switch]$SkipSqliteRealFullDrill,
+    [switch]$StrictSqliteRealFullDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
     [switch]$StrictDbCorruptionQuarantineDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
@@ -259,6 +261,31 @@ if (-not $SkipDiskPressureFaultInjectionDrill) {
             }
             Write-Warning (
                 "Disk-pressure fault-injection drill failed but StrictDiskPressureFaultInjectionDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSqliteRealFullDrill) {
+    Invoke-GateStep -Name "SQLite real FULL drill (actual max_page_count saturation + recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\sqlite-real-full-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\sqlite-real-full-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--payload-bytes", "8192",
+                "--max-write-attempts", "240",
+                "--max-page-growth", "24",
+                "--recovery-page-growth", "160"
+            )
+        } catch {
+            if ($StrictSqliteRealFullDrill) {
+                throw
+            }
+            Write-Warning (
+                "SQLite real full drill failed but StrictSqliteRealFullDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

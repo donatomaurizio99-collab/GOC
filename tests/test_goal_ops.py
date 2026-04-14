@@ -2541,3 +2541,54 @@ def test_99_disk_pressure_fault_injection_drill_reports_success():
         assert case["workflow_runs"]["running_during_fault"] == []
         assert case["workflow_runs"]["running_after_recovery"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_100_sqlite_real_full_drill_reports_success():
+    workspace = _local_test_dir("pytest-sqlite-real-full-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "sqlite-real-full-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--payload-bytes",
+        "4096",
+        "--max-write-attempts",
+        "160",
+        "--max-page-growth",
+        "16",
+        "--recovery-page-growth",
+        "120",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["fill"]["first_failure_status"] == 500
+    assert payload["safe_mode"]["after_full_trigger"]["active"] is True
+    assert payload["status_codes"]["blocked_mutation_during_safe_mode"] == 503
+    assert payload["status_codes"]["post_recovery_goal_create"] == 201
+    assert payload["readiness"]["during_fault"] is False
+    assert payload["readiness"]["after_recovery"] is True
+    assert payload["slo"]["during_fault"] == "critical"
+    assert payload["slo"]["after_recovery"] == "ok"
+    assert payload["integrity"]["during_fault_quick_ok"] is True
+    assert payload["integrity"]["during_fault_full_ok"] is True
+    assert payload["integrity"]["after_recovery_quick_ok"] is True
+    assert payload["integrity"]["after_recovery_full_ok"] is True
+    assert payload["runtime_metrics"]["io_error_count"] >= 1
+    assert payload["workflow_runs"]["running_during_fault"] == []
+    assert payload["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
