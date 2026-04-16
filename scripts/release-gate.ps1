@@ -8,6 +8,8 @@ param(
     [switch]$StrictSecurityConfigHardeningCheck,
     [switch]$SkipAuditTrailHardeningCheck,
     [switch]$StrictAuditTrailHardeningCheck,
+    [switch]$SkipSecurityCiLaneCheck,
+    [switch]$StrictSecurityCiLaneCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -193,6 +195,36 @@ if (-not $SkipAuditTrailHardeningCheck) {
             }
             Write-Warning (
                 "Audit trail hardening check failed but StrictAuditTrailHardeningCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSecurityCiLaneCheck) {
+    Invoke-GateStep -Name "Security CI lane check (dependency audit + SAST + SBOM + fail policy)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\security-ci-lane-release-gate.json"
+        $sbomPath = Join-Path $ProjectRoot "artifacts\security-sbom-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\security-ci-lane-check.py",
+                "--label", "release-gate",
+                "--python-exe", $PythonExe,
+                "--deployment-profile", "production",
+                "--scan-path", "goal_ops_console",
+                "--max-dependency-vulnerabilities", "0",
+                "--max-sast-high", "0",
+                "--max-sast-medium", "200",
+                "--timeout-seconds", "300",
+                "--sbom-output-file", $sbomPath,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSecurityCiLaneCheck) {
+                throw
+            }
+            Write-Warning (
+                "Security CI lane check failed but StrictSecurityCiLaneCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

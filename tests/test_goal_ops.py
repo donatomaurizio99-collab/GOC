@@ -3828,3 +3828,133 @@ def test_125_service_startup_backfills_legacy_audit_integrity_rows():
         assert payload["metrics"]["total_audit_entries"] >= 1
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_126_security_ci_lane_check_reports_success_with_fixture_inputs():
+    workspace = _local_test_dir("pytest-security-ci-lane-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    dependency_file = artifacts_dir / "dependency-audit.json"
+    sast_file = artifacts_dir / "sast-bandit.json"
+    sbom_file = artifacts_dir / "security-sbom.json"
+    output_file = artifacts_dir / "security-ci-lane-report.json"
+
+    dependency_file.write_text(json.dumps([], ensure_ascii=True), encoding="utf-8")
+    sast_file.write_text(
+        json.dumps({"results": [], "metrics": {}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-ci-lane-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--scan-path",
+        "goal_ops_console",
+        "--max-dependency-vulnerabilities",
+        "0",
+        "--max-sast-high",
+        "0",
+        "--max-sast-medium",
+        "0",
+        "--dependency-audit-json-file",
+        str(dependency_file.resolve()),
+        "--sast-json-file",
+        str(sast_file.resolve()),
+        "--sbom-output-file",
+        str(sbom_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert sbom_file.exists()
+    assert output_file.exists()
+
+    sbom_payload = json.loads(sbom_file.read_text(encoding="utf-8"))
+    assert sbom_payload["component_count"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_127_security_ci_lane_check_fails_when_dependency_budget_exceeded():
+    workspace = _local_test_dir("pytest-security-ci-lane-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    dependency_file = artifacts_dir / "dependency-audit.json"
+    sast_file = artifacts_dir / "sast-bandit.json"
+    output_file = artifacts_dir / "security-ci-lane-report.json"
+
+    dependency_file.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "example-package",
+                    "version": "1.2.3",
+                    "vulns": [{"id": "PYSEC-2026-0001", "fix_versions": ["1.2.4"]}],
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    sast_file.write_text(
+        json.dumps({"results": [], "metrics": {}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-ci-lane-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--scan-path",
+        "goal_ops_console",
+        "--max-dependency-vulnerabilities",
+        "0",
+        "--max-sast-high",
+        "0",
+        "--max-sast-medium",
+        "0",
+        "--dependency-audit-json-file",
+        str(dependency_file.resolve()),
+        "--sast-json-file",
+        str(sast_file.resolve()),
+        "--sbom-output-file",
+        str((artifacts_dir / "security-sbom.json").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[security-ci-lane-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert payload["metrics"]["dependency_vulnerability_count"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
