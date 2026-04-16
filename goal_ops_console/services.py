@@ -52,6 +52,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
     )
     db.initialize()
     observability = ObservabilityService(db)
+    observability.ensure_audit_integrity_backfill()
     runtime_guard = RuntimeGuard(
         lock_error_threshold=app_settings.safe_mode_lock_error_threshold,
         lock_error_window_seconds=app_settings.safe_mode_lock_error_window_seconds,
@@ -81,6 +82,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         events_retention_days=app_settings.events_retention_days,
         event_processing_retention_days=app_settings.event_processing_retention_days,
         failure_log_retention_days=app_settings.failure_log_retention_days,
+        audit_log_retention_days=app_settings.audit_log_retention_days,
         idempotency_retention_days=app_settings.idempotency_retention_days,
         observability=observability,
     )

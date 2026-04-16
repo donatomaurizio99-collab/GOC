@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action_created_at ON audit_log(action, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS audit_log_integrity (
+  chain_index      INTEGER PRIMARY KEY AUTOINCREMENT,
+  audit_id         TEXT NOT NULL UNIQUE,
+  previous_hash    TEXT,
+  entry_hash       TEXT NOT NULL,
+  canonical_payload TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  FOREIGN KEY(audit_id) REFERENCES audit_log(audit_id)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_integrity_created_at
+ON audit_log_integrity(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_integrity_audit_id
+ON audit_log_integrity(audit_id);
+
 CREATE TABLE IF NOT EXISTS metrics_counters (
   metric_name TEXT PRIMARY KEY,
   value       INTEGER NOT NULL DEFAULT 0,

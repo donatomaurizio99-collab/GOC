@@ -27,6 +27,7 @@ class EventBus:
         events_retention_days: int,
         event_processing_retention_days: int,
         failure_log_retention_days: int,
+        audit_log_retention_days: int,
         idempotency_retention_days: int,
         observability: "ObservabilityService | None" = None,
     ):
@@ -38,6 +39,7 @@ class EventBus:
         self.events_retention_days = events_retention_days
         self.event_processing_retention_days = event_processing_retention_days
         self.failure_log_retention_days = failure_log_retention_days
+        self.audit_log_retention_days = audit_log_retention_days
         self.idempotency_retention_days = idempotency_retention_days
         self.observability = observability
 
@@ -141,6 +143,22 @@ class EventBus:
                    WHERE created_at < datetime('now', ? || ' days')""",
                 f"-{self.failure_log_retention_days}",
             )
+            audit_integrity_deleted = tx.execute(
+                """DELETE FROM audit_log_integrity
+                   WHERE created_at < datetime('now', ? || ' days')
+                      OR audit_id IN (
+                          SELECT audit_id
+                          FROM audit_log
+                          WHERE created_at < datetime('now', ? || ' days')
+                      )""",
+                f"-{self.audit_log_retention_days}",
+                f"-{self.audit_log_retention_days}",
+            )
+            audit_log_deleted = tx.execute(
+                """DELETE FROM audit_log
+                   WHERE created_at < datetime('now', ? || ' days')""",
+                f"-{self.audit_log_retention_days}",
+            )
             idempotency_deleted = tx.execute(
                 """DELETE FROM idempotency_keys
                    WHERE updated_at < datetime('now', ? || ' days')""",
@@ -156,12 +174,22 @@ class EventBus:
                 )
             if failures_deleted:
                 self._metric("maintenance.retention.failure_log_deleted", failures_deleted, tx=tx)
+            if audit_integrity_deleted:
+                self._metric(
+                    "maintenance.retention.audit_integrity_deleted",
+                    audit_integrity_deleted,
+                    tx=tx,
+                )
+            if audit_log_deleted:
+                self._metric("maintenance.retention.audit_log_deleted", audit_log_deleted, tx=tx)
             if idempotency_deleted:
                 self._metric("maintenance.retention.idempotency_deleted", idempotency_deleted, tx=tx)
         return {
             "events_deleted": events_deleted,
             "event_processing_deleted": event_processing_deleted,
             "failure_log_deleted": failures_deleted,
+            "audit_integrity_deleted": audit_integrity_deleted,
+            "audit_log_deleted": audit_log_deleted,
             "idempotency_deleted": idempotency_deleted,
         }
 

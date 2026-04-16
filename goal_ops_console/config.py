@@ -82,6 +82,7 @@ EPHEMERAL_MAX_ROWS = 10_000
 EVENTS_RETENTION_DAYS = 30
 EVENT_PROCESSING_RETENTION_DAYS = 30
 FAILURE_LOG_RETENTION_DAYS = 90
+AUDIT_LOG_RETENTION_DAYS = _env_int("GOAL_OPS_AUDIT_LOG_RETENTION_DAYS", 365)
 WORKFLOW_RUN_TIMEOUT_SECONDS = 300
 WORKFLOW_REAPER_BATCH_SIZE = 200
 WORKFLOW_WORKER_POLL_INTERVAL_SECONDS = 0.5
@@ -177,6 +178,7 @@ class Settings:
     events_retention_days: int = EVENTS_RETENTION_DAYS
     event_processing_retention_days: int = EVENT_PROCESSING_RETENTION_DAYS
     failure_log_retention_days: int = FAILURE_LOG_RETENTION_DAYS
+    audit_log_retention_days: int = AUDIT_LOG_RETENTION_DAYS
     workflow_run_timeout_seconds: int = WORKFLOW_RUN_TIMEOUT_SECONDS
     workflow_reaper_batch_size: int = WORKFLOW_REAPER_BATCH_SIZE
     workflow_worker_poll_interval_seconds: float = WORKFLOW_WORKER_POLL_INTERVAL_SECONDS

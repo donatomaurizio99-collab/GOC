@@ -531,18 +531,38 @@ def test_29_retention_cleanup_deletes_old_records(client):
         " 'old-fingerprint', 1, 'old', 'recorded', 1, datetime('now', '-120 days'), datetime('now', '-120 days'))",
         old_failure_id,
     )
+    old_audit_id = services.observability.record_audit(
+        action="retention.old.audit",
+        actor="test",
+        status="success",
+        entity_type="retention",
+        entity_id="old-audit-entry",
+    )
+    services.db.execute(
+        "UPDATE audit_log SET created_at = datetime('now', '-400 days') WHERE audit_id = ?",
+        old_audit_id,
+    )
+    services.db.execute(
+        "UPDATE audit_log_integrity SET created_at = datetime('now', '-400 days') WHERE audit_id = ?",
+        old_audit_id,
+    )
     response = client.post("/system/maintenance/retention")
     assert response.status_code == 200
     payload = response.json()
     assert payload["event_processing_deleted"] == 1
     assert payload["events_deleted"] == 1
     assert payload["failure_log_deleted"] == 1
+    assert payload["audit_log_deleted"] == 1
+    assert payload["audit_integrity_deleted"] == 1
+    assert payload["retention_days"]["audit_log"] == services.settings.audit_log_retention_days
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM events WHERE event_id = ?", old_event_id) == 0
     assert (
         services.db.fetch_scalar("SELECT COUNT(*) FROM event_processing WHERE event_id = ?", old_event_id)
         == 0
     )
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM failure_log WHERE id = ?", old_failure_id) == 0
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log WHERE audit_id = ?", old_audit_id) == 0
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log_integrity WHERE audit_id = ?", old_audit_id) == 0
 
 
 def test_30_backpressure_endpoint_and_health_include_limits(client):
@@ -3634,3 +3654,177 @@ def test_120_security_config_hardening_check_reports_failure_without_auth_requir
     payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
     assert payload["success"] is False
     assert payload["metrics"]["criteria_failed"] >= 1
+
+
+def test_121_audit_integrity_endpoint_detects_tampering(client):
+    created = client.post(
+        "/goals",
+        json={
+            "title": "Audit integrity goal",
+            "description": "tamper detection",
+            "urgency": 0.6,
+            "value": 0.7,
+            "deadline_score": 0.1,
+        },
+    )
+    assert created.status_code == 201
+
+    baseline = client.get("/system/audit/integrity?verify_limit=500")
+    assert baseline.status_code == 200
+    baseline_payload = baseline.json()
+    assert baseline_payload["ok"] is True
+    assert baseline_payload["metrics"]["missing_integrity_rows"] == 0
+
+    services = client.app.state.services
+    latest_audit_id = services.db.fetch_scalar(
+        "SELECT audit_id FROM audit_log ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+    )
+    assert latest_audit_id is not None
+    services.db.execute(
+        "UPDATE audit_log_integrity SET entry_hash = ? WHERE audit_id = ?",
+        "0" * 64,
+        latest_audit_id,
+    )
+
+    tampered = client.get("/system/audit/integrity?verify_limit=500")
+    assert tampered.status_code == 200
+    tampered_payload = tampered.json()
+    assert tampered_payload["ok"] is False
+    assert tampered_payload["metrics"]["hash_mismatch_count"] >= 1
+
+
+def test_122_readiness_reports_not_ready_when_audit_integrity_is_tampered():
+    app = create_app(Settings(database_url=":memory:"))
+    with TestClient(app) as local_client:
+        created = local_client.post(
+            "/goals",
+            json={
+                "title": "Readiness tamper goal",
+                "description": "check",
+                "urgency": 0.5,
+                "value": 0.4,
+                "deadline_score": 0.1,
+            },
+        )
+        assert created.status_code == 201
+
+        services = local_client.app.state.services
+        latest_audit_id = services.db.fetch_scalar(
+            "SELECT audit_id FROM audit_log ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+        )
+        assert latest_audit_id is not None
+        services.db.execute(
+            "UPDATE audit_log_integrity SET entry_hash = ? WHERE audit_id = ?",
+            "0" * 64,
+            latest_audit_id,
+        )
+
+        readiness = local_client.get("/system/readiness")
+        assert readiness.status_code == 200
+        payload = readiness.json()
+        assert payload["ready"] is False
+        assert payload["checks"]["audit_integrity"]["ok"] is False
+        assert payload["checks"]["audit_integrity"]["metrics"]["hash_mismatch_count"] >= 1
+
+
+def test_123_audit_trail_hardening_check_reports_success():
+    workspace = _local_test_dir("pytest-audit-trail-hardening-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "audit-trail-hardening-check-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "audit-trail-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--audit-retention-days",
+        "365",
+        "--min-audit-retention-days",
+        "90",
+        "--seed-entries",
+        "8",
+        "--workspace",
+        str(workspace),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_124_audit_trail_hardening_check_fails_with_low_retention_policy():
+    workspace = _local_test_dir("pytest-audit-trail-hardening-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "audit-trail-hardening-check-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "audit-trail-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--audit-retention-days",
+        "14",
+        "--min-audit-retention-days",
+        "90",
+        "--seed-entries",
+        "8",
+        "--workspace",
+        str(workspace),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[audit-trail-hardening-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_125_service_startup_backfills_legacy_audit_integrity_rows():
+    workspace = _local_test_dir("pytest-audit-integrity-backfill")
+    db_path = workspace / "legacy-audit.db"
+    db = Database(str(db_path))
+    db.initialize()
+
+    legacy_audit_id = new_id()
+    db.execute(
+        """INSERT INTO audit_log
+           (audit_id, action, actor, status, entity_type, entity_id, correlation_id, details, created_at)
+           VALUES (?, 'legacy.audit', 'test', 'success', 'legacy', 'entry-1', NULL, NULL, ?)""",
+        legacy_audit_id,
+        now_utc(),
+    )
+
+    app = create_app(Settings(database_url=str(db_path)))
+    with TestClient(app) as local_client:
+        integrity = local_client.get("/system/audit/integrity?verify_limit=500")
+        assert integrity.status_code == 200
+        payload = integrity.json()
+        assert payload["ok"] is True
+        assert payload["metrics"]["missing_integrity_rows"] == 0
+        assert payload["metrics"]["chain_entries"] >= 1
+        assert payload["metrics"]["total_audit_entries"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)

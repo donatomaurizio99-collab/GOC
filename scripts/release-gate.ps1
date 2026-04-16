@@ -6,6 +6,8 @@ param(
     [switch]$SkipSloAlertCheck,
     [switch]$SkipSecurityConfigHardeningCheck,
     [switch]$StrictSecurityConfigHardeningCheck,
+    [switch]$SkipAuditTrailHardeningCheck,
+    [switch]$StrictAuditTrailHardeningCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -164,6 +166,33 @@ if (-not $SkipSecurityConfigHardeningCheck) {
             }
             Write-Warning (
                 "Security config hardening check failed but StrictSecurityConfigHardeningCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipAuditTrailHardeningCheck) {
+    Invoke-GateStep -Name "Audit trail hardening check (immutable hash-chain + tamper detection + retention policy)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\audit-trail-hardening-release-gate.json"
+        $workspace = Join-Path $ProjectRoot ".tmp\audit-trail-hardening-release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\audit-trail-hardening-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--audit-retention-days", "365",
+                "--min-audit-retention-days", "90",
+                "--seed-entries", "8",
+                "--workspace", $workspace,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictAuditTrailHardeningCheck) {
+                throw
+            }
+            Write-Warning (
+                "Audit trail hardening check failed but StrictAuditTrailHardeningCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

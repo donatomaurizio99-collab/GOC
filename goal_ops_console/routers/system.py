@@ -32,6 +32,7 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
     faults["systemic_external_failures_last_window"] = (
         services.failure_intelligence.systemic_external_failure_count()
     )
+    audit_integrity = services.observability.audit_integrity_status(verify_limit=200)
     return {
         "spec_version": SPEC_VERSION,
         "default_consumer_id": services.settings.consumer_id,
@@ -45,11 +46,13 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
             "events_days": services.settings.events_retention_days,
             "event_processing_days": services.settings.event_processing_retention_days,
             "failure_log_days": services.settings.failure_log_retention_days,
+            "audit_log_days": services.settings.audit_log_retention_days,
             "idempotency_keys_days": services.settings.idempotency_retention_days,
         },
         "metrics": services.observability.metrics_summary(),
         "audit": {
             "entries_last_24h": services.observability.recent_audit_count(hours=24),
+            "integrity": audit_integrity,
         },
         "faults": faults,
         "retry_budget_per_cycle": MAX_TOTAL_RETRIES_PER_CYCLE,
@@ -140,6 +143,28 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
         safe_mode_error = str(exc)
     safe_mode_ok = safe_mode_error is None and not bool(safe_mode.get("active"))
 
+    audit_integrity_error: str | None = None
+    audit_integrity: dict[str, Any] = {
+        "ok": False,
+        "metrics": {
+            "total_audit_entries": 0,
+            "chain_entries": 0,
+            "missing_integrity_rows": 0,
+            "coverage_percent": 100.0,
+            "sampled_rows": 0,
+            "hash_mismatch_count": 0,
+            "previous_link_mismatch_count": 0,
+            "chain_gap_count": 0,
+            "verify_limit": 500,
+        },
+        "violations": [],
+    }
+    try:
+        audit_integrity = services.observability.audit_integrity_status(verify_limit=500)
+    except Exception as exc:
+        audit_integrity_error = str(exc)
+    audit_integrity_ok = audit_integrity_error is None and bool(audit_integrity.get("ok"))
+
     invariant_monitor_error: str | None = None
     invariant_monitor: dict[str, Any] = {
         "is_running": False,
@@ -171,6 +196,7 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
             db_ok
             and worker_ok
             and safe_mode_ok
+            and audit_integrity_ok
             and invariant_monitor_ok
             and operator_auth_ok
         ),
@@ -193,6 +219,11 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
                 **safe_mode,
                 "ok": safe_mode_ok,
                 "error": safe_mode_error,
+            },
+            "audit_integrity": {
+                **audit_integrity,
+                "ok": audit_integrity_ok,
+                "error": audit_integrity_error,
             },
             "invariant_monitor": {
                 **invariant_monitor,
@@ -673,6 +704,17 @@ def audit_log(
     }
 
 
+@router.get("/system/audit/integrity")
+def audit_integrity(
+    verify_limit: int = 500,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return {
+        "timestamp_utc": _utc_iso(),
+        **services.observability.audit_integrity_status(verify_limit=verify_limit),
+    }
+
+
 @router.get("/system/faults")
 def fault_explorer(
     limit: int = 200,
@@ -789,6 +831,7 @@ def run_retention_cleanup(services: AppServices = Depends(get_services)) -> dict
             "events": services.settings.events_retention_days,
             "event_processing": services.settings.event_processing_retention_days,
             "failure_log": services.settings.failure_log_retention_days,
+            "audit_log": services.settings.audit_log_retention_days,
             "idempotency_keys": services.settings.idempotency_retention_days,
         },
     }
