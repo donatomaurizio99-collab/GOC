@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck
 ```
 
 This gate covers:
@@ -48,6 +48,7 @@ This gate covers:
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
+- P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
 
 Manual migration rehearsal invocation (same thresholds as gate defaults):
 
@@ -217,6 +218,12 @@ Manual P0 burn-in consecutive-green monitor invocation:
 .\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
 ```
 
+Manual P0 runbook contract check invocation:
+
+```powershell
+.\scripts\run-p0-runbook-contract-check.ps1
+```
+
 Verify before release:
 - CI checks green:
   - `Release Gate (Windows)`
@@ -224,6 +231,7 @@ Verify before release:
   - `Pytest (Python 3.12)`
   - `Desktop Smoke (Windows)`
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
+- runbook contract report confirms zero missing flags/scripts (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
 - No unresolved high-severity bug tickets for release scope.
 

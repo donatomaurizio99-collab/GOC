@@ -3269,3 +3269,41 @@ def test_111_p0_burnin_consecutive_green_reports_failure_for_latest_non_green_ru
     assert report["first_non_green"]["is_green"] is False
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_112_p0_runbook_contract_check_reports_success():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check")
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "runbook-contract-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_strict_flags_in_ci_workflow"] == []
+    assert payload["checks"]["missing_strict_flags_in_runbook"] == []
+    assert payload["checks"]["missing_required_runbook_scripts"] == []
+    assert payload["checks"]["missing_script_files_for_runbook_references"] == []
+    assert output_file.exists()
+
+    report_file_payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert report_file_payload["success"] is True
+
+    shutil.rmtree(workspace, ignore_errors=True)

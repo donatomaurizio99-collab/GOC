@@ -410,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck
 ```
 
 Standalone backup/restore drill:
@@ -632,6 +632,13 @@ Standalone P0 burn-in consecutive-green monitor (CI history hard gate):
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
+```
+
+Standalone P0 runbook contract check (release-gate/CI/runbook consistency):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-p0-runbook-contract-check.ps1
 ```
 
 Current result during implementation:
@@ -893,5 +900,7 @@ If a value is rejected:
 - [run-release-gate-runtime-stability-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-runtime-stability-drill.ps1)
 - [p0-burnin-consecutive-green.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-burnin-consecutive-green.py)
 - [run-p0-burnin-consecutive-green.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-burnin-consecutive-green.ps1)
+- [p0-runbook-contract-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-runbook-contract-check.py)
+- [run-p0-runbook-contract-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-runbook-contract-check.ps1)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)

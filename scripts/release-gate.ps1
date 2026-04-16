@@ -65,7 +65,9 @@ param(
     [switch]$SkipCriticalDrillFlakeGate,
     [switch]$StrictCriticalDrillFlakeGate,
     [switch]$SkipP0BurnInConsecutiveGreen,
-    [switch]$StrictP0BurnInConsecutiveGreen
+    [switch]$StrictP0BurnInConsecutiveGreen,
+    [switch]$SkipP0RunbookContractCheck,
+    [switch]$StrictP0RunbookContractCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -860,6 +862,27 @@ if (-not $SkipP0BurnInConsecutiveGreen) {
             }
             Write-Warning (
                 "P0 burn-in consecutive-green monitor failed but StrictP0BurnInConsecutiveGreen is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0RunbookContractCheck) {
+    Invoke-GateStep -Name "P0 runbook contract check (release-gate/CI/runbook consistency)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-runbook-contract-check-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\p0-runbook-contract-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictP0RunbookContractCheck) {
+                throw
+            }
+            Write-Warning (
+                "P0 runbook contract check failed but StrictP0RunbookContractCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
