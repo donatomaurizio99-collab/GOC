@@ -2930,3 +2930,73 @@ def test_107_snapshot_restore_crash_consistency_drill_reports_success():
     assert happy_case["app_probe"]["goal_create_status_code"] == 201
     assert happy_case["app_probe"]["running_run_ids"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_108_multi_db_atomic_switch_drill_reports_success():
+    workspace = _local_test_dir("pytest-multi-db-atomic-switch-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "multi-db-atomic-switch-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--seed-rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["cases"] == 4
+    assert len(payload["cases"]) == 4
+
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == [
+        "abort_before_pointer_replace",
+        "candidate_integrity_reject",
+        "switch_to_candidate_success",
+        "switch_back_to_primary_success",
+    ]
+    for case in payload["cases"]:
+        assert case["success"] is True
+
+    abort_case = payload["cases"][0]
+    assert abort_case["aborted_return_code"] != 0
+    assert abort_case["pointer_active_after"] == "primary"
+    assert abort_case["app_probe"]["readiness_ready"] is True
+    assert abort_case["app_probe"]["slo_status"] == "ok"
+    assert abort_case["app_probe"]["running_run_ids"] == []
+
+    reject_case = payload["cases"][1]
+    assert reject_case["failure_reason"] in {"target_snapshot_failed", "target_integrity_failed"}
+    assert reject_case["pointer_active_before"] == "primary"
+    assert reject_case["pointer_active_after"] == "primary"
+
+    candidate_case = payload["cases"][2]
+    assert candidate_case["pointer_active_after"] == "candidate"
+    assert candidate_case["app_probe"]["readiness_ready"] is True
+    assert candidate_case["app_probe"]["slo_status"] == "ok"
+    assert candidate_case["app_probe"]["goal_create_status_code"] == 201
+    assert candidate_case["app_probe"]["running_run_ids"] == []
+
+    rollback_case = payload["cases"][3]
+    assert rollback_case["pointer_active_after"] == "primary"
+    assert rollback_case["app_probe"]["readiness_ready"] is True
+    assert rollback_case["app_probe"]["slo_status"] == "ok"
+    assert rollback_case["app_probe"]["goal_create_status_code"] == 201
+    assert rollback_case["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)

@@ -56,6 +56,8 @@ param(
     [switch]$StrictBackupRestoreStressDrill,
     [switch]$SkipSnapshotRestoreCrashConsistencyDrill,
     [switch]$StrictSnapshotRestoreCrashConsistencyDrill,
+    [switch]$SkipMultiDbAtomicSwitchDrill,
+    [switch]$StrictMultiDbAtomicSwitchDrill,
     [switch]$SkipIncidentRollbackDrill,
     [switch]$StrictIncidentRollbackDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -729,6 +731,29 @@ if (-not $SkipSnapshotRestoreCrashConsistencyDrill) {
             }
             Write-Warning (
                 "Snapshot/restore crash-consistency drill failed but StrictSnapshotRestoreCrashConsistencyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipMultiDbAtomicSwitchDrill) {
+    Invoke-GateStep -Name "Multi-DB atomic-switch drill (failover pointer crash + integrity reject + rollback)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\multi-db-atomic-switch-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\multi-db-atomic-switch-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--seed-rows", "96",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictMultiDbAtomicSwitchDrill) {
+                throw
+            }
+            Write-Warning (
+                "Multi-DB atomic-switch drill failed but StrictMultiDbAtomicSwitchDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
