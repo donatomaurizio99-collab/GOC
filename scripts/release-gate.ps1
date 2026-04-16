@@ -54,6 +54,8 @@ param(
     [switch]$StrictBackupRestoreDrill,
     [switch]$SkipBackupRestoreStressDrill,
     [switch]$StrictBackupRestoreStressDrill,
+    [switch]$SkipSnapshotRestoreCrashConsistencyDrill,
+    [switch]$StrictSnapshotRestoreCrashConsistencyDrill,
     [switch]$SkipIncidentRollbackDrill,
     [switch]$StrictIncidentRollbackDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -704,6 +706,29 @@ if (-not $SkipBackupRestoreStressDrill) {
             }
             Write-Warning (
                 "Backup/restore stress drill failed but StrictBackupRestoreStressDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSnapshotRestoreCrashConsistencyDrill) {
+    Invoke-GateStep -Name "Snapshot/restore crash-consistency drill (fault matrix + aborted copy recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\snapshot-restore-crash-consistency-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\snapshot-restore-crash-consistency-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--seed-rows", "96",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictSnapshotRestoreCrashConsistencyDrill) {
+                throw
+            }
+            Write-Warning (
+                "Snapshot/restore crash-consistency drill failed but StrictSnapshotRestoreCrashConsistencyDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

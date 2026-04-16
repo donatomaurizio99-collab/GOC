@@ -2873,3 +2873,60 @@ def test_106_backup_restore_stress_drill_reports_success():
         assert round_report["app_probe"]["post_restore_goal_status_code"] == 201
         assert round_report["app_probe"]["running_run_ids"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_107_snapshot_restore_crash_consistency_drill_reports_success():
+    workspace = _local_test_dir("pytest-snapshot-restore-crash-consistency-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "snapshot-restore-crash-consistency-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--seed-rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["fault_matrix_cases"] == 4
+    assert len(payload["cases"]) == 4
+
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == [
+        "missing_manifest_after_snapshot_abort",
+        "tampered_snapshot_checksum_mismatch",
+        "restore_abort_then_recover",
+        "happy_path_restore",
+    ]
+    for case in payload["cases"]:
+        assert case["success"] is True
+
+    restore_abort_case = payload["cases"][2]
+    assert restore_abort_case["aborted_return_code"] != 0
+    assert restore_abort_case["app_probe"]["readiness_ready"] is True
+    assert restore_abort_case["app_probe"]["slo_status"] == "ok"
+    assert restore_abort_case["app_probe"]["goal_create_status_code"] == 201
+    assert restore_abort_case["app_probe"]["running_run_ids"] == []
+
+    happy_case = payload["cases"][3]
+    assert happy_case["app_probe"]["readiness_ready"] is True
+    assert happy_case["app_probe"]["slo_status"] == "ok"
+    assert happy_case["app_probe"]["goal_create_status_code"] == 201
+    assert happy_case["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)

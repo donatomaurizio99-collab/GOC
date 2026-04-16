@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
 ```
 
 This gate covers:
@@ -43,6 +43,7 @@ This gate covers:
 - upgrade/downgrade compatibility drill (N-1 -> N upgrade + rollback restore to N-1 + legacy schema probe)
 - backup/restore drill with row-count and integrity verification on restored DB
 - backup/restore stress drill (multi-round load, restore parity validation, and restore idempotence checks)
+- snapshot/restore crash-consistency drill (hard-aborted copy fault matrix, manifest preflight checks, and deterministic recovery restore)
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 
 Manual migration rehearsal invocation (same thresholds as gate defaults):
@@ -187,6 +188,12 @@ Manual backup/restore stress drill invocation:
 
 ```powershell
 .\scripts\run-backup-restore-stress-drill.ps1 -Rounds 3 -GoalsPerRound 120 -TasksPerGoal 2 -WorkflowRunsPerRound 24
+```
+
+Manual snapshot/restore crash-consistency drill invocation:
+
+```powershell
+.\scripts\run-snapshot-restore-crash-consistency-drill.ps1 -SeedRows 96 -PayloadBytes 128
 ```
 
 Verify before release:

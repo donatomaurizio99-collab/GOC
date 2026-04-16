@@ -19,7 +19,8 @@ DEFAULT_KEYWORD_EXPRESSION = (
     "test_102_recovery_idempotence_drill_reports_success or "
     "test_103_fsync_io_stall_drill_reports_success or "
     "test_105_storage_corruption_hardening_drill_reports_success or "
-    "test_106_backup_restore_stress_drill_reports_success"
+    "test_106_backup_restore_stress_drill_reports_success or "
+    "test_107_snapshot_restore_crash_consistency_drill_reports_success"
 )
 
 
