@@ -10,6 +10,8 @@ param(
     [switch]$StrictAuditTrailHardeningCheck,
     [switch]$SkipSecurityCiLaneCheck,
     [switch]$StrictSecurityCiLaneCheck,
+    [switch]$SkipAlertRoutingOnCallCheck,
+    [switch]$StrictAlertRoutingOnCallCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -225,6 +227,34 @@ if (-not $SkipSecurityCiLaneCheck) {
             }
             Write-Warning (
                 "Security CI lane check failed but StrictSecurityCiLaneCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipAlertRoutingOnCallCheck) {
+    Invoke-GateStep -Name "Alert routing + on-call runbook automation check (severity routing + escalation plan)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\alert-routing-oncall-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\alert-routing-oncall-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--mock-slo-status", "critical",
+                "--mock-alert-count", "2",
+                "--routing-policy-file", "docs/oncall-alert-routing-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--max-critical-ack-minutes", "15",
+                "--max-warning-ack-minutes", "120",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictAlertRoutingOnCallCheck) {
+                throw
+            }
+            Write-Warning (
+                "Alert routing on-call check failed but StrictAlertRoutingOnCallCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

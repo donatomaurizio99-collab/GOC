@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -20,6 +20,7 @@ This gate covers:
 - security config hardening check (production profile must require operator auth, strong token, non-memory DB, and startup corruption recovery guard)
 - audit trail hardening check (audit hash-chain integrity verification, tamper detection, and retention policy floor)
 - security CI lane check (`pip-audit` + `bandit` + SBOM export with explicit fail policy thresholds)
+- alert-routing/on-call check (severity route policy, escalation SLA budgets, and runbook-section references)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
@@ -89,6 +90,12 @@ Manual security CI lane check invocation:
 
 ```powershell
 .\scripts\run-security-ci-lane-check.ps1 -MaxDependencyVulnerabilities 0 -MaxSastHigh 0 -MaxSastMedium 200
+```
+
+Manual alert-routing/on-call runbook automation invocation:
+
+```powershell
+.\scripts\run-alert-routing-oncall-check.ps1 -MockSloStatus critical -MockAlertCount 2 -RoutingPolicyFile "docs\oncall-alert-routing-policy.json"
 ```
 
 Manual release-freeze policy invocation (live endpoint, stable ring):
@@ -827,6 +834,44 @@ Actions:
    - `readiness.after_recovery = true`
    - `slo.after_recovery = ok`
 3. If recovery or integrity checks fail, hold release and escalate with drill JSON + diagnostics snapshot before retrying rollout.
+
+### 3.27 On-call critical alert routing
+
+Symptoms:
+- `/system/slo` returns `status=critical` or one/more critical alert objects in `alerts[]`
+- customer-impacting error budget burn or safe-mode incidents require immediate human response
+
+Actions:
+1. Trigger on-call routing automation:
+   ```powershell
+   .\scripts\run-alert-routing-oncall-check.ps1 -MockSloStatus critical -MockAlertCount 2 -RoutingPolicyFile "docs\oncall-alert-routing-policy.json"
+   ```
+2. Ensure policy output includes for every critical alert:
+   - `page_primary_oncall` action to `primary-oncall`
+   - `page_backup_oncall` action to `secondary-oncall`
+   - due windows within policy (`critical_page_within_minutes`, `critical_backup_after_minutes`)
+3. Follow escalation order:
+   - page primary immediately
+   - page backup if ack/mitigation is not confirmed within escalation SLA
+   - open incident bridge and attach diagnostics bundle
+4. Keep release frozen until `status` returns to `ok` and post-incident checklist is complete.
+
+### 3.28 On-call warning alert routing
+
+Symptoms:
+- `/system/slo` returns `status=degraded` or warning-level alerts
+- no immediate outage, but error budget and stability trends indicate heightened risk
+
+Actions:
+1. Run warning-route verification:
+   ```powershell
+   .\scripts\run-alert-routing-oncall-check.ps1 -MockSloStatus degraded -MockAlertCount 1 -RoutingPolicyFile "docs\oncall-alert-routing-policy.json"
+   ```
+2. Ensure policy output includes for every warning alert:
+   - `notify_warning_channel` action to `ops-slack-warning`
+   - `create_warning_ticket` action with owner + due window
+3. Assign mitigation owner and ETA in incident tracker.
+4. Escalate to critical routing immediately if warning turns into `status=critical` or burn-rate spikes.
 
 ## 4. Operational Defaults
 

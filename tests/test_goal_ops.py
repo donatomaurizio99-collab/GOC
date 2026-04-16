@@ -3958,3 +3958,107 @@ def test_127_security_ci_lane_check_fails_when_dependency_budget_exceeded():
     assert payload["metrics"]["dependency_vulnerability_count"] >= 1
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_128_alert_routing_oncall_check_reports_success_with_mock_critical():
+    workspace = _local_test_dir("pytest-alert-routing-oncall-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "alert-routing-oncall-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "alert-routing-oncall-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-slo-status",
+        "critical",
+        "--mock-alert-count",
+        "2",
+        "--routing-policy-file",
+        str((project_root / "docs" / "oncall-alert-routing-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["critical_alert_count"] >= 2
+    assert payload["metrics"]["action_count"] >= 4
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_129_alert_routing_oncall_check_fails_when_critical_route_missing():
+    workspace = _local_test_dir("pytest-alert-routing-oncall-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "broken-policy.json"
+    output_file = workspace / "alert-routing-oncall-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "routes": {
+                    "warning": {
+                        "channel": "ops-slack-warning",
+                        "primary": "ops-duty-manager",
+                        "backup": "ops-secondary",
+                        "max_ack_minutes": 60,
+                        "runbook_section": "### 3.28 On-call warning alert routing",
+                    }
+                },
+                "escalation": {
+                    "critical_page_within_minutes": 5,
+                    "critical_backup_after_minutes": 10,
+                    "warning_notify_within_minutes": 15,
+                    "warning_ticket_within_minutes": 30,
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "alert-routing-oncall-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-slo-status",
+        "critical",
+        "--mock-alert-count",
+        "1",
+        "--routing-policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[alert-routing-oncall-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
