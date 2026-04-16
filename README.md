@@ -410,11 +410,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + incident/rollback drill under burst load + critical drill flake gate):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + incident/rollback drill under burst load + critical drill flake gate):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
 ```
 
 Standalone backup/restore drill:
@@ -422,6 +422,13 @@ Standalone backup/restore drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-backup-restore-drill.ps1
+```
+
+Standalone backup/restore stress drill (round-based load + restore idempotence):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-backup-restore-stress-drill.ps1 -Rounds 3 -GoalsPerRound 120 -TasksPerGoal 2 -WorkflowRunsPerRound 24
 ```
 
 Standalone migration rehearsal drill:
@@ -513,6 +520,13 @@ Standalone DB corruption quarantine drill:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
+```
+
+Standalone storage corruption hardening drill (WAL/JOURNAL anomaly files + startup quarantine recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-storage-corruption-hardening-drill.ps1 -CorruptionBytes 192 -Rows 80 -PayloadBytes 128
 ```
 
 Standalone workflow lock-resilience drill:
@@ -806,6 +820,8 @@ If a value is rejected:
 - [run-sqlite-real-full-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-sqlite-real-full-drill.ps1)
 - [db-corruption-quarantine-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/db-corruption-quarantine-drill.py)
 - [run-db-corruption-quarantine-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-db-corruption-quarantine-drill.ps1)
+- [storage-corruption-hardening-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/storage-corruption-hardening-drill.py)
+- [run-storage-corruption-hardening-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-storage-corruption-hardening-drill.ps1)
 - [workflow-lock-resilience-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-lock-resilience-drill.py)
 - [run-workflow-lock-resilience-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-lock-resilience-drill.ps1)
 - [workflow-soak-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-soak-drill.py)
@@ -830,6 +846,8 @@ If a value is rejected:
 - [run-upgrade-downgrade-compatibility-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-upgrade-downgrade-compatibility-drill.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
+- [backup-restore-stress-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-stress-drill.py)
+- [run-backup-restore-stress-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-stress-drill.ps1)
 - [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
 - [run-incident-rollback-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-rollback-drill.ps1)
 - [critical-drill-flake-gate.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/critical-drill-flake-gate.py)

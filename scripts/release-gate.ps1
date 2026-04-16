@@ -28,6 +28,8 @@ param(
     [switch]$StrictSqliteRealFullDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
     [switch]$StrictDbCorruptionQuarantineDrill,
+    [switch]$SkipStorageCorruptionHardeningDrill,
+    [switch]$StrictStorageCorruptionHardeningDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
     [switch]$StrictWorkflowLockResilienceDrill,
     [switch]$SkipWorkflowSoakDrill,
@@ -50,6 +52,8 @@ param(
     [switch]$StrictUpgradeDowngradeCompatibilityDrill,
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
+    [switch]$SkipBackupRestoreStressDrill,
+    [switch]$StrictBackupRestoreStressDrill,
     [switch]$SkipIncidentRollbackDrill,
     [switch]$StrictIncidentRollbackDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -610,6 +614,30 @@ if (-not $SkipMigrationRehearsal) {
     }
 }
 
+if (-not $SkipStorageCorruptionHardeningDrill) {
+    Invoke-GateStep -Name "Storage corruption hardening drill (WAL/JOURNAL anomalies + startup quarantine recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\storage-corruption-hardening-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\storage-corruption-hardening-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--corruption-bytes", "192",
+                "--rows", "80",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictStorageCorruptionHardeningDrill) {
+                throw
+            }
+            Write-Warning (
+                "Storage corruption hardening drill failed but StrictStorageCorruptionHardeningDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
 if (-not $SkipUpgradeDowngradeCompatibilityDrill) {
     Invoke-GateStep -Name "Upgrade/downgrade compatibility drill (N-1 -> N -> N-1 rollback path)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\upgrade-downgrade-compatibility-drills"
@@ -651,6 +679,31 @@ if (-not $SkipBackupRestoreDrill) {
             }
             Write-Warning (
                 "Backup/restore drill failed but StrictBackupRestoreDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipBackupRestoreStressDrill) {
+    Invoke-GateStep -Name "Backup/restore stress drill (round-based load + restore idempotence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\backup-restore-stress-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\backup-restore-stress-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--rounds", "3",
+                "--goals-per-round", "120",
+                "--tasks-per-goal", "2",
+                "--workflow-runs-per-round", "24"
+            )
+        } catch {
+            if ($StrictBackupRestoreStressDrill) {
+                throw
+            }
+            Write-Warning (
+                "Backup/restore stress drill failed but StrictBackupRestoreStressDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

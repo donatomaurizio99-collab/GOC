@@ -17,7 +17,9 @@ DEFAULT_KEYWORD_EXPRESSION = (
     "test_100_sqlite_real_full_drill_reports_success or "
     "test_101_wal_checkpoint_crash_drill_reports_success or "
     "test_102_recovery_idempotence_drill_reports_success or "
-    "test_103_fsync_io_stall_drill_reports_success"
+    "test_103_fsync_io_stall_drill_reports_success or "
+    "test_105_storage_corruption_hardening_drill_reports_success or "
+    "test_106_backup_restore_stress_drill_reports_success"
 )
 
 

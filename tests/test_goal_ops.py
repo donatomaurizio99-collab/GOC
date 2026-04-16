@@ -2777,3 +2777,99 @@ def test_104_critical_drill_flake_gate_reports_success():
     for iteration in payload["iterations"]:
         assert iteration["success"] is True
         assert iteration["return_code"] == 0
+
+
+def test_105_storage_corruption_hardening_drill_reports_success():
+    workspace = _local_test_dir("pytest-storage-corruption-hardening-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "storage-corruption-hardening-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--corruption-bytes",
+        "128",
+        "--rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert len(payload["cases"]) == 2
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == ["wal_file_anomaly", "rollback_journal_anomaly"]
+    for case in payload["cases"]:
+        assert case["success"] is True
+        assert case["recovery"]["startup_recovery"]["triggered"] is True
+        assert case["recovery"]["startup_recovery"]["recovered"] is True
+        assert case["recovery"]["blocked_status_code"] == 503
+        assert case["recovery"]["post_disable_goal_create_status_code"] == 201
+        assert case["recovery"]["readiness_before"]["ready"] is False
+        assert case["recovery"]["readiness_after"]["ready"] is True
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_106_backup_restore_stress_drill_reports_success():
+    workspace = _local_test_dir("pytest-backup-restore-stress-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "backup-restore-stress-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--rounds",
+        "2",
+        "--goals-per-round",
+        "30",
+        "--tasks-per-goal",
+        "2",
+        "--workflow-runs-per-round",
+        "8",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["rounds"] == 2
+    assert len(payload["rounds"]) == 2
+    for round_report in payload["rounds"]:
+        assert round_report["restore_matches_source"] is True
+        assert round_report["restore_idempotent"] is True
+        assert round_report["source"]["integrity"]["quick_ok"] is True
+        assert round_report["source"]["integrity"]["full_ok"] is True
+        assert round_report["restored_a"]["integrity"]["quick_ok"] is True
+        assert round_report["restored_a"]["integrity"]["full_ok"] is True
+        assert round_report["restored_b"]["integrity"]["quick_ok"] is True
+        assert round_report["restored_b"]["integrity"]["full_ok"] is True
+        assert round_report["app_probe"]["readiness_ready"] is True
+        assert round_report["app_probe"]["slo_status"] == "ok"
+        assert round_report["app_probe"]["post_restore_goal_status_code"] == 201
+        assert round_report["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)

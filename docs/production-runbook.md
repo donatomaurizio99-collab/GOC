@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
+.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictIncidentRollbackDrill -StrictCriticalDrillFlakeGate
 ```
 
 This gate covers:
@@ -28,6 +28,7 @@ This gate covers:
 - fsync/I/O stall drill (bounded write stall + I/O error path with deterministic safe-mode degradation/recovery)
 - real SQLite FULL drill (actual `max_page_count` saturation to force natural write failure + controlled recovery)
 - DB corruption quarantine drill (startup quarantines corrupted SQLite file and enters guarded safe mode)
+- storage corruption hardening drill (WAL/JOURNAL anomaly file path + startup quarantine recovery with deterministic safe-mode behavior)
 - workflow lock-resilience drill (transient SQLite lock conflicts while worker remains healthy)
 - workflow soak drill (burst enqueue with zero lingering `running` or `queued` runs)
 - workflow worker restart drill (stop worker, enqueue run, and verify self-healing restart path)
@@ -41,6 +42,7 @@ This gate covers:
 - migration rehearsal across small/medium/large/xlarge DB copies with explicit backup/restore/migration runtime thresholds
 - upgrade/downgrade compatibility drill (N-1 -> N upgrade + rollback restore to N-1 + legacy schema probe)
 - backup/restore drill with row-count and integrity verification on restored DB
+- backup/restore stress drill (multi-round load, restore parity validation, and restore idempotence checks)
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 
 Manual migration rehearsal invocation (same thresholds as gate defaults):
@@ -121,6 +123,12 @@ Manual DB corruption quarantine drill invocation:
 .\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
 ```
 
+Manual storage corruption hardening drill invocation:
+
+```powershell
+.\scripts\run-storage-corruption-hardening-drill.ps1 -CorruptionBytes 192 -Rows 80 -PayloadBytes 128
+```
+
 Manual workflow lock-resilience drill invocation:
 
 ```powershell
@@ -173,6 +181,12 @@ Manual invariant monitor watchdog drill invocation:
 
 ```powershell
 .\scripts\run-invariant-monitor-watchdog-drill.ps1 -TimeoutSeconds 8
+```
+
+Manual backup/restore stress drill invocation:
+
+```powershell
+.\scripts\run-backup-restore-stress-drill.ps1 -Rounds 3 -GoalsPerRound 120 -TasksPerGoal 2 -WorkflowRunsPerRound 24
 ```
 
 Verify before release:
