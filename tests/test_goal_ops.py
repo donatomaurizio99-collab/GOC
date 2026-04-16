@@ -3000,3 +3000,57 @@ def test_108_multi_db_atomic_switch_drill_reports_success():
     assert rollback_case["app_probe"]["goal_create_status_code"] == 201
     assert rollback_case["app_probe"]["running_run_ids"] == []
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_109_release_gate_runtime_stability_drill_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-runtime-stability-drill.py"),
+        "--label",
+        "pytest-drill",
+        "--samples",
+        "2",
+        "--repeats-per-sample",
+        "1",
+        "--target-file",
+        str(project_root / "tests" / "test_goal_ops.py"),
+        "--keyword-expression",
+        (
+            "test_105_storage_corruption_hardening_drill_reports_success or "
+            "test_106_backup_restore_stress_drill_reports_success or "
+            "test_107_snapshot_restore_crash_consistency_drill_reports_success or "
+            "test_108_multi_db_atomic_switch_drill_reports_success"
+        ),
+        "--timeout-seconds",
+        "900",
+        "--max-mean-duration-ms",
+        "300000",
+        "--max-stddev-ms",
+        "180000",
+        "--max-iteration-duration-ms",
+        "480000",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["samples"] == 2
+    assert payload["config"]["repeats_per_sample"] == 1
+    assert payload["metrics"]["iterations_total"] >= 2
+    assert payload["metrics"]["failed_iterations"] == 0
+    assert payload["metrics"]["mean_duration_ms"] > 0
+    assert payload["metrics"]["max_duration_ms"] > 0
+    assert len(payload["samples"]) == 2
+    for sample in payload["samples"]:
+        assert sample["success"] is True
+        assert sample["return_code"] == 0

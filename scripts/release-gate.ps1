@@ -60,6 +60,8 @@ param(
     [switch]$StrictMultiDbAtomicSwitchDrill,
     [switch]$SkipIncidentRollbackDrill,
     [switch]$StrictIncidentRollbackDrill,
+    [switch]$SkipReleaseGateRuntimeStabilityDrill,
+    [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
     [switch]$StrictCriticalDrillFlakeGate
 )
@@ -776,6 +778,33 @@ if (-not $SkipIncidentRollbackDrill) {
             }
             Write-Warning (
                 "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateRuntimeStabilityDrill) {
+    Invoke-GateStep -Name "Release-gate runtime stability drill (duration/variance budget on critical drills)" -Action {
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-runtime-stability-drill.py",
+                "--label", "release-gate",
+                "--samples", "2",
+                "--repeats-per-sample", "1",
+                "--target-file", ".\tests\test_goal_ops.py",
+                "--keyword-expression", "test_105_storage_corruption_hardening_drill_reports_success or test_106_backup_restore_stress_drill_reports_success or test_107_snapshot_restore_crash_consistency_drill_reports_success or test_108_multi_db_atomic_switch_drill_reports_success",
+                "--timeout-seconds", "900",
+                "--max-mean-duration-ms", "120000",
+                "--max-stddev-ms", "60000",
+                "--max-iteration-duration-ms", "180000"
+            )
+        } catch {
+            if ($StrictReleaseGateRuntimeStabilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate runtime stability drill failed but StrictReleaseGateRuntimeStabilityDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
