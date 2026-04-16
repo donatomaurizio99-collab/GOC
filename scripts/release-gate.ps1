@@ -67,13 +67,16 @@ param(
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
-    [switch]$StrictP0RunbookContractCheck
+    [switch]$StrictP0RunbookContractCheck,
+    [switch]$SkipP0ReleaseEvidenceBundle,
+    [switch]$StrictP0ReleaseEvidenceBundle
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
+$P0EvidenceReportPaths = @()
 
 function Invoke-NativeCommand {
     param(
@@ -839,6 +842,7 @@ if (-not $SkipCriticalDrillFlakeGate) {
 if (-not $SkipP0BurnInConsecutiveGreen) {
     Invoke-GateStep -Name "P0 burn-in consecutive-green monitor (CI history hard gate)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-burnin-consecutive-green-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         $repository = if ($env:GITHUB_REPOSITORY) {
             $env:GITHUB_REPOSITORY
         } else {
@@ -871,6 +875,7 @@ if (-not $SkipP0BurnInConsecutiveGreen) {
 if (-not $SkipP0RunbookContractCheck) {
     Invoke-GateStep -Name "P0 runbook contract check (release-gate/CI/runbook consistency)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-runbook-contract-check-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\p0-runbook-contract-check.py",
@@ -883,6 +888,37 @@ if (-not $SkipP0RunbookContractCheck) {
             }
             Write-Warning (
                 "P0 runbook contract check failed but StrictP0RunbookContractCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ReleaseEvidenceBundle) {
+    Invoke-GateStep -Name "P0 release evidence bundle (aggregate release-gate reports)" -Action {
+        $bundleOutputPath = Join-Path $ProjectRoot "artifacts\p0-release-evidence-bundle-release-gate.json"
+        $bundleDir = Join-Path $ProjectRoot "artifacts\p0-release-evidence-files-release-gate"
+        $arguments = @(
+            ".\scripts\p0-release-evidence-bundle.py",
+            "--label", "release-gate",
+            "--artifacts-dir", "artifacts",
+            "--include-glob", "p0-*-release-gate.json",
+            "--output-file", $bundleOutputPath,
+            "--bundle-dir", $bundleDir
+        )
+        if ($P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-files", ($P0EvidenceReportPaths -join ","))
+        } else {
+            $arguments += "--allow-empty"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
+        } catch {
+            if ($StrictP0ReleaseEvidenceBundle) {
+                throw
+            }
+            Write-Warning (
+                "P0 release evidence bundle failed but StrictP0ReleaseEvidenceBundle is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

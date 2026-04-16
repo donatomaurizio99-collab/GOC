@@ -16,6 +16,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-backup-restore-stress-drill.ps1",
     "run-release-gate-runtime-stability-drill.ps1",
     "run-p0-burnin-consecutive-green.ps1",
+    "run-p0-release-evidence-bundle.ps1",
 ]
 
 

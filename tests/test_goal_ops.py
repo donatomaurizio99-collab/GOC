@@ -3307,3 +3307,104 @@ def test_112_p0_runbook_contract_check_reports_success():
     assert report_file_payload["success"] is True
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_113_p0_release_evidence_bundle_reports_success_with_required_files():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_report = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    burnin_report.write_text(
+        json.dumps({"label": "burnin", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    runbook_report.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    bundle_dir = artifacts_dir / "p0-release-evidence-files-release-gate"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--required-files",
+        ",".join([str(burnin_report.resolve()), str(runbook_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+        "--bundle-dir",
+        str(bundle_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["required_missing_reports"] == 0
+    assert payload["metrics"]["failed_reports"] == 0
+    assert payload["metrics"]["success_reports"] == 2
+    assert output_file.exists()
+    assert (bundle_dir / burnin_report.name).exists()
+    assert (bundle_dir / runbook_report.name).exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_114_p0_release_evidence_bundle_fails_when_required_file_missing():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    missing_report = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    existing_report.write_text(
+        json.dumps({"label": "burnin", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--required-files",
+        ",".join([str(existing_report.resolve()), str(missing_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 release evidence bundle check failed: "
+    assert marker in completed.stderr
+    report = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert report["success"] is False
+    assert report["metrics"]["required_missing_reports"] == 1
+    assert str(missing_report) in report["required_missing"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
