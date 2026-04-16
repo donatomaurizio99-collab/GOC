@@ -69,7 +69,9 @@ param(
     [switch]$SkipP0RunbookContractCheck,
     [switch]$StrictP0RunbookContractCheck,
     [switch]$SkipP0ReleaseEvidenceBundle,
-    [switch]$StrictP0ReleaseEvidenceBundle
+    [switch]$StrictP0ReleaseEvidenceBundle,
+    [switch]$SkipP0ClosureReport,
+    [switch]$StrictP0ClosureReport
 )
 
 $ErrorActionPreference = "Stop"
@@ -919,6 +921,31 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
             }
             Write-Warning (
                 "P0 release evidence bundle failed but StrictP0ReleaseEvidenceBundle is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ClosureReport) {
+    Invoke-GateStep -Name "P0 closure go/no-go report (consolidated readiness signal)" -Action {
+        $outputPath = Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\p0-closure-report.py",
+                "--label", "release-gate",
+                "--required-consecutive", "10",
+                "--evidence-bundle-file", "artifacts\p0-release-evidence-bundle-release-gate.json",
+                "--burnin-file", "artifacts\p0-burnin-consecutive-green-release-gate.json",
+                "--runbook-contract-file", "artifacts\p0-runbook-contract-check-release-gate.json",
+                "--output-file", $outputPath
+            )
+        } catch {
+            if ($StrictP0ClosureReport) {
+                throw
+            }
+            Write-Warning (
+                "P0 closure report failed but StrictP0ClosureReport is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

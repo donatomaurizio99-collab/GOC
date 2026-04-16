@@ -3408,3 +3408,126 @@ def test_114_p0_release_evidence_bundle_fails_when_required_file_missing():
     assert str(missing_report) in report["required_missing"]
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_115_p0_closure_report_reports_success_when_all_criteria_pass():
+    workspace = _local_test_dir("pytest-p0-closure-report-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+
+    evidence_file.write_text(
+        json.dumps({"label": "evidence", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 12}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_116_p0_closure_report_fails_when_burnin_threshold_not_met():
+    workspace = _local_test_dir("pytest-p0-closure-report-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+
+    evidence_file.write_text(
+        json.dumps({"label": "evidence", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 3}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 closure report is not green: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
