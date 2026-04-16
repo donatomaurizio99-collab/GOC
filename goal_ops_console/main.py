@@ -57,6 +57,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         method = request.method.upper()
         path = request.url.path
 
+        if (
+            bool(services.settings.operator_auth_required)
+            and method in {"POST", "PUT", "PATCH", "DELETE"}
+            and path.startswith("/system/")
+        ):
+            expected_token = str(services.settings.operator_auth_token or "").strip()
+            auth_header = str(request.headers.get("Authorization") or "")
+            operator_header = str(request.headers.get("X-Operator-Token") or "").strip()
+            provided_token = ""
+            if auth_header.lower().startswith("bearer "):
+                provided_token = auth_header[7:].strip()
+            elif operator_header:
+                provided_token = operator_header
+
+            if not provided_token or provided_token != expected_token:
+                services.observability.increment_metric("security.operator_auth.denied")
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": (
+                            "Operator authentication required for mutating /system endpoints."
+                        )
+                    },
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            services.observability.increment_metric("security.operator_auth.allowed")
+
         if services.runtime_guard.should_block_mutation(method=method, path=path):
             safe_mode = services.runtime_guard.safe_mode_snapshot()
             return JSONResponse(

@@ -4,6 +4,8 @@ param(
     [switch]$SkipDesktopSmoke,
     [switch]$SkipApiProbe,
     [switch]$SkipSloAlertCheck,
+    [switch]$SkipSecurityConfigHardeningCheck,
+    [switch]$StrictSecurityConfigHardeningCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -138,6 +140,33 @@ if (-not $SkipSloAlertCheck) {
             "--database-url", ":memory:",
             "--allowed-status", "ok"
         )
+    }
+}
+
+if (-not $SkipSecurityConfigHardeningCheck) {
+    Invoke-GateStep -Name "Security config hardening check (production profile)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\security-config-hardening-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\security-config-hardening-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--operator-auth-required",
+                "--operator-auth-token", "release-gate-operator-token-0001",
+                "--min-operator-token-length", "16",
+                "--database-url", "goal_ops.db",
+                "--startup-corruption-recovery-enabled",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSecurityConfigHardeningCheck) {
+                throw
+            }
+            Write-Warning (
+                "Security config hardening check failed but StrictSecurityConfigHardeningCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
     }
 }
 

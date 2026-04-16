@@ -10,6 +10,7 @@ from typing import Any
 
 
 DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
+    "run-security-config-hardening-check.ps1",
     "run-power-loss-durability-drill.ps1",
     "run-disk-pressure-fault-injection-drill.ps1",
     "run-upgrade-downgrade-compatibility-drill.ps1",

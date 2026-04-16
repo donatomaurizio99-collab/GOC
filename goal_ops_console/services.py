@@ -36,6 +36,14 @@ class AppServices:
 
 def build_services(settings: Settings | None = None) -> AppServices:
     app_settings = settings or Settings()
+    if app_settings.operator_auth_required:
+        token = str(app_settings.operator_auth_token or "").strip()
+        minimum = max(1, int(app_settings.operator_auth_token_min_length))
+        if len(token) < minimum:
+            raise ValueError(
+                "Operator auth is required but GOAL_OPS_OPERATOR_AUTH_TOKEN is missing or too short "
+                f"(minimum length: {minimum})."
+            )
     db = Database(
         app_settings.database_url,
         migration_backup_dir=app_settings.db_migration_backup_dir,

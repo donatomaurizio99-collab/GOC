@@ -59,6 +59,15 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
         "invariant_monitor": services.invariant_monitor.status(),
         "safe_mode": services.runtime_guard.safe_mode_snapshot(),
         "database_startup_recovery": services.db.startup_recovery_status(),
+        "security": {
+            "operator_auth_required": bool(services.settings.operator_auth_required),
+            "operator_auth_token_configured": bool(
+                str(services.settings.operator_auth_token or "").strip()
+            ),
+            "operator_auth_token_min_length": int(
+                services.settings.operator_auth_token_min_length
+            ),
+        },
     }
 
 
@@ -152,8 +161,19 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
         and not invariant_monitor.get("last_error")
     )
 
+    operator_token = str(services.settings.operator_auth_token or "").strip()
+    operator_token_min_length = max(1, int(services.settings.operator_auth_token_min_length))
+    operator_auth_required = bool(services.settings.operator_auth_required)
+    operator_auth_ok = (not operator_auth_required) or (len(operator_token) >= operator_token_min_length)
+
     return {
-        "ready": bool(db_ok and worker_ok and safe_mode_ok and invariant_monitor_ok),
+        "ready": bool(
+            db_ok
+            and worker_ok
+            and safe_mode_ok
+            and invariant_monitor_ok
+            and operator_auth_ok
+        ),
         "spec_version": SPEC_VERSION,
         "timestamp_utc": _utc_iso(),
         "checks": {
@@ -178,6 +198,13 @@ def _build_readiness_payload(services: AppServices) -> dict[str, Any]:
                 **invariant_monitor,
                 "ok": invariant_monitor_ok,
                 "error": invariant_monitor_error,
+            },
+            "operator_auth": {
+                "ok": operator_auth_ok,
+                "required": operator_auth_required,
+                "token_configured": bool(operator_token),
+                "token_length": len(operator_token),
+                "token_min_length": operator_token_min_length,
             },
         },
     }

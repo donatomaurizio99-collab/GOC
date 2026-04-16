@@ -3531,3 +3531,106 @@ def test_116_p0_closure_report_fails_when_burnin_threshold_not_met():
     assert payload["metrics"]["criteria_failed"] >= 1
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_117_operator_auth_blocks_system_mutations_without_valid_token():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            operator_auth_required=True,
+            operator_auth_token="operator-token-0123456789",
+            operator_auth_token_min_length=16,
+        )
+    )
+    with TestClient(app) as local_client:
+        health = local_client.get("/system/health")
+        blocked = local_client.post("/system/scheduler/age")
+        wrong = local_client.post(
+            "/system/scheduler/age",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        allowed = local_client.post(
+            "/system/scheduler/age",
+            headers={"Authorization": "Bearer operator-token-0123456789"},
+        )
+
+    assert health.status_code == 200
+    assert blocked.status_code == 401
+    assert blocked.headers.get("WWW-Authenticate") == "Bearer"
+    assert "Operator authentication required" in blocked.json()["detail"]
+    assert wrong.status_code == 401
+    assert allowed.status_code == 200
+
+
+def test_118_create_app_rejects_weak_operator_token_when_auth_required():
+    with pytest.raises(ValueError) as exc_info:
+        create_app(
+            Settings(
+                database_url=":memory:",
+                operator_auth_required=True,
+                operator_auth_token="short",
+                operator_auth_token_min_length=16,
+            )
+        )
+    assert "Operator auth is required" in str(exc_info.value)
+
+
+def test_119_security_config_hardening_check_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-config-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--operator-auth-required",
+        "--operator-auth-token",
+        "security-token-0123456789",
+        "--min-operator-token-length",
+        "16",
+        "--database-url",
+        "goal_ops.db",
+        "--startup-corruption-recovery-enabled",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+
+
+def test_120_security_config_hardening_check_reports_failure_without_auth_requirement():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-config-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--operator-auth-token",
+        "security-token-0123456789",
+        "--min-operator-token-length",
+        "16",
+        "--database-url",
+        "goal_ops.db",
+        "--startup-corruption-recovery-enabled",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[security-config-hardening-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
