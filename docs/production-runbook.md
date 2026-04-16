@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -21,6 +21,7 @@ This gate covers:
 - audit trail hardening check (audit hash-chain integrity verification, tamper detection, and retention policy floor)
 - security CI lane check (`pip-audit` + `bandit` + SBOM export with explicit fail policy thresholds)
 - alert-routing/on-call check (severity route policy, escalation SLA budgets, and runbook-section references)
+- incident drill automation check (tabletop + technical drill cadence, evidence completeness, and follow-up budget)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
@@ -96,6 +97,12 @@ Manual alert-routing/on-call runbook automation invocation:
 
 ```powershell
 .\scripts\run-alert-routing-oncall-check.ps1 -MockSloStatus critical -MockAlertCount 2 -RoutingPolicyFile "docs\oncall-alert-routing-policy.json"
+```
+
+Manual incident drill automation invocation:
+
+```powershell
+.\scripts\run-incident-drill-automation-check.ps1 -MockReport -MockDaysSinceTabletop 7 -MockDaysSinceTechnical 3 -PolicyFile "docs\incident-drill-automation-policy.json"
 ```
 
 Manual release-freeze policy invocation (live endpoint, stable ring):
@@ -872,6 +879,42 @@ Actions:
    - `create_warning_ticket` action with owner + due window
 3. Assign mitigation owner and ETA in incident tracker.
 4. Escalate to critical routing immediately if warning turns into `status=critical` or burn-rate spikes.
+
+### 3.29 Incident tabletop drill automation
+
+Symptoms:
+- recurring incidents reveal process gaps between detection, communication, and rollback decision points
+- tabletop evidence is missing/stale and release confidence drops below expected operational baseline
+
+Actions:
+1. Run tabletop drill automation check:
+   ```powershell
+   .\scripts\run-incident-drill-automation-check.ps1 -MockReport -MockDaysSinceTabletop 7 -MockDaysSinceTechnical 3 -PolicyFile "docs\incident-drill-automation-policy.json"
+   ```
+2. Confirm policy checks pass for `tabletop.release-rollback`:
+   - `status_completed = true`
+   - `recency_budget` within `tabletop_max_age_days`
+   - `postmortem_link_present = true`
+3. Ensure owner roles are mapped and active (`incident_commander`, `scribe`, `communications`).
+4. Convert unresolved tabletop findings into tracked follow-ups before release promotion resumes.
+
+### 3.30 Incident technical drill automation
+
+Symptoms:
+- rollback path has not been proven recently under controlled load
+- technical drill evidence (load + rollback verification) is missing or out of budget
+
+Actions:
+1. Execute technical drill automation validation:
+   ```powershell
+   .\scripts\run-incident-drill-automation-check.ps1 -MockReport -MockDaysSinceTabletop 7 -MockDaysSinceTechnical 3 -PolicyFile "docs\incident-drill-automation-policy.json"
+   ```
+2. Verify `technical.incident-rollback` evidence:
+   - `technical_min_load_requests` meets policy floor
+   - `rollback_verified = true`
+   - `recency_budget` within `technical_drill_max_age_days`
+3. Keep open follow-ups within policy budget (`max_open_followup_actions`) before approving release.
+4. If check fails, hold release and run a fresh end-to-end incident/rollback drill, then re-run automation check.
 
 ## 4. Operational Defaults
 

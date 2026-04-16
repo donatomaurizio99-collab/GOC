@@ -12,6 +12,8 @@ param(
     [switch]$StrictSecurityCiLaneCheck,
     [switch]$SkipAlertRoutingOnCallCheck,
     [switch]$StrictAlertRoutingOnCallCheck,
+    [switch]$SkipIncidentDrillAutomationCheck,
+    [switch]$StrictIncidentDrillAutomationCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -255,6 +257,40 @@ if (-not $SkipAlertRoutingOnCallCheck) {
             }
             Write-Warning (
                 "Alert routing on-call check failed but StrictAlertRoutingOnCallCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipIncidentDrillAutomationCheck) {
+    Invoke-GateStep -Name "Incident drill automation check (tabletop cadence + technical rollback evidence)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\incident-drill-automation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\incident-drill-automation-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--mock-report",
+                "--mock-days-since-tabletop", "7",
+                "--mock-days-since-technical", "3",
+                "--mock-tabletop-status", "completed",
+                "--mock-technical-status", "completed",
+                "--mock-open-followups", "0",
+                "--policy-file", "docs/incident-drill-automation-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--max-tabletop-age-days", "30",
+                "--max-technical-age-days", "14",
+                "--min-technical-load-requests", "20",
+                "--max-open-followups", "3",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictIncidentDrillAutomationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Incident drill automation check failed but StrictIncidentDrillAutomationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

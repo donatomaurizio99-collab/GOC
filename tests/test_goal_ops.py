@@ -4062,3 +4062,100 @@ def test_129_alert_routing_oncall_check_fails_when_critical_route_missing():
     assert payload["metrics"]["criteria_failed"] >= 1
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_130_incident_drill_automation_check_reports_success_with_mock_data():
+    workspace = _local_test_dir("pytest-incident-drill-automation-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-drill-automation-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "incident-drill-automation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-report",
+        "--mock-days-since-tabletop",
+        "7",
+        "--mock-days-since-technical",
+        "3",
+        "--mock-tabletop-status",
+        "completed",
+        "--mock-technical-status",
+        "completed",
+        "--mock-open-followups",
+        "0",
+        "--policy-file",
+        str((project_root / "docs" / "incident-drill-automation-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["required_scenario_count"] >= 2
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_131_incident_drill_automation_check_fails_when_technical_drill_is_stale():
+    workspace = _local_test_dir("pytest-incident-drill-automation-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-drill-automation-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "incident-drill-automation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-report",
+        "--mock-days-since-tabletop",
+        "5",
+        "--mock-days-since-technical",
+        "45",
+        "--mock-tabletop-status",
+        "completed",
+        "--mock-technical-status",
+        "completed",
+        "--mock-open-followups",
+        "0",
+        "--max-technical-age-days",
+        "14",
+        "--policy-file",
+        str((project_root / "docs" / "incident-drill-automation-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[incident-drill-automation-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "technical.incident-rollback.recency_budget"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
