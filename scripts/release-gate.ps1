@@ -63,7 +63,9 @@ param(
     [switch]$SkipReleaseGateRuntimeStabilityDrill,
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
-    [switch]$StrictCriticalDrillFlakeGate
+    [switch]$StrictCriticalDrillFlakeGate,
+    [switch]$SkipP0BurnInConsecutiveGreen,
+    [switch]$StrictP0BurnInConsecutiveGreen
 )
 
 $ErrorActionPreference = "Stop"
@@ -826,6 +828,38 @@ if (-not $SkipCriticalDrillFlakeGate) {
             }
             Write-Warning (
                 "Critical drill flake gate failed but StrictCriticalDrillFlakeGate is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0BurnInConsecutiveGreen) {
+    Invoke-GateStep -Name "P0 burn-in consecutive-green monitor (CI history hard gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-burnin-consecutive-green-release-gate.json"
+        $repository = if ($env:GITHUB_REPOSITORY) {
+            $env:GITHUB_REPOSITORY
+        } else {
+            "donatomaurizio99-collab/GOC"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\p0-burnin-consecutive-green.py",
+                "--label", "release-gate",
+                "--repo", $repository,
+                "--branch", "master",
+                "--workflow-name", "CI",
+                "--required-jobs", "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+                "--required-consecutive", "10",
+                "--per-page", "50",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictP0BurnInConsecutiveGreen) {
+                throw
+            }
+            Write-Warning (
+                "P0 burn-in consecutive-green monitor failed but StrictP0BurnInConsecutiveGreen is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

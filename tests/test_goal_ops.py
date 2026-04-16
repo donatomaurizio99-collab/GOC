@@ -3054,3 +3054,218 @@ def test_109_release_gate_runtime_stability_drill_reports_success():
     for sample in payload["samples"]:
         assert sample["success"] is True
         assert sample["return_code"] == 0
+
+
+def test_110_p0_burnin_consecutive_green_reports_success_after_recovery_window():
+    workspace = _local_test_dir("pytest-p0-burnin-consecutive-green")
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_dir = workspace / "fixtures"
+    jobs_dir = fixtures_dir / "jobs"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    runs_payload = {
+        "workflow_runs": [
+            {
+                "id": 9003,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9003",
+                "updated_at": "2026-04-16T10:00:03Z",
+            },
+            {
+                "id": 9002,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9002",
+                "updated_at": "2026-04-16T10:00:02Z",
+            },
+            {
+                "id": 9001,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9001",
+                "updated_at": "2026-04-16T10:00:01Z",
+            },
+            {
+                "id": 9000,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "sha-9000",
+                "updated_at": "2026-04-16T10:00:00Z",
+            },
+        ]
+    }
+    # Older failure after a sequence of fresh green runs models recovery after a transient incident.
+    runs_file = fixtures_dir / "runs.json"
+    runs_file.write_text(json.dumps(runs_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    required_jobs = [
+        "Release Gate (Windows)",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    for run_id in (9003, 9002, 9001, 9000):
+        conclusion = "success" if run_id != 9000 else "failure"
+        jobs_payload = {
+            "jobs": [
+                {"name": required_jobs[0], "conclusion": conclusion},
+                {"name": required_jobs[1], "conclusion": conclusion},
+                {"name": required_jobs[2], "conclusion": conclusion},
+                {"name": required_jobs[3], "conclusion": conclusion},
+                {"name": "Auxiliary Check", "conclusion": "success"},
+            ]
+        }
+        (jobs_dir / f"{run_id}.json").write_text(
+            json.dumps(jobs_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "CI",
+        "--required-jobs",
+        ",".join(required_jobs),
+        "--required-consecutive",
+        "3",
+        "--per-page",
+        "10",
+        "--runs-file",
+        str(runs_file),
+        "--jobs-dir",
+        str(jobs_dir),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["required_consecutive"] == 3
+    assert payload["metrics"]["consecutive_green"] == 3
+    assert payload["metrics"]["evaluated_runs"] == 3
+    assert payload["first_non_green"] is None
+    assert len(payload["evaluations"]) == 3
+    for evaluation in payload["evaluations"]:
+        assert evaluation["is_green"] is True
+        assert evaluation["missing_jobs"] == []
+        assert evaluation["failing_jobs"] == []
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_111_p0_burnin_consecutive_green_reports_failure_for_latest_non_green_run():
+    workspace = _local_test_dir("pytest-p0-burnin-consecutive-green-failure")
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_dir = workspace / "fixtures"
+    jobs_dir = fixtures_dir / "jobs"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    required_jobs = [
+        "Release Gate (Windows)",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    runs_payload = {
+        "workflow_runs": [
+            {
+                "id": 9102,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "sha-9102",
+                "updated_at": "2026-04-16T11:00:02Z",
+            },
+            {
+                "id": 9101,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9101",
+                "updated_at": "2026-04-16T11:00:01Z",
+            },
+        ]
+    }
+    runs_file = fixtures_dir / "runs.json"
+    runs_file.write_text(json.dumps(runs_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    jobs_payload_failure = {
+        "jobs": [
+            {"name": required_jobs[0], "conclusion": "failure"},
+            {"name": required_jobs[1], "conclusion": "success"},
+            {"name": required_jobs[2], "conclusion": "success"},
+            {"name": required_jobs[3], "conclusion": "success"},
+        ]
+    }
+    (jobs_dir / "9102.json").write_text(
+        json.dumps(jobs_payload_failure, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    jobs_payload_success = {
+        "jobs": [{"name": job_name, "conclusion": "success"} for job_name in required_jobs]
+    }
+    (jobs_dir / "9101.json").write_text(
+        json.dumps(jobs_payload_success, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "CI",
+        "--required-jobs",
+        ",".join(required_jobs),
+        "--required-consecutive",
+        "2",
+        "--per-page",
+        "10",
+        "--runs-file",
+        str(runs_file),
+        "--jobs-dir",
+        str(jobs_dir),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 burn-in consecutive-green check not met: "
+    assert marker in completed.stderr
+
+    report = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert report["success"] is False
+    assert report["metrics"]["consecutive_green"] == 0
+    assert report["metrics"]["evaluated_runs"] == 1
+    assert report["first_non_green"]["run_id"] == 9102
+    assert report["first_non_green"]["is_green"] is False
+
+    shutil.rmtree(workspace, ignore_errors=True)
