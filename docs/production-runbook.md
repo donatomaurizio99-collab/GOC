@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -22,6 +22,7 @@ This gate covers:
 - security CI lane check (`pip-audit` + `bandit` + SBOM export with explicit fail policy thresholds)
 - alert-routing/on-call check (severity route policy, escalation SLA budgets, and runbook-section references)
 - incident drill automation check (tabletop + technical drill cadence, evidence completeness, and follow-up budget)
+- load profile framework check (versioned production-like traffic profile with deterministic latency/error budgets)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
@@ -103,6 +104,12 @@ Manual incident drill automation invocation:
 
 ```powershell
 .\scripts\run-incident-drill-automation-check.ps1 -MockReport -MockDaysSinceTabletop 7 -MockDaysSinceTechnical 3 -PolicyFile "docs\incident-drill-automation-policy.json"
+```
+
+Manual load profile framework invocation:
+
+```powershell
+.\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
 ```
 
 Manual release-freeze policy invocation (live endpoint, stable ring):
@@ -915,6 +922,39 @@ Actions:
    - `recency_budget` within `technical_drill_max_age_days`
 3. Keep open follow-ups within policy budget (`max_open_followup_actions`) before approving release.
 4. If check fails, hold release and run a fresh end-to-end incident/rollback drill, then re-run automation check.
+
+### 3.31 Prod-like load profile execution
+
+Symptoms:
+- release candidate has no recent evidence under versioned production-like load profiles
+- latency/error behavior is unknown for current build in steady-plus-burst traffic shape
+
+Actions:
+1. Run load-profile framework check:
+   ```powershell
+   .\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
+   ```
+2. Verify reported budgets are all green:
+   - `min_total_requests`
+   - `p95_latency_budget`, `p99_latency_budget`, `max_latency_budget`
+   - `http_429_budget`, `error_rate_budget`
+3. Confirm final health gates after profile run:
+   - `final_readiness_true = true`
+   - `final_slo_ok = true`
+   - `workflow_queue_drained = true`
+4. If a budget fails, hold release and attach JSON report to incident/change ticket for remediation.
+
+### 3.32 Load profile catalog version management
+
+Symptoms:
+- profile definitions change over time and previous evidence cannot be compared reproducibly
+- operators need deterministic mapping between release decision and exact profile revision
+
+Actions:
+1. Keep `docs/load-profile-catalog.json` under version control and bump `catalog_version` when profile semantics change.
+2. Add/retain explicit `name` + `version` for each profile and run checks with pinned values (`--profile-name`, `--profile-version`).
+3. For major profile updates, run both old and new versions once in rehearsal, compare deltas, then switch release gate default.
+4. Record selected profile/version in release notes for auditability and rollback analysis.
 
 ## 4. Operational Defaults
 

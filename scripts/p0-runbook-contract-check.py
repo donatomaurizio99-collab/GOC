@@ -15,6 +15,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-security-ci-lane-check.ps1",
     "run-alert-routing-oncall-check.ps1",
     "run-incident-drill-automation-check.ps1",
+    "run-load-profile-framework-check.ps1",
     "run-power-loss-durability-drill.ps1",
     "run-disk-pressure-fault-injection-drill.ps1",
     "run-upgrade-downgrade-compatibility-drill.ps1",

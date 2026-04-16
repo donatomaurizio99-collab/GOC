@@ -14,6 +14,8 @@ param(
     [switch]$StrictAlertRoutingOnCallCheck,
     [switch]$SkipIncidentDrillAutomationCheck,
     [switch]$StrictIncidentDrillAutomationCheck,
+    [switch]$SkipLoadProfileFrameworkCheck,
+    [switch]$StrictLoadProfileFrameworkCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -291,6 +293,31 @@ if (-not $SkipIncidentDrillAutomationCheck) {
             }
             Write-Warning (
                 "Incident drill automation check failed but StrictIncidentDrillAutomationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipLoadProfileFrameworkCheck) {
+    Invoke-GateStep -Name "Load profile framework check (versioned prod-like load profile budgets)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\load-profile-framework-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\load-profile-framework-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--profile-file", "docs/load-profile-catalog.json",
+                "--profile-name", "prod_like_ci_smoke",
+                "--profile-version", "1.0.0",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictLoadProfileFrameworkCheck) {
+                throw
+            }
+            Write-Warning (
+                "Load profile framework check failed but StrictLoadProfileFrameworkCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

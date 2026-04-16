@@ -4159,3 +4159,162 @@ def test_131_incident_drill_automation_check_fails_when_technical_drill_is_stale
     )
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_132_load_profile_framework_check_reports_success_with_fixture_profile():
+    workspace = _local_test_dir("pytest-load-profile-framework-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    profile_file = workspace / "load-profile-catalog.json"
+    output_file = workspace / "load-profile-framework-report.json"
+
+    profile_file.write_text(
+        json.dumps(
+            {
+                "catalog_version": "pytest.stage-c.1",
+                "profiles": [
+                    {
+                        "name": "pytest_smoke",
+                        "version": "1.0.0",
+                        "description": "pytest profile",
+                        "stages": [
+                            {
+                                "name": "steady",
+                                "cycles": 4,
+                                "workflow_start_every_cycles": 0,
+                                "drain_batch_size": 50,
+                                "readiness_check_every_cycles": 2,
+                            },
+                            {
+                                "name": "burst",
+                                "cycles": 6,
+                                "workflow_start_every_cycles": 3,
+                                "drain_batch_size": 80,
+                                "readiness_check_every_cycles": 2,
+                            },
+                        ],
+                        "budgets": {
+                            "max_p95_latency_ms": 5000.0,
+                            "max_p99_latency_ms": 6000.0,
+                            "max_max_latency_ms": 12000.0,
+                            "max_http_429_rate_percent": 50.0,
+                            "max_error_rate_percent": 10.0,
+                            "min_total_requests": 40,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "load-profile-framework-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--profile-file",
+        str(profile_file.resolve()),
+        "--profile-name",
+        "pytest_smoke",
+        "--profile-version",
+        "1.0.0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["requests_total"] >= 40
+    assert payload["profile"]["name"] == "pytest_smoke"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_133_load_profile_framework_check_fails_when_min_requests_budget_is_unmet():
+    workspace = _local_test_dir("pytest-load-profile-framework-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    profile_file = workspace / "load-profile-catalog.json"
+    output_file = workspace / "load-profile-framework-report.json"
+
+    profile_file.write_text(
+        json.dumps(
+            {
+                "catalog_version": "pytest.stage-c.1",
+                "profiles": [
+                    {
+                        "name": "pytest_strict",
+                        "version": "1.0.0",
+                        "description": "pytest strict profile",
+                        "stages": [
+                            {
+                                "name": "steady",
+                                "cycles": 3,
+                                "workflow_start_every_cycles": 0,
+                                "drain_batch_size": 50,
+                                "readiness_check_every_cycles": 0,
+                            }
+                        ],
+                        "budgets": {
+                            "max_p95_latency_ms": 5000.0,
+                            "max_p99_latency_ms": 6000.0,
+                            "max_max_latency_ms": 12000.0,
+                            "max_http_429_rate_percent": 50.0,
+                            "max_error_rate_percent": 10.0,
+                            "min_total_requests": 2000,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "load-profile-framework-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--profile-file",
+        str(profile_file.resolve()),
+        "--profile-name",
+        "pytest_strict",
+        "--profile-version",
+        "1.0.0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[load-profile-framework-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "min_total_requests"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
