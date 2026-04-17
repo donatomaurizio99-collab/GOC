@@ -1216,8 +1216,8 @@ Actions:
 ### 3.44 Release evidence schema drift (JSON contract instability)
 
 Symptoms:
-- one or more release-gate report JSON files no longer include required top-level keys (`label`, `success`, `generated_at_utc`, `duration_ms`, `paths`, `metrics`, `decision`)
-- `decision.release_blocked` key is missing or non-boolean, causing deterministic bundle/closure parsing risk
+- one or more required release-gate evidence JSON files no longer include baseline contract keys (`label`, `success`)
+- report labels drift away from `release-gate`, causing deterministic bundle/closure parsing risk
 
 Actions:
 1. Execute schema contract check:

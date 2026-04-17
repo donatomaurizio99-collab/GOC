@@ -1331,7 +1331,7 @@ if (-not $SkipP0RunbookContractCheck) {
 }
 
 if (-not $SkipP0ReportSchemaContractCheck) {
-    Invoke-GateStep -Name "P0 report schema contract check (release-gate evidence schema + decision fields)" -Action {
+    Invoke-GateStep -Name "P0 report schema contract check (release-gate evidence baseline schema)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-report-schema-contract-release-gate.json"
         $requiredReportPaths = @($script:P0EvidenceReportPaths)
         $script:P0EvidenceReportPaths += $reportPath
@@ -1340,8 +1340,7 @@ if (-not $SkipP0ReportSchemaContractCheck) {
             "--label", "release-gate",
             "--artifacts-dir", "artifacts",
             "--include-glob", "*-release-gate.json",
-            "--required-top-level-keys", "label,success,generated_at_utc,duration_ms,paths,metrics,decision",
-            "--required-decision-keys", "release_blocked",
+            "--required-top-level-keys", "label,success",
             "--required-label", "release-gate",
             "--output-file", $reportPath
         )

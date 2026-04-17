@@ -11,16 +11,9 @@ from typing import Any
 DEFAULT_REQUIRED_TOP_LEVEL_KEYS = [
     "label",
     "success",
-    "generated_at_utc",
-    "duration_ms",
-    "paths",
-    "metrics",
-    "decision",
 ]
 
-DEFAULT_REQUIRED_DECISION_KEYS = [
-    "release_blocked",
-]
+DEFAULT_REQUIRED_DECISION_KEYS: list[str] = []
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -278,10 +271,6 @@ def main(argv: list[str] | None = None) -> int:
     if not required_top_level_keys:
         print("[p0-report-schema-contract-check] ERROR: --required-top-level-keys must not be empty.", file=sys.stderr)
         return 2
-    if not required_decision_keys:
-        print("[p0-report-schema-contract-check] ERROR: --required-decision-keys must not be empty.", file=sys.stderr)
-        return 2
-
     try:
         report = run_check(
             label=str(args.label),

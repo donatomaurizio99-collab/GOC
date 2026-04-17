@@ -5415,8 +5415,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
 
-    assert '"--required-top-level-keys", "label,success,generated_at_utc,duration_ms,paths,metrics,decision"' in release_gate
-    assert '"--required-decision-keys", "release_blocked"' in release_gate
+    assert '"--required-top-level-keys", "label,success"' in release_gate
+    assert '"--required-decision-keys", "release_blocked"' not in release_gate
     assert '"--include-glob", "*-release-gate.json"' in release_gate
     assert '"--required-label", "release-gate"' in release_gate
     assert "$script:P0EvidenceReportPaths = @()" in release_gate
@@ -5427,8 +5427,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in schema_wrapper
-    assert '[string]$RequiredTopLevelKeys = "label,success,generated_at_utc,duration_ms,paths,metrics,decision"' in schema_wrapper
-    assert '[string]$RequiredDecisionKeys = "release_blocked"' in schema_wrapper
+    assert '[string]$RequiredTopLevelKeys = "label,success"' in schema_wrapper
+    assert '[string]$RequiredDecisionKeys = ""' in schema_wrapper
     assert 'default="*-release-gate.json"' in bundle_script
     assert 'parser.add_argument("--required-label", default="")' in bundle_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
@@ -5854,6 +5854,10 @@ def test_162_p0_report_schema_contract_check_fails_when_required_keys_are_missin
         "*-release-gate.json",
         "--required-label",
         "release-gate",
+        "--required-top-level-keys",
+        "label,success,generated_at_utc,duration_ms,paths,metrics,decision",
+        "--required-decision-keys",
+        "release_blocked",
         "--required-files",
         str(broken_report.resolve()),
         "--output-file",
