@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -54,6 +54,7 @@ This gate covers:
 - snapshot/restore crash-consistency drill (hard-aborted copy fault matrix, manifest preflight checks, and deterministic recovery restore)
 - multi-db atomic-switch drill (pointer update crash simulation, corrupted-candidate reject, and deterministic switch rollback path)
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
+- disaster-recovery rehearsal pack (aggregated backup/snapshot/switch/RTO-RPO drills with deterministic release-block decision + evidence files)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
@@ -264,6 +265,12 @@ Manual multi-db atomic-switch drill invocation:
 .\scripts\run-multi-db-atomic-switch-drill.ps1 -SeedRows 96 -PayloadBytes 128
 ```
 
+Manual disaster-recovery rehearsal pack invocation:
+
+```powershell
+.\scripts\run-disaster-recovery-rehearsal-pack.ps1 -Profile scheduled -MaxTotalDurationSeconds 2400
+```
+
 Manual release-gate runtime stability drill invocation:
 
 ```powershell
@@ -303,6 +310,7 @@ Verify before release:
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts (`success=true`)
 - release evidence bundle report confirms all required P0 reports present and successful (`success=true`)
+- disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
 - closure report confirms all readiness criteria are green (`success=true`, `metrics.criteria_failed=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
@@ -1073,6 +1081,40 @@ Actions:
    - `decision.recommended_action = rollback_executed` (or `manual_rollback_required` in dry-run mode)
 3. If expected trigger reason is not matched, keep release blocked and escalate policy defect immediately.
 4. Resume rollout only after readiness is stable and a fresh rollback-policy drill passes with expected reason.
+
+### 3.39 Disaster-recovery rehearsal pack
+
+Symptoms:
+- restore/snapshot/switch and RTO/RPO signals are green individually, but there is no single consolidated go/no-go artifact
+- release evidence lacks deterministic proof that all disaster-recovery drills passed under one execution budget
+
+Actions:
+1. Execute consolidated rehearsal pack (release-gate profile):
+   ```powershell
+   .\scripts\run-disaster-recovery-rehearsal-pack.ps1 -Profile release-gate -MaxFailedDrills 0 -MaxTotalDurationSeconds 2400 -OutputFile "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json" -EvidenceDir "artifacts\p0-disaster-recovery-rehearsal-pack-evidence-release-gate"
+   ```
+2. Validate release-block decision:
+   - `success = true`
+   - `decision.release_blocked = false`
+   - `metrics.drills_failed = 0`
+   - `metrics.duration_budget_exceeded = false`
+3. Confirm per-drill evidence exists under `paths.evidence_files` and attach artifacts to change/incident record.
+4. If report fails any threshold, keep release blocked and remediate before re-running release gate.
+
+### 3.40 Scheduled DR evidence freshness
+
+Symptoms:
+- no recent periodic disaster-recovery rehearsal evidence is available
+- operators cannot confirm recovery posture drift between releases
+
+Actions:
+1. Trigger scheduled pack manually if needed:
+   ```powershell
+   .\scripts\run-disaster-recovery-rehearsal-pack.ps1 -Profile scheduled -MaxTotalDurationSeconds 2400 -OutputFile "artifacts\p0-disaster-recovery-rehearsal-pack-scheduled.json" -EvidenceDir "artifacts\p0-disaster-recovery-rehearsal-pack-evidence-scheduled"
+   ```
+2. Verify report criteria remain green (`success=true`, `metrics.drills_failed=0`, `decision.release_blocked=false`).
+3. Track report timestamp (`generated_at_utc`) and keep at least one recent successful scheduled report available during release review.
+4. If scheduled report fails, open incident and hold promotion until fresh green evidence is produced.
 
 ## 4. Operational Defaults
 

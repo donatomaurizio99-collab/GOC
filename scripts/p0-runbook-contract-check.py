@@ -18,6 +18,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-load-profile-framework-check.ps1",
     "run-canary-guardrails-check.ps1",
     "run-rto-rpo-assertion-suite.ps1",
+    "run-disaster-recovery-rehearsal-pack.ps1",
     "run-power-loss-durability-drill.ps1",
     "run-disk-pressure-fault-injection-drill.ps1",
     "run-upgrade-downgrade-compatibility-drill.ps1",

@@ -4703,3 +4703,158 @@ def test_139_auto_rollback_policy_triggers_on_readiness_regression():
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_140_disaster_recovery_rehearsal_pack_reports_success_with_mock_results():
+    workspace = _local_test_dir("pytest-disaster-recovery-rehearsal-pack-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-drill-results.json"
+    output_file = workspace / "disaster-recovery-rehearsal-pack-report.json"
+    evidence_dir = workspace / "evidence"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "drills": [
+                    {
+                        "name": "snapshot_restore_crash_consistency",
+                        "success": True,
+                        "duration_seconds": 0.8,
+                        "payload": {"success": True, "report": "snapshot"},
+                    },
+                    {
+                        "name": "multi_db_atomic_switch",
+                        "success": True,
+                        "duration_seconds": 0.7,
+                        "payload": {"success": True, "report": "switch"},
+                    },
+                    {
+                        "name": "rto_rpo_assertion",
+                        "success": True,
+                        "duration_seconds": 0.6,
+                        "payload": {"success": True, "report": "rto-rpo"},
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disaster-recovery-rehearsal-pack.py"),
+        "--label",
+        "pytest-drill",
+        "--profile",
+        "release-gate",
+        "--workspace",
+        str((workspace / "run-workspace").resolve()),
+        "--mock-drill-results-file",
+        str(mock_results_file.resolve()),
+        "--max-failed-drills",
+        "0",
+        "--max-total-duration-seconds",
+        "120",
+        "--output-file",
+        str(output_file.resolve()),
+        "--evidence-dir",
+        str(evidence_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["profile"] == "mock"
+    assert payload["metrics"]["drills_total"] == 3
+    assert payload["metrics"]["drills_failed"] == 0
+    assert payload["metrics"]["duration_budget_exceeded"] is False
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+    assert len(payload["paths"]["evidence_files"]) == 3
+    for evidence_file in payload["paths"]["evidence_files"]:
+        assert Path(evidence_file).exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_141_disaster_recovery_rehearsal_pack_fails_when_duration_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-disaster-recovery-rehearsal-pack-duration-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-drill-results.json"
+    output_file = workspace / "disaster-recovery-rehearsal-pack-report.json"
+    evidence_dir = workspace / "evidence"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "drills": [
+                    {
+                        "name": "snapshot_restore_crash_consistency",
+                        "success": True,
+                        "duration_seconds": 3.0,
+                        "payload": {"success": True},
+                    },
+                    {
+                        "name": "multi_db_atomic_switch",
+                        "success": True,
+                        "duration_seconds": 2.5,
+                        "payload": {"success": True},
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disaster-recovery-rehearsal-pack.py"),
+        "--label",
+        "pytest-drill",
+        "--profile",
+        "release-gate",
+        "--workspace",
+        str((workspace / "run-workspace").resolve()),
+        "--mock-drill-results-file",
+        str(mock_results_file.resolve()),
+        "--max-failed-drills",
+        "0",
+        "--max-total-duration-seconds",
+        "1",
+        "--output-file",
+        str(output_file.resolve()),
+        "--evidence-dir",
+        str(evidence_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[disaster-recovery-rehearsal-pack] ERROR: "
+    assert marker in completed.stderr
+    error_text = completed.stderr.split(marker, 1)[1].strip()
+    payload_text = error_text
+    nested_marker = "Disaster recovery rehearsal pack failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["drills_failed"] == 0
+    assert payload["metrics"]["duration_budget_exceeded"] is True
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

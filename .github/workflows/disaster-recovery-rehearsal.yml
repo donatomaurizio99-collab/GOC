@@ -1,0 +1,57 @@
+name: Disaster Recovery Rehearsal
+
+on:
+  schedule:
+    - cron: "45 2 * * *"
+  workflow_dispatch:
+    inputs:
+      max_total_duration_seconds:
+        description: "Duration budget in seconds for the full rehearsal pack"
+        required: false
+        default: "2400"
+
+jobs:
+  rehearsal:
+    name: Disaster Recovery Rehearsal Pack (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Run disaster-recovery rehearsal pack
+        shell: pwsh
+        env:
+          MAX_TOTAL_DURATION_SECONDS: ${{ github.event.inputs.max_total_duration_seconds || '2400' }}
+        run: |
+          python .\scripts\disaster-recovery-rehearsal-pack.py `
+            --label github-actions-scheduled `
+            --profile scheduled `
+            --workspace .\.tmp\disaster-recovery-rehearsal-pack-scheduled `
+            --runbook-file .\docs\production-runbook.md `
+            --rto-rpo-policy-file .\docs\rto-rpo-assertion-policy.json `
+            --max-failed-drills 0 `
+            --max-total-duration-seconds $env:MAX_TOTAL_DURATION_SECONDS `
+            --output-file .\artifacts\p0-disaster-recovery-rehearsal-pack-scheduled.json `
+            --evidence-dir .\artifacts\p0-disaster-recovery-rehearsal-pack-evidence-scheduled
+
+      - name: Upload disaster-recovery rehearsal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-disaster-recovery-rehearsal-pack-scheduled
+          path: |
+            artifacts/p0-disaster-recovery-rehearsal-pack-scheduled.json
+            artifacts/p0-disaster-recovery-rehearsal-pack-evidence-scheduled/**
+          if-no-files-found: error

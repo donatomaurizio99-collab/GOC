@@ -76,6 +76,8 @@ param(
     [switch]$StrictMultiDbAtomicSwitchDrill,
     [switch]$SkipIncidentRollbackDrill,
     [switch]$StrictIncidentRollbackDrill,
+    [switch]$SkipDisasterRecoveryRehearsalPack,
+    [switch]$StrictDisasterRecoveryRehearsalPack,
     [switch]$SkipReleaseGateRuntimeStabilityDrill,
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -1044,6 +1046,37 @@ if (-not $SkipIncidentRollbackDrill) {
             }
             Write-Warning (
                 "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDisasterRecoveryRehearsalPack) {
+    Invoke-GateStep -Name "Disaster-recovery rehearsal pack (consolidated restore/switch/RTO-RPO evidence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\disaster-recovery-rehearsal-pack"
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
+        $evidenceDir = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-evidence-release-gate"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\disaster-recovery-rehearsal-pack.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--profile", "release-gate",
+                "--runbook-file", "docs/production-runbook.md",
+                "--rto-rpo-policy-file", "docs/rto-rpo-assertion-policy.json",
+                "--max-failed-drills", "0",
+                "--max-total-duration-seconds", "2400",
+                "--output-file", $reportPath,
+                "--evidence-dir", $evidenceDir
+            )
+        } catch {
+            if ($StrictDisasterRecoveryRehearsalPack) {
+                throw
+            }
+            Write-Warning (
+                "Disaster-recovery rehearsal pack failed but StrictDisasterRecoveryRehearsalPack is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
