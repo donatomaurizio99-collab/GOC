@@ -55,6 +55,13 @@ def _parse_utc_timestamp(value: Any) -> float | None:
     return dt.timestamp()
 
 
+def _read_mtime_epoch(path: Path) -> float | None:
+    try:
+        return float(path.stat().st_mtime)
+    except OSError:
+        return None
+
+
 def run_check(
     *,
     label: str,
@@ -80,6 +87,7 @@ def run_check(
     invalid_timestamp_reports: list[dict[str, Any]] = []
     parsed_timestamps: list[float] = []
     report_timestamp_by_path: dict[str, float | None] = {}
+    report_mtime_by_path: dict[str, float | None] = {}
 
     for report_path in resolved_required_reports:
         if not report_path.exists():
@@ -94,6 +102,7 @@ def run_check(
         generated_at = payload.get("generated_at_utc")
         parsed_timestamp = _parse_utc_timestamp(generated_at)
         has_valid_timestamp = parsed_timestamp is not None
+        report_mtime = _read_mtime_epoch(report_path)
 
         record = {
             "path": str(report_path),
@@ -114,9 +123,11 @@ def run_check(
         else:
             invalid_timestamp_reports.append(record)
         report_timestamp_by_path[str(report_path)] = float(parsed_timestamp) if has_valid_timestamp else None
+        report_mtime_by_path[str(report_path)] = report_mtime
 
     manifest_present = manifest_file.exists()
     manifest_payload: dict[str, Any] = _read_json_object(manifest_file) if manifest_present else {}
+    manifest_mtime_epoch = _read_mtime_epoch(manifest_file) if manifest_present else None
     manifest_entries_raw = manifest_payload.get("files")
     manifest_entries = manifest_entries_raw if isinstance(manifest_entries_raw, list) else []
     manifest_paths = {
@@ -132,11 +143,27 @@ def run_check(
         if report_key in missing_reports:
             continue
         report_timestamp = report_timestamp_by_path.get(report_key)
+        report_generated_after_manifest = False
         if (
             manifest_generated_at_epoch is not None
             and report_timestamp is not None
             and float(report_timestamp) > float(manifest_generated_at_epoch)
         ):
+            report_generated_after_manifest = True
+        elif (
+            manifest_generated_at_epoch is not None
+            and report_timestamp is not None
+            and float(report_timestamp) == float(manifest_generated_at_epoch)
+        ):
+            report_mtime = report_mtime_by_path.get(report_key)
+            if (
+                manifest_mtime_epoch is not None
+                and report_mtime is not None
+                and float(report_mtime) > float(manifest_mtime_epoch)
+            ):
+                report_generated_after_manifest = True
+
+        if report_generated_after_manifest:
             reports_generated_after_manifest.append(report_key)
             continue
         reports_expected_in_manifest.append(report_key)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import shutil
@@ -8190,6 +8191,93 @@ def test_189_release_gate_production_final_attestation_fails_when_burnin_thresho
     assert payload["success"] is False
     assert payload["metrics"]["burnin_threshold_failed"] == 1
     assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_190_release_gate_evidence_lineage_uses_file_mtime_when_manifest_and_report_timestamps_share_same_second():
+    workspace = _local_test_dir("pytest-release-gate-evidence-lineage-same-second-fallback").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    final_report = artifacts_dir / "release-gate-stability-final-readiness-release-gate.json"
+    staging_report = artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json"
+    rc_report = artifacts_dir / "release-gate-rc-canary-rollout-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    report_paths = [final_report, staging_report, rc_report, closure_report]
+    manifest_file = artifacts_dir / "release-gate-evidence-manifest-release-gate.json"
+    output_file = artifacts_dir / "release-gate-evidence-lineage-release-gate.json"
+
+    same_second_timestamp = "2026-04-17T12:00:39Z"
+    for report_path in report_paths:
+        report_path.write_text(
+            json.dumps(
+                {"label": "release-gate", "success": True, "generated_at_utc": same_second_timestamp},
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "generated_at_utc": same_second_timestamp,
+                "files": [
+                    {"path": str(final_report.resolve()), "sha256": "x"},
+                    {"path": str(closure_report.resolve()), "sha256": "y"},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    # Force deterministic same-second ordering: report JSON timestamps are equal,
+    # but staging + RC files are newer than the manifest at file-system precision.
+    base_epoch = 1776254439.0
+    os.utime(final_report, (base_epoch + 0.05, base_epoch + 0.05))
+    os.utime(closure_report, (base_epoch + 0.06, base_epoch + 0.06))
+    os.utime(manifest_file, (base_epoch + 0.10, base_epoch + 0.10))
+    os.utime(staging_report, (base_epoch + 0.20, base_epoch + 0.20))
+    os.utime(rc_report, (base_epoch + 0.30, base_epoch + 0.30))
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-evidence-lineage-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-reports",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--manifest-file",
+        str(manifest_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--max-report-timestamp-skew-seconds",
+        "900",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["manifest_missing_entries"] == 0
+    assert payload["metrics"]["reports_generated_after_manifest"] == 2
+    assert sorted(payload["reports_generated_after_manifest"]) == sorted(
+        [str(staging_report.resolve()), str(rc_report.resolve())]
+    )
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
