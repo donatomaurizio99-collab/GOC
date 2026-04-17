@@ -7091,3 +7091,82 @@ def test_177_release_gate_rc_canary_rollout_check_fails_when_rollout_policy_is_i
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_178_p0_burnin_consecutive_green_can_ignore_run_conclusion_when_required_jobs_are_green():
+    workspace = _local_test_dir("pytest-p0-burnin-ignore-run-conclusion").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    output_file = workspace / "p0-burnin-report.json"
+
+    run_id = 5001
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "head_sha": "abc123",
+                        "updated_at": "2026-04-17T12:00:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.11)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.12)", "conclusion": "success"},
+                    {"name": "Desktop Smoke (Windows)", "conclusion": "success"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--required-jobs",
+        "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+        "--required-consecutive",
+        "1",
+        "--per-page",
+        "5",
+        "--ignore-run-conclusion",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["consecutive_green"] == 1
+    assert payload["config"]["ignore_run_conclusion"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

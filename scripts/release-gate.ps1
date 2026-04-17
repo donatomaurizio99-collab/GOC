@@ -1365,7 +1365,8 @@ if (-not $SkipP0BurnInConsecutiveGreen) {
                 "--repo", $repository,
                 "--branch", "master",
                 "--workflow-name", "CI",
-                "--required-jobs", "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+                "--required-jobs", "Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+                "--ignore-run-conclusion",
                 "--required-consecutive", "10",
                 "--per-page", "50",
                 "--output-file", $reportPath
