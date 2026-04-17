@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -56,6 +56,7 @@ This gate covers:
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 - disaster-recovery rehearsal pack (aggregated backup/snapshot/switch/RTO-RPO drills with deterministic release-block decision + evidence files)
 - failure budget dashboard (aggregated machine-readable release-block signal across critical budget reports)
+- safe-mode UX degradation check (runtime rail + mutation-lock UX contract + release/CI/runbook wiring)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
@@ -276,6 +277,12 @@ Manual failure budget dashboard invocation:
 
 ```powershell
 .\scripts\run-failure-budget-dashboard.ps1
+```
+
+Manual safe-mode/degradation UX contract check invocation:
+
+```powershell
+.\scripts\run-safe-mode-ux-degradation-check.ps1
 ```
 
 Manual release-gate runtime stability drill invocation:
@@ -1142,6 +1149,25 @@ Actions:
    - `metrics.reports_missing = 0`
 3. Confirm dashboard includes critical report set (load-profile, RTO/RPO, canary, auto-rollback, DR rehearsal pack).
 4. If dashboard is red, treat as hard release blocker and remediate failing/missing budget report before promotion.
+
+### 3.42 Safe-mode/degraded-state UX contract regression
+
+Symptoms:
+- dashboard does not clearly communicate safe-mode/degraded runtime state to operators
+- mutating controls remain available while readiness is false, safe mode is active, or SLO is critical
+
+Actions:
+1. Execute the UX contract check:
+   ```powershell
+   .\scripts\run-safe-mode-ux-degradation-check.ps1
+   ```
+2. Validate report criteria:
+   - `success = true`
+   - `checks.missing_template_tokens = []`
+   - `checks.missing_app_js_tokens = []`
+   - `checks.release_gate_has_strict_flag = true`
+   - `checks.ci_has_strict_flag = true`
+3. If check fails, hold release and restore runtime rail + mutation-lock behavior before retry.
 
 ## 4. Operational Defaults
 

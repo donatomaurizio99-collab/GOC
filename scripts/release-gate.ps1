@@ -80,6 +80,8 @@ param(
     [switch]$StrictDisasterRecoveryRehearsalPack,
     [switch]$SkipFailureBudgetDashboard,
     [switch]$StrictFailureBudgetDashboard,
+    [switch]$SkipSafeModeUxDegradationCheck,
+    [switch]$StrictSafeModeUxDegradationCheck,
     [switch]$SkipReleaseGateRuntimeStabilityDrill,
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -1110,6 +1112,27 @@ if (-not $SkipFailureBudgetDashboard) {
             }
             Write-Warning (
                 "Failure budget dashboard failed but StrictFailureBudgetDashboard is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSafeModeUxDegradationCheck) {
+    Invoke-GateStep -Name "Safe-mode UX degradation check (runtime rail + mutation lock + release/runbook contract)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\safe-mode-ux-degradation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\safe-mode-ux-degradation-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSafeModeUxDegradationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Safe-mode UX degradation check failed but StrictSafeModeUxDegradationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

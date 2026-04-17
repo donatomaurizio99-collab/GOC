@@ -193,7 +193,7 @@
     }
     .kpi-strip {
       display: grid;
-      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
       gap: 0.5rem;
       align-self: stretch;
     }
@@ -237,6 +237,51 @@
       border: 1px solid rgba(29, 26, 22, 0.1);
       background: rgba(255, 255, 255, 0.7);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+    }
+    .runtime-rail {
+      border-radius: 12px;
+      border: 1px solid rgba(29, 26, 22, 0.15);
+      background: rgba(255, 255, 255, 0.86);
+      padding: 0.65rem 0.75rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+    .runtime-rail p {
+      margin: 0;
+    }
+    .runtime-rail-grid {
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+    }
+    .runtime-rail-grid h3 {
+      margin: 0 0 0.35rem;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .runtime-rail ul {
+      margin: 0;
+      padding-left: 1rem;
+      display: grid;
+      gap: 0.35rem;
+    }
+    .runtime-rail.state-loading {
+      border-color: rgba(35, 102, 173, 0.25);
+      background: rgba(238, 246, 255, 0.82);
+    }
+    .runtime-rail.state-ok {
+      border-color: rgba(32, 117, 90, 0.32);
+      background: rgba(232, 248, 242, 0.78);
+    }
+    .runtime-rail.state-degraded {
+      border-color: rgba(181, 110, 17, 0.35);
+      background: rgba(255, 245, 227, 0.85);
+    }
+    .runtime-rail.state-critical {
+      border-color: rgba(191, 47, 47, 0.42);
+      background: rgba(255, 232, 232, 0.9);
     }
     .command-row {
       display: grid;
@@ -432,6 +477,11 @@
     }
     button.secondary:hover {
       background: #fff4e7;
+    }
+    button:disabled, input:disabled, select:disabled, textarea:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+      filter: grayscale(0.15);
     }
     button.ghost {
       background: transparent;
@@ -705,6 +755,9 @@
       .command-row {
         grid-template-columns: 1fr;
       }
+      .runtime-rail-grid {
+        grid-template-columns: 1fr;
+      }
       .split { grid-template-columns: 1fr; }
       .entity-header { flex-direction: column; }
       main { padding: 1rem; }
@@ -725,6 +778,8 @@
         <div class="kpi-chip"><span class="meta">Backpressure</span><strong>...</strong></div>
         <div class="kpi-chip"><span class="meta">Dead-Letter</span><strong>...</strong></div>
         <div class="kpi-chip"><span class="meta">Audit 24h</span><strong>...</strong></div>
+        <div class="kpi-chip"><span class="meta">Readiness</span><strong>...</strong></div>
+        <div class="kpi-chip"><span class="meta">SLO</span><strong>...</strong></div>
       </div>
     </div>
     <div class="command-bar" aria-label="Operator command bar">
@@ -748,6 +803,19 @@
         <button type="button" class="jump-btn" data-jump-target="states-section">States</button>
       </nav>
       <p class="meta toolbar-status" id="toolbar-status" role="status" aria-live="polite">Global filter inactive. Auto-refresh every 5s.</p>
+      <div class="runtime-rail state-loading" id="runtime-state-rail" data-runtime-severity="loading" role="status" aria-live="polite">
+        <p id="runtime-state-summary">Runtime status is loading.</p>
+        <div class="runtime-rail-grid">
+          <div>
+            <h3>Active Alerts</h3>
+            <div id="runtime-state-alerts" class="meta">No active SLO alerts.</div>
+          </div>
+          <div>
+            <h3>Operator Recommendations</h3>
+            <div id="runtime-state-recommendations" class="meta">Wait for runtime signals.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
   <main id="main-content" tabindex="-1">
@@ -766,7 +834,7 @@
         </div>
         <label class="sr-only" for="goal-deadline-score">Deadline score</label>
         <input id="goal-deadline-score" name="deadline_score" type="number" step="0.1" min="0" max="1" value="0.0" placeholder="Deadline score">
-        <button type="submit">Create Goal</button>
+        <button type="submit" data-mutation-control="true">Create Goal</button>
         <div class="error" id="goal-error" role="status" aria-live="polite"></div>
       </form>
       <div class="meta" id="selected-goal-label">No goal selected.</div>
@@ -780,7 +848,7 @@
         <input name="goal_id" id="task-goal-id" placeholder="Goal ID" required>
         <label class="sr-only" for="task-title">Task title</label>
         <input id="task-title" name="title" placeholder="Task title" required>
-        <button type="submit">Create Task</button>
+        <button type="submit" data-mutation-control="true">Create Task</button>
         <div class="error" id="task-error" role="status" aria-live="polite"></div>
       </form>
       <div id="tasks-table"></div>
@@ -792,8 +860,8 @@
         <div class="card">
           <span class="meta">Scheduler</span>
           <div class="actions" style="margin-top:0.75rem;">
-            <button type="button" data-operator-action="age">Age Queue</button>
-            <button type="button" data-operator-action="pick">Pick Next Goal</button>
+            <button type="button" data-mutation-control="true" data-operator-action="age">Age Queue</button>
+            <button type="button" data-mutation-control="true" data-operator-action="pick">Pick Next Goal</button>
           </div>
         </div>
         <div class="card">
@@ -804,16 +872,16 @@
               <input id="consumer-batch-size" type="number" min="1" max="500" value="50" placeholder="Batch size">
             </div>
             <div class="actions">
-              <button type="button" data-operator-action="drain">Drain Events</button>
-              <button type="button" class="secondary" data-operator-action="reclaim">Reclaim Stuck</button>
+              <button type="button" data-mutation-control="true" data-operator-action="drain">Drain Events</button>
+              <button type="button" class="secondary" data-mutation-control="true" data-operator-action="reclaim">Reclaim Stuck</button>
             </div>
           </form>
         </div>
         <div class="card">
           <span class="meta">Maintenance</span>
           <div class="actions" style="margin-top:0.75rem;">
-            <button type="button" data-operator-action="retention">Run Retention Cleanup</button>
-            <button type="button" class="secondary" data-operator-action="diagnostics">Export Diagnostics</button>
+            <button type="button" data-mutation-control="true" data-operator-action="retention">Run Retention Cleanup</button>
+            <button type="button" class="secondary" data-mutation-control="true" data-mutation-exempt="true" data-operator-action="diagnostics">Export Diagnostics</button>
           </div>
         </div>
       </div>
@@ -835,11 +903,11 @@
         <div class="split">
           <label class="sr-only" for="workflow-idempotency-key">Idempotency key</label>
           <input id="workflow-idempotency-key" placeholder="Optional Idempotency-Key">
-          <button type="button" class="secondary" id="workflow-reap-runs">Reap Stuck Runs</button>
+          <button type="button" class="secondary" id="workflow-reap-runs" data-mutation-control="true">Reap Stuck Runs</button>
         </div>
         <label class="sr-only" for="workflow-payload">Workflow payload JSON</label>
         <textarea id="workflow-payload" placeholder='Optional payload as JSON (example: {"note":"manual run"})'></textarea>
-        <button type="submit">Start Workflow</button>
+        <button type="submit" data-mutation-control="true">Start Workflow</button>
         <div class="error" id="workflow-error" role="status" aria-live="polite"></div>
       </form>
       <div id="workflows-table"></div>
@@ -935,7 +1003,7 @@
         <label class="meta"><input type="checkbox" id="fault-dead-letter-only" checked> Dead-letter only (`poison` + `exhausted`)</label>
         <div class="actions">
           <button type="submit">Apply Filter</button>
-          <button type="button" class="secondary" id="bulk-resolve-faults">Resolve Filtered</button>
+          <button type="button" class="secondary" id="bulk-resolve-faults" data-mutation-control="true">Resolve Filtered</button>
         </div>
       </form>
       <div class="meta" id="fault-filter-summary" role="status" aria-live="polite">Current filter: none</div>

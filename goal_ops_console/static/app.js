@@ -40,6 +40,9 @@ let densityMode = "comfy";
 let visualMode = "warm";
 let globalFilterTerm = "";
 let jumpScrollScheduled = false;
+const MUTATION_LOCK_FALLBACK_MESSAGE = (
+  "Mutating operations are blocked while runtime is in critical protection mode."
+);
 
 const viewCache = {
   goals: [],
@@ -52,6 +55,9 @@ const viewCache = {
   faultEntries: [],
   queue: [],
   health: null,
+  readiness: null,
+  slo: null,
+  runtimeState: null,
 };
 
 async function api(path, options = {}) {
@@ -173,10 +179,215 @@ function updateToolbarStatus() {
   const densityPart = `Density: ${densityMode}.`;
   const activeVisualPreset = VISUAL_PRESETS.find((preset) => preset.id === visualMode) || VISUAL_PRESETS[0];
   const visualPart = `Visual: ${activeVisualPreset.label}.`;
+  const runtime = viewCache.runtimeState;
+  const runtimePart = runtime
+    ? `Runtime: ${runtime.readinessReady ? "ready" : "not-ready"}, SLO ${runtime.sloStatus.toUpperCase()}, ${runtime.severity}.`
+    : "Runtime: loading.";
   const desktopPart = IS_DESKTOP_MODE
     ? "Desktop shortcuts: Ctrl+1/2/3 visual, Ctrl+Shift+F filter, Ctrl+Shift+R refresh."
     : "";
-  status.textContent = `${filterPart} ${refreshPart} ${densityPart} ${visualPart}${desktopPart ? ` ${desktopPart}` : ""}`;
+  status.textContent = (
+    `${filterPart} ${refreshPart} ${densityPart} ${visualPart} ${runtimePart}`
+    + `${desktopPart ? ` ${desktopPart}` : ""}`
+  );
+}
+
+function deriveRuntimeState(health, readiness, slo) {
+  if (!health || !readiness || !slo) {
+    return {
+      severity: "loading",
+      safeModeActive: false,
+      readinessReady: false,
+      sloStatus: "unknown",
+      mutationBlocked: false,
+      mutationBlockReason: "",
+      summary: "Runtime status is loading.",
+      recommendations: ["Wait for health/readiness/SLO refresh to complete."],
+      alerts: [],
+    };
+  }
+
+  const backpressure = health.backpressure || {};
+  const readinessChecks = (readiness.checks && typeof readiness.checks === "object")
+    ? readiness.checks
+    : {};
+  const safeModeCheck = readinessChecks.safe_mode || health.safe_mode || {};
+  const safeModeActive = Boolean(safeModeCheck.active);
+  const readinessReady = Boolean(readiness.ready);
+  const sloStatus = String(slo.status || "unknown").toLowerCase();
+  const rawAlerts = Array.isArray(slo.alerts) ? slo.alerts : [];
+  const alerts = rawAlerts.filter((alert) => alert && typeof alert === "object");
+  const criticalAlerts = alerts.filter(
+    (alert) => String(alert.severity || "").toLowerCase() === "critical",
+  );
+  const warningAlerts = alerts.filter(
+    (alert) => String(alert.severity || "").toLowerCase() === "warning",
+  );
+  const failingReadinessChecks = Object.entries(readinessChecks)
+    .filter(([, check]) => (
+      check
+      && typeof check === "object"
+      && Object.prototype.hasOwnProperty.call(check, "ok")
+      && check.ok === false
+    ))
+    .map(([checkName]) => checkName);
+
+  const isCritical = safeModeActive || !readinessReady || sloStatus === "critical";
+  const isDegraded = (
+    isCritical
+    || sloStatus === "degraded"
+    || Boolean(backpressure.is_throttled)
+    || warningAlerts.length > 0
+  );
+  const severity = isCritical ? "critical" : isDegraded ? "degraded" : "ok";
+  const mutationBlocked = isCritical;
+
+  let summary = "Runtime healthy. Mutating actions are enabled.";
+  let mutationBlockReason = "";
+  if (safeModeActive) {
+    const reason = String(safeModeCheck.reason || "runtime safe mode active");
+    summary = `Safe mode active: ${reason}. Mutating actions are blocked for protection.`;
+    mutationBlockReason = "Safe mode is active.";
+  } else if (!readinessReady) {
+    const checkHint = failingReadinessChecks.length
+      ? ` failing check: ${failingReadinessChecks[0]}.`
+      : "";
+    summary = `Readiness is false.${checkHint} Mutating actions are blocked until recovery.`;
+    mutationBlockReason = "Readiness is false.";
+  } else if (sloStatus === "critical") {
+    const alertHint = criticalAlerts.length
+      ? ` Active critical alert: ${criticalAlerts[0].code || "unknown"}.`
+      : "";
+    summary = `SLO is critical.${alertHint} Mutating actions are blocked to prevent escalation.`;
+    mutationBlockReason = "SLO status is critical.";
+  } else if (sloStatus === "degraded" || Boolean(backpressure.is_throttled) || warningAlerts.length > 0) {
+    summary = "Runtime degraded. Mutating actions remain available with caution.";
+  }
+
+  const recommendations = [];
+  if (safeModeActive) {
+    recommendations.push("Inspect runtime safe mode cause and clear underlying fault before disabling.");
+  }
+  if (!readinessReady) {
+    recommendations.push("Open readiness checks and remediate failing components before normal operations.");
+  }
+  if (sloStatus !== "ok") {
+    recommendations.push("Review /system/slo alerts and stabilize error budget before rollout.");
+  }
+  if (Boolean(backpressure.is_throttled)) {
+    recommendations.push("Drain backpressure and reduce new workflow starts until queue utilization normalizes.");
+  }
+  if (!recommendations.length) {
+    recommendations.push("Continue supervised operations and monitor the runtime rail for regressions.");
+  }
+
+  const alertSummaries = alerts.slice(0, 4).map((alert) => ({
+    code: String(alert.code || "unknown"),
+    severity: String(alert.severity || "warning").toLowerCase(),
+    message: String(alert.message || ""),
+  }));
+
+  return {
+    severity,
+    safeModeActive,
+    readinessReady,
+    sloStatus,
+    mutationBlocked,
+    mutationBlockReason: mutationBlockReason || MUTATION_LOCK_FALLBACK_MESSAGE,
+    summary,
+    recommendations,
+    alerts: alertSummaries,
+  };
+}
+
+function renderRuntimeStateRail(runtimeState) {
+  const rail = document.getElementById("runtime-state-rail");
+  if (!rail) {
+    return;
+  }
+
+  const severity = ["ok", "degraded", "critical", "loading"].includes(runtimeState?.severity)
+    ? runtimeState.severity
+    : "loading";
+  const summaryTarget = document.getElementById("runtime-state-summary");
+  const alertsTarget = document.getElementById("runtime-state-alerts");
+  const recommendationsTarget = document.getElementById("runtime-state-recommendations");
+
+  rail.classList.remove("state-ok", "state-degraded", "state-critical", "state-loading");
+  rail.classList.add(`state-${severity}`);
+  rail.setAttribute("data-runtime-severity", severity);
+
+  document.body.classList.toggle("runtime-critical", severity === "critical");
+  document.body.classList.toggle("runtime-degraded", severity === "degraded");
+  document.body.classList.toggle("runtime-loading", severity === "loading");
+
+  if (summaryTarget) {
+    summaryTarget.textContent = String(runtimeState?.summary || "Runtime state unavailable.");
+  }
+
+  if (alertsTarget) {
+    const alerts = Array.isArray(runtimeState?.alerts) ? runtimeState.alerts : [];
+    alertsTarget.innerHTML = alerts.length
+      ? `<ul>${alerts.map((alert) => (
+          `<li><span class="pill ${stateClass(alert.severity)}">${escapeHtml(alert.severity)}</span> `
+          + `<strong>${escapeHtml(alert.code)}</strong>: ${escapeHtml(alert.message || "-")}</li>`
+        )).join("")}</ul>`
+      : `<div class="meta">No active SLO alerts.</div>`;
+  }
+
+  if (recommendationsTarget) {
+    const recommendations = Array.isArray(runtimeState?.recommendations)
+      ? runtimeState.recommendations
+      : [];
+    recommendationsTarget.innerHTML = recommendations.length
+      ? `<ul>${recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : `<div class="meta">No operator recommendations.</div>`;
+  }
+}
+
+function applyMutationControlState() {
+  const runtimeState = viewCache.runtimeState;
+  const blocked = Boolean(runtimeState?.mutationBlocked);
+  const reason = String(runtimeState?.mutationBlockReason || MUTATION_LOCK_FALLBACK_MESSAGE);
+
+  document.querySelectorAll('[data-mutation-control="true"]').forEach((control) => {
+    if (!("disabled" in control)) {
+      return;
+    }
+    const isExempt = String(control.dataset.mutationExempt || "").toLowerCase() === "true";
+    if (!Object.prototype.hasOwnProperty.call(control.dataset, "mutationBaseDisabled")) {
+      control.dataset.mutationBaseDisabled = control.disabled ? "true" : "false";
+    }
+    if (!Object.prototype.hasOwnProperty.call(control.dataset, "mutationOriginalTitle")) {
+      control.dataset.mutationOriginalTitle = control.getAttribute("title") || "";
+    }
+
+    const baseDisabled = control.dataset.mutationBaseDisabled === "true";
+    const shouldLock = blocked && !isExempt;
+    control.disabled = baseDisabled || shouldLock;
+
+    if (shouldLock) {
+      control.setAttribute("aria-disabled", "true");
+      control.setAttribute("title", reason);
+    } else {
+      control.removeAttribute("aria-disabled");
+      const originalTitle = control.dataset.mutationOriginalTitle || "";
+      if (originalTitle) {
+        control.setAttribute("title", originalTitle);
+      } else {
+        control.removeAttribute("title");
+      }
+    }
+  });
+}
+
+function ensureMutationAllowed(actionLabel, { allowWhenBlocked = false } = {}) {
+  const runtimeState = viewCache.runtimeState;
+  if (!runtimeState || !runtimeState.mutationBlocked || allowWhenBlocked) {
+    return;
+  }
+  const reason = String(runtimeState.mutationBlockReason || MUTATION_LOCK_FALLBACK_MESSAGE);
+  throw new Error(`${actionLabel} blocked. ${reason}`);
 }
 
 function setDensityMode(mode) {
@@ -284,7 +495,10 @@ function renderGoalButtons(goal) {
     if (action === "trace") {
       return `<button class="secondary" data-correlation="${goal.goal_id}">${label}</button>`;
     }
-    return `<button class="secondary" data-goal-action="${action}" data-goal-id="${goal.goal_id}">${label}</button>`;
+    return (
+      `<button class="secondary" data-mutation-control="true" data-goal-action="${action}" `
+      + `data-goal-id="${goal.goal_id}">${label}</button>`
+    );
   }).join("");
 }
 
@@ -292,10 +506,18 @@ function renderTaskButtons(task) {
   const terminalStates = new Set(["poison", "exhausted", "succeeded"]);
   const buttons = [];
   if (!terminalStates.has(task.status)) {
-    buttons.push(`<button class="secondary" data-task-action="success" data-task-id="${task.task_id}">Success</button>`);
-    buttons.push(`<button class="secondary" data-task-action="skill" data-task-id="${task.task_id}">Skill Fail</button>`);
-    buttons.push(`<button class="secondary" data-task-action="execution" data-task-id="${task.task_id}">Exec Fail</button>`);
-    buttons.push(`<button class="secondary" data-task-action="external" data-task-id="${task.task_id}">External Fail</button>`);
+    buttons.push(
+      `<button class="secondary" data-mutation-control="true" data-task-action="success" data-task-id="${task.task_id}">Success</button>`,
+    );
+    buttons.push(
+      `<button class="secondary" data-mutation-control="true" data-task-action="skill" data-task-id="${task.task_id}">Skill Fail</button>`,
+    );
+    buttons.push(
+      `<button class="secondary" data-mutation-control="true" data-task-action="execution" data-task-id="${task.task_id}">Exec Fail</button>`,
+    );
+    buttons.push(
+      `<button class="secondary" data-mutation-control="true" data-task-action="external" data-task-id="${task.task_id}">External Fail</button>`,
+    );
   }
   buttons.push(`<button class="secondary" data-correlation="${task.goal_id}">Goal Trace</button>`);
   return buttons.join("");
@@ -339,6 +561,7 @@ function renderGoals(goals) {
       </div>`
     : `<div class="meta">${filteredEmptyMessage("No goals yet.")}</div>`;
   document.getElementById("goals-table").innerHTML = content;
+  applyMutationControlState();
 }
 
 function renderTasks(tasks) {
@@ -354,6 +577,7 @@ function renderTasks(tasks) {
   ]);
   if (!filteredTasks.length) {
     container.innerHTML = `<div class="meta">${filteredEmptyMessage("No tasks for the current selection.")}</div>`;
+    applyMutationControlState();
     return;
   }
   container.innerHTML = `<div class="stack-list">
@@ -382,6 +606,7 @@ function renderTasks(tasks) {
         <div class="actions">${renderTaskButtons(task)}</div>
       </article>`).join("")}
   </div>`;
+  applyMutationControlState();
 }
 
 function renderEvents(events) {
@@ -508,6 +733,7 @@ function renderFaults(summary, entries) {
   ]);
   if (!filteredEntries.length) {
     tableTarget.innerHTML = `<div class="meta">${filteredEmptyMessage("No fault records for current filter.")}</div>`;
+    applyMutationControlState();
     return;
   }
   tableTarget.innerHTML = `<div class="table-scroll"><table>
@@ -547,25 +773,26 @@ function renderFaults(summary, entries) {
           </td>
           <td>${renderFaultRemediationButtons(item)}</td>
         </tr>`).join("")}
-    </tbody>
+      </tbody>
   </table></div>`;
+  applyMutationControlState();
 }
 
 function renderFaultRemediationButtons(item) {
   const buttons = [];
   if (["failed", "exhausted", "poison"].includes(item.task_status)) {
     buttons.push(
-      `<button class="secondary" data-fault-action="retry" data-failure-id="${item.failure_id}">Retry Task</button>`,
+      `<button class="secondary" data-mutation-control="true" data-fault-action="retry" data-failure-id="${item.failure_id}">Retry Task</button>`,
     );
   }
   if (["blocked", "escalation_pending"].includes(item.goal_state)) {
     buttons.push(
-      `<button class="secondary" data-fault-action="requeue_goal" data-failure-id="${item.failure_id}">Requeue Goal</button>`,
+      `<button class="secondary" data-mutation-control="true" data-fault-action="requeue_goal" data-failure-id="${item.failure_id}">Requeue Goal</button>`,
     );
   }
   if (item.failure_status !== "resolved") {
     buttons.push(
-      `<button class="secondary" data-fault-action="resolve" data-failure-id="${item.failure_id}">Resolve</button>`,
+      `<button class="secondary" data-mutation-control="true" data-fault-action="resolve" data-failure-id="${item.failure_id}">Resolve</button>`,
     );
   }
   if (!buttons.length) {
@@ -612,8 +839,21 @@ function renderTopKpis(health) {
   const backpressure = health.backpressure || {};
   const faults = health.faults || {};
   const audit = health.audit || {};
+  const runtimeState = viewCache.runtimeState;
   const throttled = Boolean(backpressure.is_throttled);
   const deadLetterTasks = faults.dead_letter_tasks || 0;
+  const readinessLabel = runtimeState
+    ? runtimeState.readinessReady ? "READY" : "NOT READY"
+    : "LOADING";
+  const readinessClass = runtimeState
+    ? runtimeState.readinessReady ? "good" : "alert"
+    : "";
+  const sloLabel = runtimeState
+    ? String(runtimeState.sloStatus || "unknown").toUpperCase()
+    : "UNKNOWN";
+  const sloClass = runtimeState
+    ? runtimeState.sloStatus === "ok" ? "good" : runtimeState.sloStatus === "unknown" ? "" : "alert"
+    : "";
 
   target.innerHTML = `
     <div class="kpi-chip">
@@ -632,25 +872,44 @@ function renderTopKpis(health) {
       <span class="meta">Audit 24h</span>
       <strong>${audit.entries_last_24h || 0}</strong>
     </div>
+    <div class="kpi-chip ${readinessClass}">
+      <span class="meta">Readiness</span>
+      <strong>${readinessLabel}</strong>
+    </div>
+    <div class="kpi-chip ${sloClass}">
+      <span class="meta">SLO</span>
+      <strong>${sloLabel}</strong>
+    </div>
   `;
 }
 
-function renderHealth(health) {
+function renderHealth(health, readiness, slo) {
+  viewCache.runtimeState = deriveRuntimeState(health, readiness, slo);
+  renderRuntimeStateRail(viewCache.runtimeState);
   renderTopKpis(health);
   defaultConsumerId = health.default_consumer_id || defaultConsumerId;
   const consumerInput = document.getElementById("consumer-id");
   if (consumerInput && !consumerInput.value.trim()) {
     consumerInput.value = defaultConsumerId;
   }
+  const totals = health.totals || {};
   const backpressure = health.backpressure || {};
   const retention = health.retention || {};
   const metrics = health.metrics || {};
   const audit = health.audit || {};
   const faults = health.faults || {};
+  const consumerStats = Array.isArray(health.consumer_stats) ? health.consumer_stats : [];
+  const stuckEvents = Array.isArray(health.stuck_events) ? health.stuck_events : [];
+  const invariantViolations = Array.isArray(health.invariant_violations) ? health.invariant_violations : [];
+  const sloAlerts = Array.isArray(slo?.alerts) ? slo.alerts : [];
   document.getElementById("health-cards").innerHTML = `
-    <div class="card"><span class="meta">Events</span><strong>${health.totals.events}</strong></div>
-    <div class="card"><span class="meta">Goals</span><strong>${health.totals.goals}</strong></div>
-    <div class="card"><span class="meta">Tasks</span><strong>${health.totals.tasks}</strong></div>
+    <div class="card"><span class="meta">Events</span><strong>${totals.events || 0}</strong></div>
+    <div class="card"><span class="meta">Goals</span><strong>${totals.goals || 0}</strong></div>
+    <div class="card"><span class="meta">Tasks</span><strong>${totals.tasks || 0}</strong></div>
+    <div class="card"><span class="meta">Readiness</span><strong>${viewCache.runtimeState.readinessReady ? "READY" : "NOT READY"}</strong></div>
+    <div class="card"><span class="meta">SLO Status</span><strong>${String(viewCache.runtimeState.sloStatus).toUpperCase()}</strong></div>
+    <div class="card"><span class="meta">SLO Alerts</span><strong>${sloAlerts.length}</strong></div>
+    <div class="card"><span class="meta">Safe Mode</span><strong>${viewCache.runtimeState.safeModeActive ? "ON" : "OFF"}</strong></div>
     <div class="card"><span class="meta">Retry Budget</span><strong>${health.retry_budget_per_cycle}</strong></div>
     <div class="card"><span class="meta">Pending Events</span><strong>${backpressure.pending_events || 0}</strong></div>
     <div class="card"><span class="meta">Backpressure</span><strong>${backpressure.is_throttled ? "ON" : "OFF"}</strong></div>
@@ -676,20 +935,20 @@ function renderHealth(health) {
       }</tbody></table>`
     : `<div class="meta">No metrics captured yet.</div>`;
 
-  document.getElementById("consumer-stats").innerHTML = health.consumer_stats.length
+  document.getElementById("consumer-stats").innerHTML = consumerStats.length
     ? `<table><thead><tr><th>Consumer</th><th>Status</th><th>Count</th></tr></thead><tbody>${
-        health.consumer_stats.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.status}</td><td>${item.count}</td></tr>`).join("")
+        consumerStats.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.status}</td><td>${item.count}</td></tr>`).join("")
       }</tbody></table>`
     : `<div class="meta">No consumer activity yet.</div>`;
 
-  document.getElementById("stuck-events").innerHTML = health.stuck_events.length
+  document.getElementById("stuck-events").innerHTML = stuckEvents.length
     ? `<table><thead><tr><th>Consumer</th><th>Event</th><th>Started</th></tr></thead><tbody>${
-        health.stuck_events.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.event_type} (${item.event_id})</td><td>${item.processing_started_at}</td></tr>`).join("")
+        stuckEvents.map((item) => `<tr><td>${item.consumer_id}</td><td>${item.event_type} (${item.event_id})</td><td>${item.processing_started_at}</td></tr>`).join("")
       }</tbody></table>`
     : `<div class="meta">No stuck events.</div>`;
 
-  document.getElementById("invariant-violations").innerHTML = health.invariant_violations.length
-    ? `<ul>${health.invariant_violations.map((item) => `<li>${item}</li>`).join("")}</ul>`
+  document.getElementById("invariant-violations").innerHTML = invariantViolations.length
+    ? `<ul>${invariantViolations.map((item) => `<li>${item}</li>`).join("")}</ul>`
     : `<div class="meta">No invariant violations detected.</div>`;
 
   const topFaults = faults.top_error_hashes || [];
@@ -698,6 +957,8 @@ function renderHealth(health) {
         topFaults.map((item) => `<tr><td>${item.failure_type}</td><td>${item.error_hash || "-"}</td><td>${item.count}</td></tr>`).join("")
       }</tbody></table>`
     : `<div class="meta">No dead-letter faults in snapshot.</div>`;
+  applyMutationControlState();
+  updateToolbarStatus();
 }
 
 function renderQueue(goals) {
@@ -794,7 +1055,7 @@ function renderWorkflows(workflows, runs) {
               </td>
               <td>
                 <div class="actions">
-                  <button type="button" class="secondary" data-workflow-start="${item.workflow_id}" ${item.is_enabled ? "" : "disabled"}>Start</button>
+                  <button type="button" class="secondary" data-mutation-control="true" data-workflow-start="${item.workflow_id}" ${item.is_enabled ? "" : "disabled"}>Start</button>
                 </div>
               </td>
             </tr>`).join("")}
@@ -841,13 +1102,14 @@ function renderWorkflows(workflows, runs) {
               <td><pre>${JSON.stringify(run.result_payload || {}, null, 2)}</pre></td>
               <td>
                 ${["queued", "running"].includes(run.status)
-                  ? `<button type="button" class="secondary" data-workflow-cancel="${run.run_id}">Cancel</button>`
+                  ? `<button type="button" class="secondary" data-mutation-control="true" data-mutation-exempt="true" data-workflow-cancel="${run.run_id}">Cancel</button>`
                   : `<span class="meta">-</span>`}
               </td>
             </tr>`).join("")}
         </tbody>
       </table></div>`
     : `<div class="meta">${filteredEmptyMessage("No workflow runs yet.")}</div>`;
+  applyMutationControlState();
 }
 
 async function refreshGoals() {
@@ -968,9 +1230,15 @@ async function refreshFlowTrace() {
 }
 
 async function refreshHealth() {
-  const health = await api("/system/health");
+  const [health, readiness, slo] = await Promise.all([
+    api("/system/health"),
+    api("/system/readiness"),
+    api("/system/slo"),
+  ]);
   viewCache.health = health;
-  renderHealth(viewCache.health);
+  viewCache.readiness = readiness;
+  viewCache.slo = slo;
+  renderHealth(viewCache.health, viewCache.readiness, viewCache.slo);
 }
 
 async function refreshAll() {
@@ -1012,6 +1280,9 @@ async function runOperatorAction(action) {
   const batchSize = Number(document.getElementById("consumer-batch-size").value || 50);
   let result;
   showError("system-feedback", null);
+  if (action !== "diagnostics") {
+    ensureMutationAllowed(`Operator action "${action}"`);
+  }
   if (action === "age") {
     result = await api("/system/scheduler/age", { method: "POST" });
     document.getElementById("system-feedback").textContent = `Aged ${result.aged_count} queue entries.`;
@@ -1065,6 +1336,7 @@ async function runWorkflowStart(workflowId) {
   if (!workflowId) {
     throw new Error("Select a workflow first.");
   }
+  ensureMutationAllowed(`Workflow start ${workflowId}`);
   const requestedBy = document.getElementById("workflow-requested-by").value.trim() || "operator";
   const idempotencyKey = document.getElementById("workflow-idempotency-key").value.trim();
   const payloadText = document.getElementById("workflow-payload").value;
@@ -1093,6 +1365,7 @@ async function runWorkflowStart(workflowId) {
 }
 
 async function runWorkflowReaper() {
+  ensureMutationAllowed("Workflow reaper");
   const response = await api("/workflows/runs/reap", { method: "POST" });
   document.getElementById("system-feedback").textContent = (
     `Workflow reaper marked ${response.reaped_count} stale runs as timed_out.`
@@ -1101,6 +1374,7 @@ async function runWorkflowReaper() {
 }
 
 async function runWorkflowCancel(runId) {
+  ensureMutationAllowed(`Workflow cancel ${runId}`, { allowWhenBlocked: true });
   const response = await api(`/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
     method: "POST",
     body: JSON.stringify({
@@ -1116,6 +1390,7 @@ async function runWorkflowCancel(runId) {
 }
 
 async function runFaultAction(action, failureId) {
+  ensureMutationAllowed(`Fault remediation ${action}`);
   const reasonInput = document.getElementById("fault-remediation-reason");
   const dryRunInput = document.getElementById("fault-remediation-dry-run");
   const reason = (reasonInput?.value || "").trim();
@@ -1161,6 +1436,7 @@ async function runFaultAction(action, failureId) {
 }
 
 async function runFaultBulkResolve() {
+  ensureMutationAllowed("Fault bulk resolve");
   const reasonInput = document.getElementById("fault-remediation-reason");
   const dryRunInput = document.getElementById("fault-remediation-dry-run");
   const limitInput = document.getElementById("fault-bulk-limit");
@@ -1206,6 +1482,7 @@ document.getElementById("goal-form").addEventListener("submit", async (event) =>
   const formElement = event.currentTarget;
   const form = new FormData(formElement);
   try {
+    ensureMutationAllowed("Goal creation");
     const goal = await api("/goals", {
       method: "POST",
       body: JSON.stringify({
@@ -1235,6 +1512,7 @@ document.getElementById("task-form").addEventListener("submit", async (event) =>
   const form = new FormData(formElement);
   const goalId = String(form.get("goal_id") || "").trim();
   try {
+    ensureMutationAllowed("Task creation");
     await api("/tasks", {
       method: "POST",
       body: JSON.stringify({
@@ -1425,6 +1703,7 @@ document.addEventListener("click", async (event) => {
     }
 
     if (goalAction && goalId) {
+      ensureMutationAllowed(`Goal action ${goalAction}`);
       await api(`/goals/${goalId}/${goalAction}`, { method: "POST" });
       selectedGoalId = goalId;
       document.getElementById("task-goal-id").value = goalId;
@@ -1435,6 +1714,7 @@ document.addEventListener("click", async (event) => {
     }
 
     if (taskAction && taskId) {
+      ensureMutationAllowed(`Task action ${taskAction}`);
       if (taskAction === "success") {
         await api(`/tasks/${taskId}/success`, { method: "POST" });
       } else {

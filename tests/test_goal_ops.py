@@ -4970,3 +4970,91 @@ def test_143_failure_budget_dashboard_fails_when_any_budget_report_is_red():
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_144_dashboard_template_contains_runtime_rail_contract(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="runtime-state-rail"' in html
+    assert 'id="runtime-state-summary"' in html
+    assert 'id="runtime-state-alerts"' in html
+    assert 'id="runtime-state-recommendations"' in html
+    assert 'data-mutation-control="true"' in html
+
+
+def test_145_safe_mode_ux_degradation_check_reports_success():
+    workspace = _local_test_dir("pytest-safe-mode-ux-degradation-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "safe-mode-ux-degradation-check-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "safe-mode-ux-degradation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_template_tokens"] == []
+    assert payload["checks"]["missing_app_js_tokens"] == []
+    assert payload["checks"]["missing_runbook_tokens"] == []
+    assert payload["checks"]["release_gate_has_strict_flag"] is True
+    assert payload["checks"]["ci_has_strict_flag"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_146_safe_mode_ux_degradation_check_fails_when_runtime_rail_tokens_missing():
+    workspace = _local_test_dir("pytest-safe-mode-ux-degradation-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "safe-mode-ux-degradation-check-report.json"
+    broken_template = workspace / "broken-index.html"
+    broken_template.write_text("<html><body><h1>Broken dashboard</h1></body></html>", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "safe-mode-ux-degradation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--template-file",
+        str(broken_template.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[safe-mode-ux-degradation-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Safe-mode UX degradation contract failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert len(payload["checks"]["missing_template_tokens"]) >= 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
