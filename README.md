@@ -411,7 +411,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + canary guardrails check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 release evidence bundle + P0 closure go/no-go report):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + canary guardrails check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback hard-trigger drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 release evidence bundle + P0 closure go/no-go report):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -460,11 +460,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
 ```
 
-Standalone auto-rollback policy check (live service):
+Standalone auto-rollback hard-trigger check (sustained critical OR burn-rate spike OR readiness regression):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -ReadinessRegressionWindowSeconds 120 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason auto -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Standalone security config hardening check (production profile policy):

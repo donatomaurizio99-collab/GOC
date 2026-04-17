@@ -1734,6 +1734,7 @@ def test_76_auto_rollback_policy_triggers_and_executes_rollback():
     payload = json.loads(output_lines[-1])
     assert payload["success"] is True
     assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "critical_window"
     assert payload["rollback"]["attempted"] is True
     assert payload["rollback"]["executed"] is True
     assert payload["decision"]["recommended_action"] == "rollback_executed"
@@ -4569,6 +4570,136 @@ def test_137_canary_guardrails_check_fails_when_expected_promote_but_halt_occurs
         for item in payload.get("failed_criteria", [])
         if isinstance(item, dict)
     )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_138_auto_rollback_policy_triggers_on_error_budget_burn_rate():
+    workspace = _local_test_dir("pytest-auto-rollback-hard-trigger-burn-rate").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    output_file = workspace / "auto-rollback-burn-rate-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "auto-rollback-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "ok,ok,ok,ok",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--mock-readiness-values",
+        "true,true,true,true",
+        "--critical-window-seconds",
+        "4",
+        "--readiness-regression-window-seconds",
+        "2",
+        "--max-error-budget-burn-rate-percent",
+        "2.0",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+        "--expected-trigger-reason",
+        "error_budget_burn_rate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "error_budget_burn_rate"
+    assert payload["decision"]["expected_reason_matched"] is True
+    assert payload["rollback"]["executed"] is True
+    assert payload["decision"]["recommended_action"] == "rollback_executed"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_139_auto_rollback_policy_triggers_on_readiness_regression():
+    workspace = _local_test_dir("pytest-auto-rollback-hard-trigger-readiness").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    output_file = workspace / "auto-rollback-readiness-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "auto-rollback-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "ok,degraded,degraded,degraded",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,0.9,0.9",
+        "--mock-readiness-values",
+        "true,false,false,false",
+        "--critical-window-seconds",
+        "4",
+        "--readiness-regression-window-seconds",
+        "1",
+        "--max-error-budget-burn-rate-percent",
+        "2.0",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+        "--expected-trigger-reason",
+        "readiness_regression",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "readiness_regression"
+    assert payload["decision"]["expected_reason_matched"] is True
+    assert payload["rollback"]["executed"] is True
+    assert payload["decision"]["recommended_action"] == "rollback_executed"
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

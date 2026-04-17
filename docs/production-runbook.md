@@ -26,7 +26,7 @@ This gate covers:
 - canary guardrails check (staged ring exposure with deterministic halt/freeze policy and promotion-block validation)
 - RTO/RPO assertion suite (restore duration budgets plus bounded data-loss budget assertions)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
-- auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
+- auto-rollback hard-trigger drill (sustained `critical`, burn-rate spike, or readiness regression triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
 - recovery hard-abort drill (kill running worker process, restart, and verify no hanging `running` runs)
 - recovery idempotence drill (repeated restarts keep startup recovery one-shot/idempotent for interrupted runs)
@@ -72,10 +72,10 @@ Manual upgrade/downgrade compatibility drill invocation:
 .\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
 ```
 
-Manual auto-rollback policy invocation (live endpoint, stable ring):
+Manual auto-rollback hard-trigger invocation (live endpoint, stable ring):
 
 ```powershell
-.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -ReadinessRegressionWindowSeconds 120 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason auto -PollIntervalSeconds 30 -MaxObservationSeconds 900
 ```
 
 Manual security config hardening check invocation:
@@ -464,9 +464,9 @@ Actions:
    ```powershell
    .\scripts\run-release-freeze-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -NonOkWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
    ```
-4. If status remains `critical`, enforce sustained-window rollback policy check:
+4. If status remains `critical` or readiness regresses under elevated burn-rate, enforce hard-trigger rollback policy check:
    ```powershell
-   .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+   .\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -ReadinessRegressionWindowSeconds 120 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason auto -PollIntervalSeconds 30 -MaxObservationSeconds 900
    ```
 5. Export diagnostics snapshot and attach to incident ticket.
 
@@ -1038,6 +1038,41 @@ Actions:
    .\scripts\run-canary-guardrails-check.ps1 -PolicyFile "docs\canary-guardrails-policy.json" -ExpectedDecision promote -MockSloStatuses "ok,ok,ok,ok" -MockErrorBudgetBurnRates "0.4,0.5,0.6,0.7"
    ```
 4. Only clear freeze and continue promotion after a green guardrail report is attached to incident/change record.
+
+### 3.37 Auto-rollback hard triggers
+
+Symptoms:
+- incident conditions escalate beyond release-freeze scope and require immediate stable rollback
+- operators need deterministic policy evidence for rollback trigger reason
+
+Actions:
+1. Execute hard-trigger rollback drill:
+   ```powershell
+   .\scripts\run-auto-rollback-policy.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -MockSloStatuses "ok,ok,ok,ok" -MockErrorBudgetBurnRates "0.5,0.8,2.5,2.5" -MockReadinessValues "true,true,true,true" -CriticalWindowSeconds 4 -ReadinessRegressionWindowSeconds 2 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason error_budget_burn_rate -PollIntervalSeconds 1 -MaxObservationSeconds 8 -SeedPreviousVersion "0.0.1" -SeedIncidentVersion "0.0.2"
+   ```
+2. Validate drill report fields:
+   - `observation.triggered = true`
+   - `observation.trigger_reason` is one of `critical_window`, `error_budget_burn_rate`, `readiness_regression`
+   - `decision.expected_reason_matched = true`
+3. Confirm rollback execution succeeded (`rollback.executed = true`) and stable ring swapped to previous version.
+4. Attach report JSON to incident evidence before promotion resumes.
+
+### 3.38 Readiness-regression rollback guard
+
+Symptoms:
+- readiness flips to `ready=false` while SLO remains non-critical or ambiguous
+- uncertainty whether rollback policy reacts quickly enough to sustained readiness regression
+
+Actions:
+1. Run readiness-focused rollback trigger check:
+   ```powershell
+   .\scripts\run-auto-rollback-policy.ps1 -ManifestPath ".\artifacts\desktop-rings.json" -MockSloStatuses "ok,degraded,degraded,degraded" -MockErrorBudgetBurnRates "0.5,0.8,0.9,0.9" -MockReadinessValues "true,false,false,false" -CriticalWindowSeconds 4 -ReadinessRegressionWindowSeconds 1 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason readiness_regression -PollIntervalSeconds 1 -MaxObservationSeconds 8 -SeedPreviousVersion "0.0.1" -SeedIncidentVersion "0.0.2"
+   ```
+2. Verify hard-trigger precedence in report:
+   - `observation.trigger_reason = readiness_regression`
+   - `decision.recommended_action = rollback_executed` (or `manual_rollback_required` in dry-run mode)
+3. If expected trigger reason is not matched, keep release blocked and escalate policy defect immediately.
+4. Resume rollout only after readiness is stable and a fresh rollback-policy drill passes with expected reason.
 
 ## 4. Operational Defaults
 

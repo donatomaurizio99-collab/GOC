@@ -396,9 +396,10 @@ if (-not $SkipReleaseFreezePolicyDrill) {
 }
 
 if (-not $SkipAutoRollbackPolicyDrill) {
-    Invoke-GateStep -Name "Auto rollback policy drill (sustained critical => ring rollback)" -Action {
+    Invoke-GateStep -Name "Auto rollback hard-trigger drill (readiness regression + burn-rate + sustained critical => ring rollback)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\auto-rollback-policy-drills"
         $manifestPath = Join-Path $workspace "desktop-rings.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\auto-rollback-policy-release-gate.json"
         New-Item -ItemType Directory -Force -Path $workspace | Out-Null
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
@@ -407,12 +408,18 @@ if (-not $SkipAutoRollbackPolicyDrill) {
                 "--label", "release-gate",
                 "--manifest-path", $manifestPath,
                 "--ring", "stable",
-                "--mock-slo-statuses", "critical,critical,critical,critical",
-                "--critical-window-seconds", "2",
+                "--mock-slo-statuses", "ok,degraded,degraded,degraded",
+                "--mock-error-budget-burn-rates", "0.5,0.8,0.9,0.9",
+                "--mock-readiness-values", "true,false,false,false",
+                "--critical-window-seconds", "4",
+                "--readiness-regression-window-seconds", "1",
                 "--poll-interval-seconds", "1",
                 "--max-observation-seconds", "8",
+                "--max-error-budget-burn-rate-percent", "2.0",
                 "--seed-previous-version", "0.0.1",
-                "--seed-incident-version", "0.0.2"
+                "--seed-incident-version", "0.0.2",
+                "--expected-trigger-reason", "readiness_regression",
+                "--output-file", $reportPath
             )
         } catch {
             if ($StrictAutoRollbackPolicyDrill) {
