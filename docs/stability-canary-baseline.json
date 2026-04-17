@@ -31,6 +31,9 @@
     "a11y_test_harness": {
       "baseline_duration_seconds": 3.0
     },
+    "p0_report_schema_contract": {
+      "baseline_duration_seconds": 3.0
+    },
     "long_soak_budget": {
       "baseline_duration_seconds": 140.0,
       "max_http_429_rate_percent": 1.0,

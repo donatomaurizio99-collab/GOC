@@ -60,6 +60,18 @@ def run_canary(
 ) -> dict[str, Any]:
     baseline = _load_json_file(baseline_file)
     max_duration_regression_percent = float(baseline.get("max_duration_regression_percent", 25.0))
+    safe_mode_report_file = (
+        PROJECT_ROOT / ".tmp" / "stability-canary-safe-mode-ux" / "safe-mode-ux-degradation-report.json"
+    )
+    a11y_report_file = PROJECT_ROOT / ".tmp" / "stability-canary-a11y" / "a11y-test-harness-report.json"
+    p0_schema_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-schema"
+    p0_schema_report_file = p0_schema_artifacts_dir / "p0-report-schema-contract-report.json"
+    p0_schema_required_files = ",".join(
+        [
+            str(safe_mode_report_file),
+            str(a11y_report_file),
+        ]
+    )
 
     drill_commands: dict[str, list[str]] = {
         "release_freeze_policy": [
@@ -170,7 +182,7 @@ def run_canary(
             "--label",
             "stability-canary",
             "--output-file",
-            str(PROJECT_ROOT / ".tmp" / "stability-canary-safe-mode-ux" / "safe-mode-ux-degradation-report.json"),
+            str(safe_mode_report_file),
         ],
         "a11y_test_harness": [
             sys.executable,
@@ -178,7 +190,27 @@ def run_canary(
             "--label",
             "stability-canary",
             "--output-file",
-            str(PROJECT_ROOT / ".tmp" / "stability-canary-a11y" / "a11y-test-harness-report.json"),
+            str(a11y_report_file),
+        ],
+        "p0_report_schema_contract": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "p0-report-schema-contract-check.py"),
+            "--label",
+            "stability-canary",
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--artifacts-dir",
+            str(p0_schema_artifacts_dir),
+            "--include-glob",
+            "*-report.json",
+            "--required-files",
+            p0_schema_required_files,
+            "--required-label",
+            "stability-canary",
+            "--required-top-level-keys",
+            "label,success",
+            "--output-file",
+            str(p0_schema_report_file),
         ],
         "long_soak_budget": [
             sys.executable,
