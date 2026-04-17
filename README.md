@@ -1,4 +1,4 @@
-# Goal Ops Console
+﻿# Goal Ops Console
 
 Supervised MVP for the Goal Ops Console.
 
@@ -411,13 +411,13 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + canary guardrails check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback hard-trigger drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + disaster-recovery rehearsal pack + failure budget dashboard + safe-mode UX degradation check + A11y test harness check + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 report schema contract check + P0 release evidence bundle + P0 closure go/no-go report + release-gate evidence freshness check + release-gate evidence hash manifest check + release-gate step timing schema check + release-gate performance history check + release-gate performance budget check + release-gate stability final readiness check):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + canary guardrails check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback hard-trigger drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + disaster-recovery rehearsal pack + failure budget dashboard + safe-mode UX degradation check + A11y test harness check + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 report schema contract check + P0 release evidence bundle + P0 closure go/no-go report + release-gate evidence freshness check + release-gate evidence hash manifest check + release-gate step timing schema check + release-gate performance history check + release-gate performance budget check + release-gate stability final readiness check + release-gate staging soak readiness check + release-gate RC canary rollout check):
 
 The gate starts with a preflight cleanup that removes stale `artifacts\*-release-gate.json` files and prior release-gate evidence directories so each run produces a deterministic evidence set.
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck
 ```
 
 Standalone backup/restore drill:
@@ -756,6 +756,34 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-release-gate-stability-final-readiness.ps1
 ```
 
+Standalone master burn-in window check (3-5 master runs + flake cleanup signal):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-gate-master-burnin-window-check.ps1 -MinConsecutive 3 -TargetConsecutive 5
+```
+
+Standalone release-gate performance policy calibration check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-gate-performance-policy-calibrate.ps1 -StepTimingsGlob "artifacts/release-gate-step-timings*.json" -MinSamples 3 -WriteUpdates
+```
+
+Standalone release-gate staging soak readiness check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-gate-staging-soak-readiness-check.ps1
+```
+
+Standalone release-gate RC canary rollout check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-gate-rc-canary-rollout-check.ps1 -PolicyFile "docs\\release-candidate-rollout-policy.json" -CandidateVersion "0.0.2-rc1"
+```
+
 Standalone canary determinism + flake intelligence check (repeat Stage-D UX/A11y probes with quarantine-aware flake budget):
 
 ```powershell
@@ -815,7 +843,7 @@ GitHub Actions now runs `pytest` automatically for:
 Workflow file:
 [ci.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/ci.yml)
 
-Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report), Stage-L/M evidence artifacts (`release-gate-evidence-freshness-release-gate.json`, `release-gate-evidence-hash-manifest-release-gate.json`, `release-gate-evidence-manifest-release-gate.json`), Stage-N/O timing-history artifacts (`release-gate-step-timing-schema-release-gate.json`, `release-gate-performance-history-release-gate.json`), plus Stage-K/P artifacts (`release-gate-step-timings-release-gate.json`, `release-gate-performance-budget-release-gate.json`, `release-gate-stability-final-readiness-release-gate.json`).
+Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report), Stage-L/M evidence artifacts (`release-gate-evidence-freshness-release-gate.json`, `release-gate-evidence-hash-manifest-release-gate.json`, `release-gate-evidence-manifest-release-gate.json`), Stage-N/O timing-history artifacts (`release-gate-step-timing-schema-release-gate.json`, `release-gate-performance-history-release-gate.json`), Stage-K/P artifacts (`release-gate-step-timings-release-gate.json`, `release-gate-performance-budget-release-gate.json`, `release-gate-stability-final-readiness-release-gate.json`), and Stage-Q/R readiness artifacts (`release-gate-staging-soak-readiness-release-gate.json`, `release-gate-rc-canary-rollout-release-gate.json`).
 
 Desktop workflow file:
 [desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)
@@ -825,6 +853,9 @@ Nightly stability canary workflow:
 
 Nightly burn-in monitor workflow:
 [p0-burnin-monitor.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/p0-burnin-monitor.yml)
+
+Weekly master release-gate burn-in workflow:
+[master-release-gate-burnin.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-release-gate-burnin.yml)
 
 Nightly disaster-recovery rehearsal workflow:
 [disaster-recovery-rehearsal.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/disaster-recovery-rehearsal.yml)
@@ -1080,6 +1111,14 @@ If a value is rejected:
 - [run-release-gate-performance-budget-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-performance-budget-check.ps1)
 - [release-gate-stability-final-readiness.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-stability-final-readiness.py)
 - [run-release-gate-stability-final-readiness.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-stability-final-readiness.ps1)
+- [release-gate-master-burnin-window-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-master-burnin-window-check.py)
+- [run-release-gate-master-burnin-window-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-master-burnin-window-check.ps1)
+- [release-gate-performance-policy-calibrate.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-performance-policy-calibrate.py)
+- [run-release-gate-performance-policy-calibrate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-performance-policy-calibrate.ps1)
+- [release-gate-staging-soak-readiness-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-staging-soak-readiness-check.py)
+- [run-release-gate-staging-soak-readiness-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-staging-soak-readiness-check.ps1)
+- [release-gate-rc-canary-rollout-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-rc-canary-rollout-check.py)
+- [run-release-gate-rc-canary-rollout-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-rc-canary-rollout-check.ps1)
 - [p0-burnin-consecutive-green.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-burnin-consecutive-green.py)
 - [run-p0-burnin-consecutive-green.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-burnin-consecutive-green.ps1)
 - [p0-runbook-contract-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-runbook-contract-check.py)
@@ -1108,8 +1147,10 @@ If a value is rejected:
 - [canary-guardrails-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/canary-guardrails-check.py)
 - [run-canary-guardrails-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-canary-guardrails-check.ps1)
 - [canary-guardrails-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/canary-guardrails-policy.json)
+- [release-candidate-rollout-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/release-candidate-rollout-policy.json)
 - [rto-rpo-assertion-suite.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/rto-rpo-assertion-suite.py)
 - [run-rto-rpo-assertion-suite.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-rto-rpo-assertion-suite.ps1)
 - [rto-rpo-assertion-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/rto-rpo-assertion-policy.json)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)
+

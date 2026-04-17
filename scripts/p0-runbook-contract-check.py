@@ -34,6 +34,10 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-release-gate-step-timing-schema-check.ps1",
     "run-release-gate-performance-history-check.ps1",
     "run-release-gate-stability-final-readiness.ps1",
+    "run-release-gate-master-burnin-window-check.ps1",
+    "run-release-gate-performance-policy-calibrate.ps1",
+    "run-release-gate-staging-soak-readiness-check.ps1",
+    "run-release-gate-rc-canary-rollout-check.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -70,6 +74,9 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "release-gate-performance-history-baseline.json",
     "release-gate-evidence-manifest-release-gate.json",
     "Release-gate stability final readiness check (Stage L-P consolidated go/no-go)",
+    "Release-gate staging soak readiness check (Stage Q incident/restore gate)",
+    "Release-gate RC canary rollout check (Stage R rollout policy gate)",
+    "release-candidate-rollout-policy.json",
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
@@ -84,6 +91,8 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/release-gate-performance-history-release-gate.json",
     "artifacts/release-gate-performance-budget-release-gate.json",
     "artifacts/release-gate-stability-final-readiness-release-gate.json",
+    "artifacts/release-gate-staging-soak-readiness-release-gate.json",
+    "artifacts/release-gate-rc-canary-rollout-release-gate.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
@@ -96,6 +105,11 @@ DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.steps_over_budget=0",
     "metrics.regression_budget_exceeded=0",
     "metrics.required_reports_non_green=0",
+    "metrics.staging_reports_non_green=0",
+    "metrics.incident_rollback_proof_failed=0",
+    "metrics.restore_proof_failed=0",
+    "metrics.rollout_required_reports_non_green=0",
+    "metrics.rollout_policy_invalid=0",
 ]
 
 

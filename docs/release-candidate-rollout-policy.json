@@ -1,0 +1,35 @@
+﻿{
+  "version": "1.0.0",
+  "rollout_stages": [
+    {
+      "name": "canary-10",
+      "traffic_percent": 10,
+      "min_observation_minutes": 30
+    },
+    {
+      "name": "canary-25",
+      "traffic_percent": 25,
+      "min_observation_minutes": 30
+    },
+    {
+      "name": "canary-50",
+      "traffic_percent": 50,
+      "min_observation_minutes": 45
+    },
+    {
+      "name": "full-100",
+      "traffic_percent": 100,
+      "min_observation_minutes": 60
+    }
+  ],
+  "halt_conditions": [
+    "slo_status_critical",
+    "error_budget_burn_rate_above_threshold",
+    "readiness_regression_sustained"
+  ],
+  "backout": {
+    "auto_rollback_required": true,
+    "release_freeze_required": true,
+    "runbook_anchor": "docs/production-runbook.md#337-auto-rollback-hard-triggers"
+  }
+}

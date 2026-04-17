@@ -103,6 +103,7 @@ def _evaluate_run(
     run: dict[str, Any],
     required_jobs: list[str],
     jobs: list[dict[str, Any]],
+    ignore_run_conclusion: bool,
 ) -> dict[str, Any]:
     run_id = int(run.get("id") or 0)
     run_name = str(run.get("name") or "")
@@ -127,7 +128,7 @@ def _evaluate_run(
 
     is_green = (
         run_status == "completed"
-        and run_conclusion == "success"
+        and (bool(ignore_run_conclusion) or run_conclusion == "success")
         and not missing_jobs
         and not failing_jobs
     )
@@ -158,6 +159,7 @@ def run_burnin_check(
     runs_file: Path | None,
     jobs_dir: Path | None,
     allow_not_met: bool,
+    ignore_run_conclusion: bool,
 ) -> dict[str, Any]:
     _expect(required_consecutive > 0, "required_consecutive must be > 0.")
     _expect(per_page > 0, "per_page must be > 0.")
@@ -189,7 +191,12 @@ def run_burnin_check(
             jobs = _load_run_jobs_from_dir(jobs_dir=jobs_dir, run_id=run_id)
         else:
             jobs = _fetch_run_jobs_from_github(repo=repo, run_id=run_id)
-        evaluation = _evaluate_run(run=run, required_jobs=required_jobs, jobs=jobs)
+        evaluation = _evaluate_run(
+            run=run,
+            required_jobs=required_jobs,
+            jobs=jobs,
+            ignore_run_conclusion=bool(ignore_run_conclusion),
+        )
         evaluations.append(evaluation)
         if evaluation["is_green"]:
             consecutive_green += 1
@@ -211,6 +218,7 @@ def run_burnin_check(
             "required_consecutive": int(required_consecutive),
             "per_page": int(per_page),
             "allow_not_met": bool(allow_not_met),
+            "ignore_run_conclusion": bool(ignore_run_conclusion),
             "fixture_runs_file": str(runs_file) if runs_file is not None else None,
             "fixture_jobs_dir": str(jobs_dir) if jobs_dir is not None else None,
         },
@@ -247,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jobs-dir")
     parser.add_argument("--output-file")
     parser.add_argument("--allow-not-met", action="store_true")
+    parser.add_argument("--ignore-run-conclusion", action="store_true")
     args = parser.parse_args(argv)
 
     if int(args.required_consecutive) <= 0:
@@ -272,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             runs_file=runs_file,
             jobs_dir=jobs_dir,
             allow_not_met=bool(args.allow_not_met),
+            ignore_run_conclusion=bool(args.ignore_run_conclusion),
         )
     except Exception as exc:
         print(f"[p0-burnin-consecutive-green] ERROR: {exc}", file=sys.stderr)

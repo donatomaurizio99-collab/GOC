@@ -1,0 +1,87 @@
+﻿name: Master Release Gate Burn-In
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      target_consecutive:
+        description: "Target number of consecutive green CI runs"
+        required: false
+        default: "5"
+      min_consecutive:
+        description: "Minimum acceptable consecutive green CI runs"
+        required: false
+        default: "3"
+      per_page:
+        description: "Number of recent workflow runs to inspect"
+        required: false
+        default: "60"
+      allow_not_ready:
+        description: "Do not fail workflow if burn-in window is not yet reached"
+        required: false
+        default: "false"
+
+jobs:
+  burnin-window:
+    name: Master CI Burn-In Window Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run P0 burn-in consecutive-green probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_CONSECUTIVE: ${{ github.event.inputs.target_consecutive || '5' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '60' }}
+          ALLOW_NOT_READY: ${{ github.event.inputs.allow_not_ready || 'false' }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$ALLOW_NOT_READY" = "true" ]; then
+            EXTRA_ARGS="--allow-not-met"
+          fi
+          python ./scripts/p0-burnin-consecutive-green.py \
+            --label github-actions-master-burnin \
+            --repo "${{ github.repository }}" \
+            --branch master \
+            --workflow-name "CI" \
+            --required-jobs "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)" \
+            --required-consecutive "$TARGET_CONSECUTIVE" \
+            --per-page "$PER_PAGE" \
+            --output-file ./artifacts/p0-burnin-consecutive-green-release-gate.json \
+            $EXTRA_ARGS
+
+      - name: Evaluate master burn-in window and flake cleanup signal
+        env:
+          MIN_CONSECUTIVE: ${{ github.event.inputs.min_consecutive || '3' }}
+          TARGET_CONSECUTIVE: ${{ github.event.inputs.target_consecutive || '5' }}
+          ALLOW_NOT_READY: ${{ github.event.inputs.allow_not_ready || 'false' }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$ALLOW_NOT_READY" = "true" ]; then
+            EXTRA_ARGS="--allow-target-not-met --allow-flaky-jobs"
+          fi
+          python ./scripts/release-gate-master-burnin-window-check.py \
+            --label github-actions-master-burnin-window \
+            --burnin-report-file ./artifacts/p0-burnin-consecutive-green-release-gate.json \
+            --min-consecutive "$MIN_CONSECUTIVE" \
+            --target-consecutive "$TARGET_CONSECUTIVE" \
+            --max-failing-jobs 0 \
+            --output-file ./artifacts/release-gate-master-burnin-window-release-gate.json \
+            $EXTRA_ARGS
+
+      - name: Upload burn-in window artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-master-burnin-window
+          path: |
+            artifacts/p0-burnin-consecutive-green-release-gate.json
+            artifacts/release-gate-master-burnin-window-release-gate.json
+          if-no-files-found: error
