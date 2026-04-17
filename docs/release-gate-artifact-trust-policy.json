@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "required_manifest_entries": [
+    "release-gate-stability-final-readiness-release-gate.json",
+    "release-gate-staging-soak-readiness-release-gate.json",
+    "release-gate-rc-canary-rollout-release-gate.json",
+    "release-gate-evidence-lineage-release-gate.json",
+    "release-gate-production-readiness-certification-release-gate.json"
+  ],
+  "require_sha256": true
+}
