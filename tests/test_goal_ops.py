@@ -3041,7 +3041,11 @@ def test_109_release_gate_runtime_stability_drill_reports_success():
             "test_105_storage_corruption_hardening_drill_reports_success or "
             "test_106_backup_restore_stress_drill_reports_success or "
             "test_107_snapshot_restore_crash_consistency_drill_reports_success or "
-            "test_108_multi_db_atomic_switch_drill_reports_success"
+            "test_108_multi_db_atomic_switch_drill_reports_success or "
+            "test_144_dashboard_template_contains_runtime_rail_contract or "
+            "test_145_safe_mode_ux_degradation_check_reports_success or "
+            "test_147_a11y_test_harness_check_reports_success or "
+            "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline"
         ),
         "--timeout-seconds",
         "900",
@@ -5155,3 +5159,25 @@ def test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline(clie
     assert 'id="main-content" tabindex="-1"' in html
     assert html.count('class="sr-only"') >= 10
     assert html.count('aria-live="polite"') >= 5
+
+
+def test_150_runtime_stability_and_flake_gate_defaults_include_stage_d_checks():
+    project_root = Path(__file__).resolve().parents[1]
+    runtime_script = (project_root / "scripts" / "release-gate-runtime-stability-drill.py").read_text(encoding="utf-8")
+    runtime_wrapper = (project_root / "scripts" / "run-release-gate-runtime-stability-drill.ps1").read_text(encoding="utf-8")
+    critical_script = (project_root / "scripts" / "critical-drill-flake-gate.py").read_text(encoding="utf-8")
+    critical_wrapper = (project_root / "scripts" / "run-critical-drill-flake-gate.ps1").read_text(encoding="utf-8")
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+
+    required_stage_d_tests = [
+        "test_144_dashboard_template_contains_runtime_rail_contract",
+        "test_145_safe_mode_ux_degradation_check_reports_success",
+        "test_147_a11y_test_harness_check_reports_success",
+        "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline",
+    ]
+    for test_name in required_stage_d_tests:
+        assert test_name in runtime_script
+        assert test_name in runtime_wrapper
+        assert test_name in critical_script
+        assert test_name in critical_wrapper
+        assert test_name in release_gate

@@ -698,14 +698,14 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
 ```
 
-Standalone critical drill flake gate (repeat critical drill tests):
+Standalone critical drill flake gate (repeat critical storage + Stage-D safe-mode/A11y checks):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-critical-drill-flake-gate.ps1 -Repeats 2 -MaxFailedIterations 0
 ```
 
-Standalone release-gate runtime stability drill (duration + variance budget across critical drill samples):
+Standalone release-gate runtime stability drill (duration + variance budget across critical storage + Stage-D UX/A11y samples):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"

@@ -1171,7 +1171,7 @@ if (-not $SkipReleaseGateRuntimeStabilityDrill) {
                 "--samples", "2",
                 "--repeats-per-sample", "1",
                 "--target-file", ".\tests\test_goal_ops.py",
-                "--keyword-expression", "test_105_storage_corruption_hardening_drill_reports_success or test_106_backup_restore_stress_drill_reports_success or test_107_snapshot_restore_crash_consistency_drill_reports_success or test_108_multi_db_atomic_switch_drill_reports_success",
+                "--keyword-expression", "test_105_storage_corruption_hardening_drill_reports_success or test_106_backup_restore_stress_drill_reports_success or test_107_snapshot_restore_crash_consistency_drill_reports_success or test_108_multi_db_atomic_switch_drill_reports_success or test_144_dashboard_template_contains_runtime_rail_contract or test_145_safe_mode_ux_degradation_check_reports_success or test_147_a11y_test_harness_check_reports_success or test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline",
                 "--timeout-seconds", "900",
                 "--max-mean-duration-ms", "120000",
                 "--max-stddev-ms", "60000",

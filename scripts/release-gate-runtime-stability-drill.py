@@ -11,12 +11,17 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_KEYWORD_EXPRESSION = (
-    "test_105_storage_corruption_hardening_drill_reports_success or "
-    "test_106_backup_restore_stress_drill_reports_success or "
-    "test_107_snapshot_restore_crash_consistency_drill_reports_success or "
-    "test_108_multi_db_atomic_switch_drill_reports_success"
-)
+DEFAULT_CRITICAL_TEST_NAMES = [
+    "test_105_storage_corruption_hardening_drill_reports_success",
+    "test_106_backup_restore_stress_drill_reports_success",
+    "test_107_snapshot_restore_crash_consistency_drill_reports_success",
+    "test_108_multi_db_atomic_switch_drill_reports_success",
+    "test_144_dashboard_template_contains_runtime_rail_contract",
+    "test_145_safe_mode_ux_degradation_check_reports_success",
+    "test_147_a11y_test_harness_check_reports_success",
+    "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline",
+]
+DEFAULT_KEYWORD_EXPRESSION = " or ".join(DEFAULT_CRITICAL_TEST_NAMES)
 
 
 def _expect(condition: bool, message: str) -> None:

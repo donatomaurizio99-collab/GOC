@@ -58,7 +58,7 @@ This gate covers:
 - failure budget dashboard (aggregated machine-readable release-block signal across critical budget reports)
 - safe-mode UX degradation check (runtime rail + mutation-lock UX contract + release/CI/runbook wiring)
 - A11y test harness check (keyboard navigation baseline, screen-reader semantics smoke, and contrast ratios across visual presets)
-- release-gate runtime stability drill (critical-drill duration/variance budget sampling)
+- release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
 - P0 release evidence bundle (single artifact with required P0 report files and status summary)
@@ -238,7 +238,7 @@ Manual DB safe-mode watchdog drill invocation:
 .\scripts\run-db-safe-mode-watchdog-drill.ps1 -LockErrorInjections 4
 ```
 
-Manual critical drill flake gate invocation:
+Manual critical drill flake gate invocation (critical storage + Stage-D safe-mode/A11y checks):
 
 ```powershell
 .\scripts\run-critical-drill-flake-gate.ps1 -Repeats 2 -MaxFailedIterations 0
@@ -292,7 +292,7 @@ Manual A11y test harness check invocation:
 .\scripts\run-a11y-test-harness-check.ps1
 ```
 
-Manual release-gate runtime stability drill invocation:
+Manual release-gate runtime stability drill invocation (critical storage + Stage-D UX/A11y checks):
 
 ```powershell
 .\scripts\run-release-gate-runtime-stability-drill.ps1 -Samples 2 -RepeatsPerSample 1
