@@ -8281,3 +8281,176 @@ def test_190_release_gate_evidence_lineage_uses_file_mtime_when_manifest_and_rep
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_191_release_gate_supply_chain_artifact_trust_allows_entries_generated_after_manifest_same_second():
+    workspace = _local_test_dir("pytest-release-gate-artifact-trust-post-manifest").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    security_report = artifacts_dir / "security-ci-lane-release-gate.json"
+    hash_report = artifacts_dir / "release-gate-evidence-hash-manifest-release-gate.json"
+    staged_entry_a = artifacts_dir / "release-gate-evidence-lineage-release-gate.json"
+    staged_entry_b = artifacts_dir / "release-gate-production-readiness-certification-release-gate.json"
+    manifest_file = artifacts_dir / "release-gate-evidence-manifest-release-gate.json"
+    policy_file = workspace / "release-gate-artifact-trust-policy.json"
+    output_file = artifacts_dir / "release-gate-supply-chain-artifact-trust-release-gate.json"
+
+    same_second_timestamp = "2026-04-17T12:10:00Z"
+    for report_path in [security_report, hash_report, staged_entry_a, staged_entry_b]:
+        report_path.write_text(
+            json.dumps(
+                {"label": "release-gate", "success": True, "generated_at_utc": same_second_timestamp},
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    manifest_file.write_text(
+        json.dumps(
+            {"label": "release-gate", "generated_at_utc": same_second_timestamp, "files": []},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_manifest_entries": [staged_entry_a.name, staged_entry_b.name],
+                "require_sha256": True,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    base_epoch = 1776255000.0
+    os.utime(manifest_file, (base_epoch + 0.10, base_epoch + 0.10))
+    os.utime(staged_entry_a, (base_epoch + 0.20, base_epoch + 0.20))
+    os.utime(staged_entry_b, (base_epoch + 0.30, base_epoch + 0.30))
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-supply-chain-artifact-trust-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join([str(security_report.resolve()), str(hash_report.resolve())]),
+        "--manifest-file",
+        str(manifest_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["artifact_trust_missing_entries"] == 0
+    assert payload["metrics"]["artifact_trust_generated_after_manifest_entries"] == 2
+    assert sorted(payload["entries_generated_after_manifest"]) == sorted([staged_entry_a.name, staged_entry_b.name])
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_192_release_gate_evidence_attestation_allows_entries_generated_after_manifest_same_second():
+    workspace = _local_test_dir("pytest-release-gate-evidence-attestation-post-manifest").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    supply_report = artifacts_dir / "release-gate-supply-chain-artifact-trust-release-gate.json"
+    handoff_report = artifacts_dir / "release-gate-operations-handoff-readiness-release-gate.json"
+    hash_report = artifacts_dir / "release-gate-evidence-hash-manifest-release-gate.json"
+    manifest_file = artifacts_dir / "release-gate-evidence-manifest-release-gate.json"
+    policy_file = workspace / "release-gate-evidence-attestation-policy.json"
+    output_file = artifacts_dir / "release-gate-evidence-attestation-release-gate.json"
+
+    same_second_timestamp = "2026-04-17T12:20:00Z"
+    for report_path in [supply_report, handoff_report, hash_report]:
+        report_path.write_text(
+            json.dumps(
+                {"label": "release-gate", "success": True, "generated_at_utc": same_second_timestamp},
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    manifest_file.write_text(
+        json.dumps(
+            {"label": "release-gate", "generated_at_utc": same_second_timestamp, "files": []},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_manifest_entries": [supply_report.name, handoff_report.name],
+                "require_sha256": True,
+                "max_missing_entries": 0,
+                "max_unverified_entries": 0,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    base_epoch = 1776255600.0
+    os.utime(manifest_file, (base_epoch + 0.10, base_epoch + 0.10))
+    os.utime(supply_report, (base_epoch + 0.20, base_epoch + 0.20))
+    os.utime(handoff_report, (base_epoch + 0.30, base_epoch + 0.30))
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-evidence-attestation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join([str(supply_report.resolve()), str(handoff_report.resolve()), str(hash_report.resolve())]),
+        "--manifest-file",
+        str(manifest_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["evidence_attestation_missing_entries"] == 0
+    assert payload["metrics"]["evidence_attestation_generated_after_manifest_entries"] == 2
+    assert sorted(payload["entries_generated_after_manifest"]) == sorted([supply_report.name, handoff_report.name])
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

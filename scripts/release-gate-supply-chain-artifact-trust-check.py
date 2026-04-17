@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,83 @@ def _read_json_object(path: Path) -> dict[str, Any]:
 
 def _criterion(name: str, passed: bool, details: str) -> dict[str, Any]:
     return {"name": name, "passed": bool(passed), "details": details}
+
+
+def _parse_utc_timestamp(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+    return dt.timestamp()
+
+
+def _read_mtime_epoch(path: Path) -> float | None:
+    try:
+        return float(path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _resolve_required_entry_path(project_root: Path, manifest_file: Path, required_entry: str) -> Path:
+    raw_path = Path(str(required_entry).strip())
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    else:
+        candidates.append(_resolve_path(project_root, str(raw_path)))
+        candidates.append((manifest_file.parent / raw_path).resolve())
+        if len(raw_path.parts) == 1:
+            candidates.append((project_root / "artifacts" / raw_path.name).resolve())
+
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
+    for candidate in deduped:
+        if candidate.exists():
+            return candidate
+
+    if deduped:
+        return deduped[0]
+    return (project_root / raw_path.name).resolve()
+
+
+def _is_generated_after_manifest(
+    *,
+    entry_path: Path,
+    manifest_generated_at_epoch: float | None,
+    manifest_mtime_epoch: float | None,
+) -> bool:
+    if manifest_generated_at_epoch is None or not entry_path.exists():
+        return False
+
+    try:
+        entry_payload = _read_json_object(entry_path)
+    except Exception:
+        return False
+
+    entry_generated_at_epoch = _parse_utc_timestamp(entry_payload.get("generated_at_utc"))
+    if entry_generated_at_epoch is None:
+        return False
+    if float(entry_generated_at_epoch) > float(manifest_generated_at_epoch):
+        return True
+    if float(entry_generated_at_epoch) < float(manifest_generated_at_epoch):
+        return False
+
+    entry_mtime_epoch = _read_mtime_epoch(entry_path)
+    return (
+        manifest_mtime_epoch is not None
+        and entry_mtime_epoch is not None
+        and float(entry_mtime_epoch) > float(manifest_mtime_epoch)
+    )
 
 
 def run_check(
@@ -95,10 +173,13 @@ def run_check(
     manifest_missing = []
     unverified_entries = []
     manifest_entries = []
+    entries_generated_after_manifest: list[str] = []
     if manifest_file.exists():
         manifest_payload = _read_json_object(manifest_file)
         raw_files = manifest_payload.get("files")
         manifest_entries = raw_files if isinstance(raw_files, list) else []
+        manifest_generated_at_epoch = _parse_utc_timestamp(manifest_payload.get("generated_at_utc"))
+        manifest_mtime_epoch = _read_mtime_epoch(manifest_file)
         manifest_entry_by_name = {}
         for entry in manifest_entries:
             if not isinstance(entry, dict):
@@ -110,6 +191,14 @@ def run_check(
         for required_name in required_manifest_entries:
             entry = manifest_entry_by_name.get(Path(required_name).name)
             if entry is None:
+                entry_path = _resolve_required_entry_path(project_root, manifest_file, required_name)
+                if _is_generated_after_manifest(
+                    entry_path=entry_path,
+                    manifest_generated_at_epoch=manifest_generated_at_epoch,
+                    manifest_mtime_epoch=manifest_mtime_epoch,
+                ):
+                    entries_generated_after_manifest.append(required_name)
+                    continue
                 manifest_missing.append(required_name)
                 continue
             if require_sha256 and not str(entry.get("sha256") or "").strip():
@@ -176,6 +265,7 @@ def run_check(
             "label_mismatch_reports": len(label_mismatch_reports),
             "artifact_trust_missing_entries": len(manifest_missing),
             "artifact_trust_unverified_entries": len(unverified_entries),
+            "artifact_trust_generated_after_manifest_entries": len(entries_generated_after_manifest),
             "criteria_failed": len(failed_criteria),
         },
         "decision": {
@@ -190,6 +280,7 @@ def run_check(
         "label_mismatch_reports": label_mismatch_reports,
         "manifest_missing_entries": manifest_missing,
         "artifact_trust_unverified_entries": unverified_entries,
+        "entries_generated_after_manifest": entries_generated_after_manifest,
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
