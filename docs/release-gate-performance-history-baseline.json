@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "baseline_total_duration_seconds": 2400.0,
+  "max_total_duration_regression_percent": 400.0,
+  "max_step_regression_percent": 600.0,
+  "baseline_step_durations": {
+    "Pytest suite": 300.0,
+    "Migration rehearsal (S/M/L/XL DB copies)": 120.0,
+    "Long soak budget drill (latency/429/error budget gate)": 120.0,
+    "Release-gate runtime stability drill (duration/variance budget on critical drills)": 180.0,
+    "Critical drill flake gate (repeat critical drill tests)": 120.0
+  }
+}

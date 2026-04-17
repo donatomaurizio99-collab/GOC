@@ -29,6 +29,11 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-backup-restore-stress-drill.ps1",
     "run-release-gate-runtime-stability-drill.ps1",
     "run-release-gate-performance-budget-check.ps1",
+    "run-release-gate-evidence-freshness-check.ps1",
+    "run-release-gate-evidence-hash-manifest-check.ps1",
+    "run-release-gate-step-timing-schema-check.ps1",
+    "run-release-gate-performance-history-check.ps1",
+    "run-release-gate-stability-final-readiness.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -61,6 +66,10 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "--required-evidence-reports",
     "--step-timings-file",
     "release-gate-performance-budget-policy.json",
+    "release-gate-evidence-freshness-policy.json",
+    "release-gate-performance-history-baseline.json",
+    "release-gate-evidence-manifest-release-gate.json",
+    "Release-gate stability final readiness check (Stage L-P consolidated go/no-go)",
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
@@ -68,15 +77,25 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/p0-release-evidence-bundle-release-gate.json",
     "artifacts/p0-closure-report-release-gate.json",
     "artifacts/release-gate-step-timings-release-gate.json",
+    "artifacts/release-gate-evidence-freshness-release-gate.json",
+    "artifacts/release-gate-evidence-hash-manifest-release-gate.json",
+    "artifacts/release-gate-evidence-manifest-release-gate.json",
+    "artifacts/release-gate-step-timing-schema-release-gate.json",
+    "artifacts/release-gate-performance-history-release-gate.json",
     "artifacts/release-gate-performance-budget-release-gate.json",
+    "artifacts/release-gate-stability-final-readiness-release-gate.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.label_mismatch_reports=0",
     "metrics.required_evidence_reports_missing=0",
     "metrics.required_evidence_reports_non_green=0",
+    "metrics.stale_reports=0",
+    "metrics.schema_failed_steps=0",
+    "metrics.history_regression_violations=0",
     "metrics.steps_over_budget=0",
     "metrics.regression_budget_exceeded=0",
+    "metrics.required_reports_non_green=0",
 ]
 
 

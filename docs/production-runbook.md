@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGatePerformanceBudgetCheck
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
@@ -61,7 +61,12 @@ This gate covers:
 - safe-mode UX degradation check (runtime rail + mutation-lock UX contract + release/CI/runbook wiring)
 - A11y test harness check (keyboard navigation baseline, screen-reader semantics smoke, and contrast ratios across visual presets)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
+- release-gate evidence freshness check (required release-gate reports are recent, green, and label-consistent)
+- release-gate evidence hash manifest check (deterministic SHA256 manifest for required release-gate evidence)
+- release-gate step timing schema check (step runtime ledger structure + success contract validation)
+- release-gate performance history check (total/step runtime regression budget against history baseline)
 - release-gate performance budget check (step-runtime budget policy + regression trend summary from step timing ledger)
+- release-gate stability final readiness check (Stage L-P consolidated go/no-go signal over stability reports)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
 - P0 report schema contract check (baseline `label/success` schema contract across required release-gate evidence reports)
@@ -302,10 +307,40 @@ Manual release-gate runtime stability drill invocation (critical storage + Stage
 .\scripts\run-release-gate-runtime-stability-drill.ps1 -Samples 2 -RepeatsPerSample 1
 ```
 
+Manual release-gate evidence freshness check invocation:
+
+```powershell
+.\scripts\run-release-gate-evidence-freshness-check.ps1
+```
+
+Manual release-gate evidence hash manifest check invocation:
+
+```powershell
+.\scripts\run-release-gate-evidence-hash-manifest-check.ps1
+```
+
+Manual release-gate step timing schema check invocation:
+
+```powershell
+.\scripts\run-release-gate-step-timing-schema-check.ps1
+```
+
+Manual release-gate performance history check invocation:
+
+```powershell
+.\scripts\run-release-gate-performance-history-check.ps1
+```
+
 Manual release-gate performance budget check invocation (policy budgets + trend report):
 
 ```powershell
 .\scripts\run-release-gate-performance-budget-check.ps1
+```
+
+Manual release-gate stability final readiness invocation:
+
+```powershell
+.\scripts\run-release-gate-stability-final-readiness.ps1
 ```
 
 Manual canary determinism + flake intelligence invocation:
@@ -364,8 +399,18 @@ Verify before release:
   - `artifacts\critical-drill-flake-gate-release-gate.json`
 - Stage-K performance budget artifacts are present and green:
   - `artifacts\release-gate-step-timings-release-gate.json`
+  - `artifacts\release-gate-evidence-freshness-release-gate.json`
+  - `artifacts\release-gate-evidence-hash-manifest-release-gate.json`
+  - `artifacts\release-gate-evidence-manifest-release-gate.json`
+  - `artifacts\release-gate-step-timing-schema-release-gate.json`
+  - `artifacts\release-gate-performance-history-release-gate.json`
   - `artifacts\release-gate-performance-budget-release-gate.json`
+- Stage-P final readiness report is present and green (`artifacts\release-gate-stability-final-readiness-release-gate.json`, `success=true`)
+- release-gate evidence freshness report confirms zero freshness regressions (`success=true`, `metrics.stale_reports=0`, `metrics.non_green_reports=0`)
+- release-gate step timing schema report confirms zero schema violations (`success=true`, `metrics.schema_failed_steps=0`)
+- release-gate performance history report confirms zero history regressions (`success=true`, `metrics.history_regression_violations=0`)
 - release-gate performance budget report confirms zero budget violations (`success=true`, `metrics.steps_over_budget=0`, `metrics.regression_budget_exceeded=0`)
+- release-gate final readiness report confirms no required report regressions (`success=true`, `metrics.required_reports_non_green=0`, `metrics.criteria_failed=0`)
 - closure report confirms all readiness criteria and required evidence checks are green (`success=true`, `metrics.criteria_failed=0`, `metrics.required_evidence_reports_missing=0`, `metrics.required_evidence_reports_non_green=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
