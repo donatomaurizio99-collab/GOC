@@ -44,6 +44,7 @@ DEFAULT_REQUIRED_CANARY_DRILLS = [
     "invariant_burst",
     "safe_mode_ux_degradation",
     "a11y_test_harness",
+    "p0_report_schema_contract",
     "long_soak_budget",
 ]
 

@@ -63,7 +63,7 @@ This gate covers:
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
-- P0 report schema contract check (minimal top-level + decision-field schema contract across all release-gate JSON reports)
+- P0 report schema contract check (baseline `label/success` schema contract across required release-gate evidence reports)
 - P0 release evidence bundle (single artifact with required P0 report files, optional label contract enforcement, and status summary)
 - P0 closure report (single go/no-go signal from burn-in + contract + evidence checks)
 
@@ -339,7 +339,7 @@ Verify before release:
   - `Desktop Smoke (Windows)`
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
-- report schema contract check confirms zero schema and decision-field violations (`success=true`, `metrics.schema_failed_reports=0`, `metrics.missing_required_files=0`)
+- report schema contract check confirms zero baseline schema violations on required reports (`success=true`, `metrics.schema_failed_reports=0`, `metrics.missing_required_files=0`)
 - release evidence bundle report confirms all required `*-release-gate.json` reports are present and successful (`success=true`)
 - release evidence bundle report confirms label consistency when enforced (`metrics.label_mismatch_reports=0`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
@@ -403,7 +403,7 @@ After release is live:
 
 ### 1.6 Nightly stability canary
 
-The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including power-loss durability, DB corruption quarantine startup recovery, upgrade/downgrade compatibility, and Stage-D safe-mode UX + A11y baseline checks.
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including power-loss durability, DB corruption quarantine startup recovery, upgrade/downgrade compatibility, Stage-D safe-mode UX + A11y baseline checks, and a P0 report-schema contract drill against required canary evidence reports.
 Missing baseline entries are treated as regressions and fail the canary.
 
 Manual canary invocation:
