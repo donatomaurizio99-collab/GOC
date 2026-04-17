@@ -40,6 +40,12 @@
     "p0_release_evidence_bundle": {
       "baseline_duration_seconds": 3.0
     },
+    "p0_burnin_consecutive_green": {
+      "baseline_duration_seconds": 3.0
+    },
+    "p0_closure_report": {
+      "baseline_duration_seconds": 3.0
+    },
     "long_soak_budget": {
       "baseline_duration_seconds": 140.0,
       "max_http_429_rate_percent": 1.0,

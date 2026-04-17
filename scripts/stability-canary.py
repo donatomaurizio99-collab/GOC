@@ -23,6 +23,61 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     return data
 
 
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+
+def _prepare_p0_burnin_fixtures(*, runs_file: Path, jobs_dir: Path, required_jobs: list[str]) -> None:
+    runs_payload = {
+        "workflow_runs": [
+            {
+                "id": 9203,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9203",
+                "updated_at": "2026-04-17T00:00:03Z",
+            },
+            {
+                "id": 9202,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9202",
+                "updated_at": "2026-04-17T00:00:02Z",
+            },
+            {
+                "id": 9201,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9201",
+                "updated_at": "2026-04-17T00:00:01Z",
+            },
+            {
+                "id": 9200,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "sha-9200",
+                "updated_at": "2026-04-17T00:00:00Z",
+            },
+        ]
+    }
+    _write_json_file(runs_file, runs_payload)
+
+    for run_id in (9203, 9202, 9201, 9200):
+        conclusion = "success" if run_id != 9200 else "failure"
+        jobs_payload = {
+            "jobs": (
+                [{"name": job_name, "conclusion": conclusion} for job_name in required_jobs]
+                + [{"name": "Auxiliary Check", "conclusion": "success"}]
+            )
+        }
+        _write_json_file(jobs_dir / f"{run_id}.json", jobs_payload)
+
+
 def _run_json_command(command: list[str]) -> tuple[dict[str, Any], float]:
     started = time.perf_counter()
     completed = subprocess.run(
@@ -69,9 +124,26 @@ def run_canary(
     p0_runbook_contract_report_file = (
         PROJECT_ROOT / ".tmp" / "stability-canary-p0-runbook-contract" / "p0-runbook-contract-check-report.json"
     )
+    p0_burnin_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-burnin"
+    p0_burnin_report_file = p0_burnin_artifacts_dir / "p0-burnin-consecutive-green-report.json"
+    p0_burnin_fixtures_dir = p0_burnin_artifacts_dir / "fixtures"
+    p0_burnin_runs_file = p0_burnin_fixtures_dir / "runs.json"
+    p0_burnin_jobs_dir = p0_burnin_fixtures_dir / "jobs"
+    p0_closure_report_file = PROJECT_ROOT / ".tmp" / "stability-canary-p0-closure" / "p0-closure-report.json"
     p0_evidence_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-evidence"
     p0_evidence_bundle_file = p0_evidence_artifacts_dir / "p0-release-evidence-bundle-report.json"
     p0_evidence_bundle_dir = p0_evidence_artifacts_dir / "p0-release-evidence-files"
+    p0_burnin_required_jobs = [
+        "Release Gate (Windows)",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    _prepare_p0_burnin_fixtures(
+        runs_file=p0_burnin_runs_file,
+        jobs_dir=p0_burnin_jobs_dir,
+        required_jobs=p0_burnin_required_jobs,
+    )
     p0_schema_required_files = ",".join(
         [
             str(safe_mode_report_file),
@@ -82,6 +154,16 @@ def run_canary(
         [
             str(safe_mode_report_file),
             str(a11y_report_file),
+            str(p0_burnin_report_file),
+            str(p0_schema_report_file),
+            str(p0_runbook_contract_report_file),
+        ]
+    )
+    p0_closure_required_evidence_reports = ",".join(
+        [
+            str(safe_mode_report_file),
+            str(a11y_report_file),
+            str(p0_burnin_report_file),
             str(p0_schema_report_file),
             str(p0_runbook_contract_report_file),
         ]
@@ -236,6 +318,30 @@ def run_canary(
             "--output-file",
             str(p0_runbook_contract_report_file),
         ],
+        "p0_burnin_consecutive_green": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "p0-burnin-consecutive-green.py"),
+            "--label",
+            "stability-canary",
+            "--repo",
+            "donatomaurizio99-collab/GOC",
+            "--branch",
+            "master",
+            "--workflow-name",
+            "CI",
+            "--required-jobs",
+            ",".join(p0_burnin_required_jobs),
+            "--required-consecutive",
+            "3",
+            "--per-page",
+            "10",
+            "--runs-file",
+            str(p0_burnin_runs_file),
+            "--jobs-dir",
+            str(p0_burnin_jobs_dir),
+            "--output-file",
+            str(p0_burnin_report_file),
+        ],
         "p0_release_evidence_bundle": [
             sys.executable,
             str(PROJECT_ROOT / "scripts" / "p0-release-evidence-bundle.py"),
@@ -255,6 +361,26 @@ def run_canary(
             str(p0_evidence_bundle_file),
             "--bundle-dir",
             str(p0_evidence_bundle_dir),
+        ],
+        "p0_closure_report": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "p0-closure-report.py"),
+            "--label",
+            "stability-canary",
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--required-consecutive",
+            "3",
+            "--required-evidence-reports",
+            p0_closure_required_evidence_reports,
+            "--evidence-bundle-file",
+            str(p0_evidence_bundle_file),
+            "--burnin-file",
+            str(p0_burnin_report_file),
+            "--runbook-contract-file",
+            str(p0_runbook_contract_report_file),
+            "--output-file",
+            str(p0_closure_report_file),
         ],
         "long_soak_budget": [
             sys.executable,

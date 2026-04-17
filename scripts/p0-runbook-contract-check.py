@@ -47,6 +47,8 @@ DEFAULT_REQUIRED_CANARY_DRILLS = [
     "p0_report_schema_contract",
     "p0_runbook_contract",
     "p0_release_evidence_bundle",
+    "p0_burnin_consecutive_green",
+    "p0_closure_report",
     "long_soak_budget",
 ]
 
