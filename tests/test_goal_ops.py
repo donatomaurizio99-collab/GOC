@@ -5419,6 +5419,9 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert '"--required-decision-keys", "release_blocked"' in release_gate
     assert '"--include-glob", "*-release-gate.json"' in release_gate
     assert '"--required-label", "release-gate"' in release_gate
+    assert "$script:P0EvidenceReportPaths = @()" in release_gate
+    assert "$requiredReportPaths = @($script:P0EvidenceReportPaths)" in release_gate
+    assert 'if ($script:P0EvidenceReportPaths.Count -gt 0)' in release_gate
     assert '"--required-evidence-reports"' in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
