@@ -79,6 +79,7 @@ def run_check(
     label_mismatch_reports: list[dict[str, Any]] = []
     invalid_timestamp_reports: list[dict[str, Any]] = []
     parsed_timestamps: list[float] = []
+    report_timestamp_by_path: dict[str, float | None] = {}
 
     for report_path in resolved_required_reports:
         if not report_path.exists():
@@ -112,6 +113,7 @@ def run_check(
             parsed_timestamps.append(float(parsed_timestamp))
         else:
             invalid_timestamp_reports.append(record)
+        report_timestamp_by_path[str(report_path)] = float(parsed_timestamp) if has_valid_timestamp else None
 
     manifest_present = manifest_file.exists()
     manifest_payload: dict[str, Any] = _read_json_object(manifest_file) if manifest_present else {}
@@ -122,8 +124,25 @@ def run_check(
         for item in manifest_entries
         if isinstance(item, dict) and str(item.get("path") or "").strip()
     }
+    manifest_generated_at_epoch = _parse_utc_timestamp(manifest_payload.get("generated_at_utc"))
+    reports_expected_in_manifest: list[str] = []
+    reports_generated_after_manifest: list[str] = []
+    for report_path in resolved_required_reports:
+        report_key = str(report_path)
+        if report_key in missing_reports:
+            continue
+        report_timestamp = report_timestamp_by_path.get(report_key)
+        if (
+            manifest_generated_at_epoch is not None
+            and report_timestamp is not None
+            and float(report_timestamp) > float(manifest_generated_at_epoch)
+        ):
+            reports_generated_after_manifest.append(report_key)
+            continue
+        reports_expected_in_manifest.append(report_key)
+
     manifest_missing_entries = [
-        str(report_path) for report_path in resolved_required_reports if str(report_path) not in manifest_paths
+        report_path for report_path in reports_expected_in_manifest if report_path not in manifest_paths
     ]
 
     timestamp_skew_seconds = 0.0
@@ -197,6 +216,8 @@ def run_check(
             "label_mismatch_reports": len(label_mismatch_reports),
             "invalid_timestamp_reports": len(invalid_timestamp_reports),
             "manifest_missing_entries": len(manifest_missing_entries),
+            "manifest_expected_reports": len(reports_expected_in_manifest),
+            "reports_generated_after_manifest": len(reports_generated_after_manifest),
             "max_report_timestamp_skew_seconds": int(round(timestamp_skew_seconds)),
             "criteria_failed": len(failed_criteria),
         },
@@ -212,6 +233,8 @@ def run_check(
         "label_mismatch_reports": label_mismatch_reports,
         "invalid_timestamp_reports": invalid_timestamp_reports,
         "manifest_missing_entries": manifest_missing_entries,
+        "reports_expected_in_manifest": reports_expected_in_manifest,
+        "reports_generated_after_manifest": reports_generated_after_manifest,
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }

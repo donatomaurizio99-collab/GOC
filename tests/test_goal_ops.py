@@ -7355,3 +7355,100 @@ def test_180_release_gate_production_readiness_certification_fails_when_burnin_t
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_181_release_gate_evidence_lineage_allows_reports_generated_after_manifest_timestamp():
+    workspace = _local_test_dir("pytest-release-gate-evidence-lineage-post-manifest").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    final_report = artifacts_dir / "release-gate-stability-final-readiness-release-gate.json"
+    staging_report = artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json"
+    rc_report = artifacts_dir / "release-gate-rc-canary-rollout-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    report_paths = [final_report, staging_report, rc_report, closure_report]
+    manifest_file = artifacts_dir / "release-gate-evidence-manifest-release-gate.json"
+    output_file = artifacts_dir / "release-gate-evidence-lineage-release-gate.json"
+
+    final_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "generated_at_utc": "2026-04-17T12:00:39Z"},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    staging_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "generated_at_utc": "2026-04-17T12:00:40Z"},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    rc_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "generated_at_utc": "2026-04-17T12:00:41Z"},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    closure_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "generated_at_utc": "2026-04-17T12:00:38Z"},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "generated_at_utc": "2026-04-17T12:00:39Z",
+                "files": [
+                    {"path": str(final_report.resolve()), "sha256": "x"},
+                    {"path": str(closure_report.resolve()), "sha256": "y"},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-evidence-lineage-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-reports",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--manifest-file",
+        str(manifest_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--max-report-timestamp-skew-seconds",
+        "900",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["manifest_missing_entries"] == 0
+    assert payload["metrics"]["reports_generated_after_manifest"] == 2
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
