@@ -92,6 +92,8 @@ param(
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
     [switch]$StrictP0RunbookContractCheck,
+    [switch]$SkipP0ReportSchemaContractCheck,
+    [switch]$StrictP0ReportSchemaContractCheck,
     [switch]$SkipP0ReleaseEvidenceBundle,
     [switch]$StrictP0ReleaseEvidenceBundle,
     [switch]$SkipP0ClosureReport,
@@ -1322,6 +1324,40 @@ if (-not $SkipP0RunbookContractCheck) {
             }
             Write-Warning (
                 "P0 runbook contract check failed but StrictP0RunbookContractCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ReportSchemaContractCheck) {
+    Invoke-GateStep -Name "P0 report schema contract check (release-gate evidence schema + decision fields)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-report-schema-contract-release-gate.json"
+        $requiredReportPaths = @($P0EvidenceReportPaths)
+        $P0EvidenceReportPaths += $reportPath
+        $arguments = @(
+            ".\scripts\p0-report-schema-contract-check.py",
+            "--label", "release-gate",
+            "--artifacts-dir", "artifacts",
+            "--include-glob", "*-release-gate.json",
+            "--required-top-level-keys", "label,success,generated_at_utc,duration_ms,paths,metrics,decision",
+            "--required-decision-keys", "release_blocked",
+            "--required-label", "release-gate",
+            "--output-file", $reportPath
+        )
+        if ($requiredReportPaths.Count -gt 0) {
+            $arguments += @("--required-files", ($requiredReportPaths -join ","))
+        } else {
+            $arguments += "--allow-empty"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
+        } catch {
+            if ($StrictP0ReportSchemaContractCheck) {
+                throw
+            }
+            Write-Warning (
+                "P0 report schema contract check failed but StrictP0ReportSchemaContractCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

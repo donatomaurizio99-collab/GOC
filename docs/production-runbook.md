@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
@@ -63,6 +63,7 @@ This gate covers:
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
+- P0 report schema contract check (minimal top-level + decision-field schema contract across all release-gate JSON reports)
 - P0 release evidence bundle (single artifact with required P0 report files, optional label contract enforcement, and status summary)
 - P0 closure report (single go/no-go signal from burn-in + contract + evidence checks)
 
@@ -312,6 +313,12 @@ Manual P0 runbook contract check invocation:
 .\scripts\run-p0-runbook-contract-check.ps1
 ```
 
+Manual P0 report schema contract check invocation:
+
+```powershell
+.\scripts\run-p0-report-schema-contract-check.ps1
+```
+
 Manual P0 release evidence bundle invocation:
 
 ```powershell
@@ -332,6 +339,7 @@ Verify before release:
   - `Desktop Smoke (Windows)`
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
+- report schema contract check confirms zero schema and decision-field violations (`success=true`, `metrics.schema_failed_reports=0`, `metrics.missing_required_files=0`)
 - release evidence bundle report confirms all required `*-release-gate.json` reports are present and successful (`success=true`)
 - release evidence bundle report confirms label consistency when enforced (`metrics.label_mismatch_reports=0`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
@@ -1204,6 +1212,23 @@ Actions:
    - `checks.contrast_failures = []`
    - `checks.release_gate_has_strict_flag = true`
 3. If check fails, treat as release blocker and restore the failing keyboard, semantics, or contrast contract before retrying gate.
+
+### 3.44 Release evidence schema drift (JSON contract instability)
+
+Symptoms:
+- one or more release-gate report JSON files no longer include required top-level keys (`label`, `success`, `generated_at_utc`, `duration_ms`, `paths`, `metrics`, `decision`)
+- `decision.release_blocked` key is missing or non-boolean, causing deterministic bundle/closure parsing risk
+
+Actions:
+1. Execute schema contract check:
+   ```powershell
+   .\scripts\run-p0-report-schema-contract-check.ps1
+   ```
+2. Validate report criteria:
+   - `success = true`
+   - `metrics.schema_failed_reports = 0`
+   - `metrics.missing_required_files = 0`
+3. If check fails, treat as release blocker and restore JSON schema compatibility before rerunning evidence bundle and closure report.
 
 ## 4. Operational Defaults
 

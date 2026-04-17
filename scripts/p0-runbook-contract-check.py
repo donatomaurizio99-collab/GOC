@@ -29,6 +29,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-release-gate-runtime-stability-drill.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
+    "run-p0-report-schema-contract-check.ps1",
     "run-p0-closure-report.ps1",
 ]
 
@@ -53,6 +54,7 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
+    "artifacts/p0-report-schema-contract-release-gate.json",
     "artifacts/p0-release-evidence-bundle-release-gate.json",
     "artifacts/p0-closure-report-release-gate.json",
 ]
