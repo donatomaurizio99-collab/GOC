@@ -179,8 +179,6 @@ def run_stability_drill(
         "failures": failures,
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
-    if not success:
-        raise RuntimeError(f"Release-gate runtime stability drill failed: {json.dumps(report, sort_keys=True)}")
     return report
 
 
@@ -200,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-mean-duration-ms", type=int, default=120000)
     parser.add_argument("--max-stddev-ms", type=int, default=60000)
     parser.add_argument("--max-iteration-duration-ms", type=int, default=180000)
+    parser.add_argument("--output-file")
     args = parser.parse_args(argv)
 
     if int(args.samples) <= 0:
@@ -235,6 +234,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     except Exception as exc:
         print(f"[release-gate-runtime-stability-drill] ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if args.output_file:
+        output_file = Path(str(args.output_file)).expanduser()
+        if not output_file.is_absolute():
+            output_file = (PROJECT_ROOT / output_file).resolve()
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(
+            json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+
+    if not bool(report.get("success")):
+        print(
+            "[release-gate-runtime-stability-drill] ERROR: "
+            + f"Release-gate runtime stability drill failed: {json.dumps(report, sort_keys=True)}",
+            file=sys.stderr,
+        )
         return 1
 
     print(json.dumps(report, ensure_ascii=True, sort_keys=True))

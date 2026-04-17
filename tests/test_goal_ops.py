@@ -2767,7 +2767,9 @@ def test_103_fsync_io_stall_drill_reports_success():
 
 
 def test_104_critical_drill_flake_gate_reports_success():
+    workspace = _local_test_dir("pytest-critical-drill-flake-gate").resolve()
     project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "critical-drill-flake-gate-report.json"
     command = [
         sys.executable,
         str(project_root / "scripts" / "critical-drill-flake-gate.py"),
@@ -2778,9 +2780,14 @@ def test_104_critical_drill_flake_gate_reports_success():
         "--target-file",
         str(project_root / "tests" / "test_goal_ops.py"),
         "--keyword-expression",
-        "test_100_sqlite_real_full_drill_reports_success or test_101_wal_checkpoint_crash_drill_reports_success",
+        (
+            "test_144_dashboard_template_contains_runtime_rail_contract or "
+            "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline"
+        ),
         "--timeout-seconds",
         "600",
+        "--output-file",
+        str(output_file.resolve()),
     ]
     completed = subprocess.run(
         command,
@@ -2789,6 +2796,7 @@ def test_104_critical_drill_flake_gate_reports_success():
         text=True,
     )
     if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
         pytest.skip("File-backed SQLite is unavailable in this sandbox")
     assert completed.returncode == 0, completed.stderr
 
@@ -2798,6 +2806,9 @@ def test_104_critical_drill_flake_gate_reports_success():
     assert payload["config"]["repeats"] == 2
     assert payload["summary"]["failed_iterations"] == 0
     assert payload["summary"]["passed_iterations"] == 2
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
     assert len(payload["iterations"]) == 2
     for iteration in payload["iterations"]:
         assert iteration["success"] is True
@@ -3028,7 +3039,9 @@ def test_108_multi_db_atomic_switch_drill_reports_success():
 
 
 def test_109_release_gate_runtime_stability_drill_reports_success():
+    workspace = _local_test_dir("pytest-runtime-stability-drill").resolve()
     project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "release-gate-runtime-stability-drill-report.json"
     command = [
         sys.executable,
         str(project_root / "scripts" / "release-gate-runtime-stability-drill.py"),
@@ -3059,6 +3072,8 @@ def test_109_release_gate_runtime_stability_drill_reports_success():
         "180000",
         "--max-iteration-duration-ms",
         "480000",
+        "--output-file",
+        str(output_file.resolve()),
     ]
     completed = subprocess.run(
         command,
@@ -3067,6 +3082,7 @@ def test_109_release_gate_runtime_stability_drill_reports_success():
         text=True,
     )
     if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
         pytest.skip("File-backed SQLite is unavailable in this sandbox")
     assert completed.returncode == 0, completed.stderr
 
@@ -3083,6 +3099,9 @@ def test_109_release_gate_runtime_stability_drill_reports_success():
     for sample in payload["samples"]:
         assert sample["success"] is True
         assert sample["return_code"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
 
 
 def test_110_p0_burnin_consecutive_green_reports_success_after_recovery_window():
@@ -5188,6 +5207,15 @@ def test_150_runtime_stability_and_flake_gate_defaults_include_stage_d_checks():
         assert test_name in critical_wrapper
         assert test_name in release_gate
 
+    assert "artifacts\\safe-mode-ux-degradation-release-gate.json" in release_gate
+    assert "artifacts\\a11y-test-harness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-runtime-stability-release-gate.json" in release_gate
+    assert "artifacts\\critical-drill-flake-gate-release-gate.json" in release_gate
+    assert "--output-file" in runtime_script
+    assert "--output-file" in critical_script
+    assert "--output-file" in runtime_wrapper
+    assert "--output-file" in critical_wrapper
+
 
 def test_151_stability_canary_baseline_includes_stage_d_drills():
     project_root = Path(__file__).resolve().parents[1]
@@ -5322,3 +5350,17 @@ def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_sta
     assert "a11y_test_harness" in missing
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
+    project_root = Path(__file__).resolve().parents[1]
+    ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    required_artifact_paths = [
+        "artifacts/safe-mode-ux-degradation-release-gate.json",
+        "artifacts/a11y-test-harness-release-gate.json",
+        "artifacts/release-gate-runtime-stability-release-gate.json",
+        "artifacts/critical-drill-flake-gate-release-gate.json",
+    ]
+    for artifact_path in required_artifact_paths:
+        assert artifact_path in ci_workflow

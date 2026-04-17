@@ -333,6 +333,11 @@ Verify before release:
 - release evidence bundle report confirms all required P0 reports present and successful (`success=true`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
 - failure budget dashboard report is present and green (`artifacts\failure-budget-dashboard-release-gate.json`, `success=true`)
+- Stage-D runtime evidence reports are present and green:
+  - `artifacts\safe-mode-ux-degradation-release-gate.json`
+  - `artifacts\a11y-test-harness-release-gate.json`
+  - `artifacts\release-gate-runtime-stability-release-gate.json`
+  - `artifacts\critical-drill-flake-gate-release-gate.json`
 - closure report confirms all readiness criteria are green (`success=true`, `metrics.criteria_failed=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).

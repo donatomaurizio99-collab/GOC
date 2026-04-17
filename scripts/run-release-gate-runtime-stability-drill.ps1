@@ -7,7 +7,8 @@ param(
     [double]$TimeoutSeconds = 900.0,
     [int]$MaxMeanDurationMs = 120000,
     [int]$MaxStddevMs = 60000,
-    [int]$MaxIterationDurationMs = 180000
+    [int]$MaxIterationDurationMs = 180000,
+    [string]$OutputFile = "artifacts\\release-gate-runtime-stability-drill-report.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +26,8 @@ $args = @(
     "--timeout-seconds", [string]$TimeoutSeconds,
     "--max-mean-duration-ms", [string]$MaxMeanDurationMs,
     "--max-stddev-ms", [string]$MaxStddevMs,
-    "--max-iteration-duration-ms", [string]$MaxIterationDurationMs
+    "--max-iteration-duration-ms", [string]$MaxIterationDurationMs,
+    "--output-file", $OutputFile
 )
 
 & $PythonExe @args

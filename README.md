@@ -726,7 +726,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-p0-runbook-contract-check.ps1
 ```
 
-Standalone P0 release evidence bundle (aggregate P0 reports into one manifest):
+Standalone P0 release evidence bundle (aggregate P0 + Stage-D runtime evidence into one manifest):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -757,7 +757,7 @@ GitHub Actions now runs `pytest` automatically for:
 Workflow file:
 [ci.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/ci.yml)
 
-Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports + closure report).
+Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report).
 
 Desktop workflow file:
 [desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)

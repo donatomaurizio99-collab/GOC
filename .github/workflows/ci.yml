@@ -56,6 +56,8 @@ jobs:
             artifacts/failure-budget-dashboard-release-gate.json
             artifacts/safe-mode-ux-degradation-release-gate.json
             artifacts/a11y-test-harness-release-gate.json
+            artifacts/release-gate-runtime-stability-release-gate.json
+            artifacts/critical-drill-flake-gate-release-gate.json
             artifacts/security-config-hardening-release-gate.json
             artifacts/audit-trail-hardening-release-gate.json
             artifacts/security-ci-lane-release-gate.json

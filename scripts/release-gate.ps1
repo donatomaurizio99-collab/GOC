@@ -1123,6 +1123,7 @@ if (-not $SkipFailureBudgetDashboard) {
 if (-not $SkipSafeModeUxDegradationCheck) {
     Invoke-GateStep -Name "Safe-mode UX degradation check (runtime rail + mutation lock + release/runbook contract)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\safe-mode-ux-degradation-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\safe-mode-ux-degradation-check.py",
@@ -1144,6 +1145,7 @@ if (-not $SkipSafeModeUxDegradationCheck) {
 if (-not $SkipA11yTestHarnessCheck) {
     Invoke-GateStep -Name "A11y test harness check (keyboard + screen-reader smoke + contrast baseline)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\a11y-test-harness-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\a11y-test-harness-check.py",
@@ -1164,6 +1166,8 @@ if (-not $SkipA11yTestHarnessCheck) {
 
 if (-not $SkipReleaseGateRuntimeStabilityDrill) {
     Invoke-GateStep -Name "Release-gate runtime stability drill (duration/variance budget on critical drills)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-runtime-stability-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\release-gate-runtime-stability-drill.py",
@@ -1175,7 +1179,8 @@ if (-not $SkipReleaseGateRuntimeStabilityDrill) {
                 "--timeout-seconds", "900",
                 "--max-mean-duration-ms", "120000",
                 "--max-stddev-ms", "60000",
-                "--max-iteration-duration-ms", "180000"
+                "--max-iteration-duration-ms", "180000",
+                "--output-file", $reportPath
             )
         } catch {
             if ($StrictReleaseGateRuntimeStabilityDrill) {
@@ -1191,12 +1196,15 @@ if (-not $SkipReleaseGateRuntimeStabilityDrill) {
 
 if (-not $SkipCriticalDrillFlakeGate) {
     Invoke-GateStep -Name "Critical drill flake gate (repeat critical drill tests)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\critical-drill-flake-gate-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\critical-drill-flake-gate.py",
                 "--repeats", "2",
                 "--max-failed-iterations", "0",
-                "--target-file", ".\tests\test_goal_ops.py"
+                "--target-file", ".\tests\test_goal_ops.py",
+                "--output-file", $reportPath
             )
         } catch {
             if ($StrictCriticalDrillFlakeGate) {

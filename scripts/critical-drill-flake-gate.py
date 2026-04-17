@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-file", default=str(PROJECT_ROOT / "tests" / "test_goal_ops.py"))
     parser.add_argument("--keyword-expression", default=DEFAULT_KEYWORD_EXPRESSION)
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--output-file")
     args = parser.parse_args(argv)
 
     if int(args.repeats) <= 0:
@@ -154,6 +155,16 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"[critical-drill-flake-gate] ERROR: {exc}", file=sys.stderr)
         return 1
+
+    if args.output_file:
+        output_file = Path(str(args.output_file)).expanduser()
+        if not output_file.is_absolute():
+            output_file = (PROJECT_ROOT / output_file).resolve()
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(
+            json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
 
     print(json.dumps(report, ensure_ascii=True, sort_keys=True))
     return 0 if bool(report.get("success")) else 1
