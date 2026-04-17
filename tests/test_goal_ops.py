@@ -2287,6 +2287,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                     "a11y_test_harness": {"baseline_duration_seconds": 0.1},
                     "p0_report_schema_contract": {"baseline_duration_seconds": 0.1},
                     "p0_runbook_contract": {"baseline_duration_seconds": 0.1},
+                    "p0_release_evidence_bundle": {"baseline_duration_seconds": 0.1},
                     "long_soak_budget": {
                         "baseline_duration_seconds": 0.1,
                         "max_http_429_rate_percent": 1.0,
@@ -2327,6 +2328,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
     assert payload["drills"]["a11y_test_harness"]["payload"]["success"] is True
     assert payload["drills"]["p0_report_schema_contract"]["payload"]["success"] is True
     assert payload["drills"]["p0_runbook_contract"]["payload"]["success"] is True
+    assert payload["drills"]["p0_release_evidence_bundle"]["payload"]["success"] is True
     assert report_file.exists()
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -5268,10 +5270,12 @@ def test_151_stability_canary_baseline_includes_stage_d_drills():
     assert "a11y_test_harness" in drills
     assert "p0_report_schema_contract" in drills
     assert "p0_runbook_contract" in drills
+    assert "p0_release_evidence_bundle" in drills
     assert float(drills["safe_mode_ux_degradation"]["baseline_duration_seconds"]) > 0
     assert float(drills["a11y_test_harness"]["baseline_duration_seconds"]) > 0
     assert float(drills["p0_report_schema_contract"]["baseline_duration_seconds"]) > 0
     assert float(drills["p0_runbook_contract"]["baseline_duration_seconds"]) > 0
+    assert float(drills["p0_release_evidence_bundle"]["baseline_duration_seconds"]) > 0
 
 
 def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
@@ -5335,6 +5339,7 @@ def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
     assert "a11y_test_harness" in missing_drills
     assert "p0_report_schema_contract" in missing_drills
     assert "p0_runbook_contract" in missing_drills
+    assert "p0_release_evidence_bundle" in missing_drills
     shutil.rmtree(workspace, ignore_errors=True)
 
 
@@ -5398,6 +5403,7 @@ def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_sta
     assert "a11y_test_harness" in missing
     assert "p0_report_schema_contract" in missing
     assert "p0_runbook_contract" in missing
+    assert "p0_release_evidence_bundle" in missing
 
     shutil.rmtree(workspace, ignore_errors=True)
 
