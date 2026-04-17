@@ -66,6 +66,9 @@ def run_canary(
     a11y_report_file = PROJECT_ROOT / ".tmp" / "stability-canary-a11y" / "a11y-test-harness-report.json"
     p0_schema_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-schema"
     p0_schema_report_file = p0_schema_artifacts_dir / "p0-report-schema-contract-report.json"
+    p0_runbook_contract_report_file = (
+        PROJECT_ROOT / ".tmp" / "stability-canary-p0-runbook-contract" / "p0-runbook-contract-check-report.json"
+    )
     p0_schema_required_files = ",".join(
         [
             str(safe_mode_report_file),
@@ -211,6 +214,16 @@ def run_canary(
             "label,success",
             "--output-file",
             str(p0_schema_report_file),
+        ],
+        "p0_runbook_contract": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "p0-runbook-contract-check.py"),
+            "--label",
+            "stability-canary",
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--output-file",
+            str(p0_runbook_contract_report_file),
         ],
         "long_soak_budget": [
             sys.executable,

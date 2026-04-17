@@ -800,7 +800,7 @@ python .\scripts\desktop-smoke.py
 
 ## Nightly Stability Canary
 
-Run the full canary profile locally (includes release-freeze policy, power-loss durability, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, Stage-D safe-mode UX/A11y checks, P0 report-schema contract validation on required canary evidence reports, and long soak budgets). Missing baseline drill entries are treated as regressions.
+Run the full canary profile locally (includes release-freeze policy, power-loss durability, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, Stage-D safe-mode UX/A11y checks, P0 report-schema contract validation on required canary evidence reports, P0 runbook-contract consistency checks, and long soak budgets). Missing baseline drill entries are treated as regressions.
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
