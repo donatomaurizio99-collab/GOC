@@ -3351,6 +3351,7 @@ def test_112_p0_runbook_contract_check_reports_success():
     assert payload["checks"]["missing_script_files_for_runbook_references"] == []
     assert payload["checks"]["missing_required_canary_drills"] == []
     assert payload["checks"]["invalid_canary_baseline_durations"] == []
+    assert payload["checks"]["missing_required_release_gate_tokens"] == []
     assert output_file.exists()
 
     report_file_payload = json.loads(output_file.read_text(encoding="utf-8"))
@@ -5535,5 +5536,51 @@ def test_157_p0_closure_report_fails_when_required_evidence_report_is_missing():
     assert payload["metrics"]["required_evidence_reports_missing"] == 1
     assert missing_required_report in payload["missing_required_evidence_reports"]
     assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_158_p0_runbook_contract_check_fails_when_release_gate_token_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-release-gate-token-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_release_gate = workspace / "release-gate-missing-token.ps1"
+
+    release_gate_text = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    broken_release_gate.write_text(
+        release_gate_text.replace(
+            "Release-gate artifact preflight (clean stale release-gate evidence)",
+            "Release-gate artifact preflight (legacy behavior)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--release-gate-file",
+        str(broken_release_gate.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_tokens = set(payload["checks"]["missing_required_release_gate_tokens"])
+    assert "Release-gate artifact preflight (clean stale release-gate evidence)" in missing_tokens
 
     shutil.rmtree(workspace, ignore_errors=True)

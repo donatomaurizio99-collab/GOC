@@ -46,6 +46,12 @@ DEFAULT_REQUIRED_CANARY_DRILLS = [
     "long_soak_budget",
 ]
 
+DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
+    "Release-gate artifact preflight (clean stale release-gate evidence)",
+    '--required-label", "release-gate"',
+    "--required-evidence-reports",
+]
+
 
 def _expect(condition: bool, message: str) -> None:
     if not condition:
@@ -102,6 +108,7 @@ def run_contract_check(
     required_runbook_scripts: list[str],
     required_strict_flags: list[str],
     required_canary_drills: list[str],
+    required_release_gate_tokens: list[str],
 ) -> dict[str, Any]:
     started = time.perf_counter()
     runbook_text = _read_text(runbook_file)
@@ -113,6 +120,9 @@ def run_contract_check(
     combined_required_flags = sorted(set(strict_flags_from_gate + required_strict_flags))
     missing_in_ci = [flag for flag in combined_required_flags if f"-{flag}" not in ci_workflow_text]
     missing_in_runbook = [flag for flag in combined_required_flags if f"-{flag}" not in runbook_text]
+    missing_required_release_gate_tokens = [
+        token for token in required_release_gate_tokens if token not in release_gate_text
+    ]
 
     runbook_script_refs = _extract_runbook_script_references(runbook_text)
     missing_required_runbook_scripts = [
@@ -156,6 +166,7 @@ def run_contract_check(
         and not missing_script_files
         and not missing_required_canary_drills
         and not invalid_canary_baseline_durations
+        and not missing_required_release_gate_tokens
     )
     report = {
         "label": label,
@@ -180,6 +191,8 @@ def run_contract_check(
             "canary_baseline_drill_names": sorted(canary_drills.keys()),
             "missing_required_canary_drills": missing_required_canary_drills,
             "invalid_canary_baseline_durations": invalid_canary_baseline_durations,
+            "required_release_gate_tokens": required_release_gate_tokens,
+            "missing_required_release_gate_tokens": missing_required_release_gate_tokens,
         },
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -205,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--required-runbook-scripts", default=",".join(DEFAULT_REQUIRED_RUNBOOK_SCRIPTS))
     parser.add_argument("--required-strict-flags", default="")
     parser.add_argument("--required-canary-drills", default=",".join(DEFAULT_REQUIRED_CANARY_DRILLS))
+    parser.add_argument("--required-release-gate-tokens", default=",".join(DEFAULT_REQUIRED_RELEASE_GATE_TOKENS))
     parser.add_argument("--output-file")
     args = parser.parse_args(argv)
 
@@ -222,8 +236,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     required_strict_flags = _parse_csv_list(args.required_strict_flags)
     required_canary_drills = _parse_csv_list(args.required_canary_drills)
+    required_release_gate_tokens = _parse_csv_list(args.required_release_gate_tokens)
     if not required_canary_drills:
         print("[p0-runbook-contract-check] ERROR: at least one required canary drill is required.", file=sys.stderr)
+        return 2
+    if not required_release_gate_tokens:
+        print("[p0-runbook-contract-check] ERROR: at least one required release-gate token is required.", file=sys.stderr)
         return 2
 
     try:
@@ -237,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
             required_runbook_scripts=required_runbook_scripts,
             required_strict_flags=required_strict_flags,
             required_canary_drills=required_canary_drills,
+            required_release_gate_tokens=required_release_gate_tokens,
         )
     except Exception as exc:
         print(f"[p0-runbook-contract-check] ERROR: {exc}", file=sys.stderr)
