@@ -4462,3 +4462,113 @@ def test_135_rto_rpo_assertion_suite_fails_when_rpo_budget_is_exceeded():
     )
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_136_canary_guardrails_check_reports_halt_success_with_mock_critical():
+    workspace = _local_test_dir("pytest-canary-guardrails-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    run_workspace = workspace / "run-workspace"
+    manifest_path = run_workspace / "desktop-rings.json"
+    output_file = workspace / "canary-guardrails-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-guardrails-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--manifest-path",
+        str(manifest_path.resolve()),
+        "--policy-file",
+        str((project_root / "docs" / "canary-guardrails-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--stable-baseline-version",
+        "0.0.1",
+        "--canary-candidate-version",
+        "0.0.2",
+        "--expected-decision",
+        "halt",
+        "--mock-slo-statuses",
+        "ok,ok,critical,critical",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["result"] == "halt"
+    assert payload["rings"]["promotion_blocked"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_137_canary_guardrails_check_fails_when_expected_promote_but_halt_occurs():
+    workspace = _local_test_dir("pytest-canary-guardrails-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    run_workspace = workspace / "run-workspace"
+    manifest_path = run_workspace / "desktop-rings.json"
+    output_file = workspace / "canary-guardrails-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-guardrails-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--manifest-path",
+        str(manifest_path.resolve()),
+        "--policy-file",
+        str((project_root / "docs" / "canary-guardrails-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--stable-baseline-version",
+        "0.0.1",
+        "--canary-candidate-version",
+        "0.0.2",
+        "--expected-decision",
+        "promote",
+        "--mock-slo-statuses",
+        "ok,ok,critical,critical",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[canary-guardrails-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["result"] == "halt"
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "decision_matches_expected"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

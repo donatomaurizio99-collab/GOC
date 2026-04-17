@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "stages": [
+    {
+      "name": "canary_10",
+      "traffic_percent": 10,
+      "min_samples": 1
+    },
+    {
+      "name": "canary_25",
+      "traffic_percent": 25,
+      "min_samples": 1
+    },
+    {
+      "name": "canary_50",
+      "traffic_percent": 50,
+      "min_samples": 1
+    },
+    {
+      "name": "canary_100",
+      "traffic_percent": 100,
+      "min_samples": 1
+    }
+  ],
+  "thresholds": {
+    "halt_statuses": [
+      "critical"
+    ],
+    "halt_on_non_ok": true,
+    "max_error_budget_burn_rate_percent": 2.0
+  },
+  "runbook_sections": {
+    "promotion": "### 3.35 Canary promotion guardrails",
+    "halt": "### 3.36 Canary automatic halt and freeze"
+  }
+}

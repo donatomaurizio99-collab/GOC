@@ -16,6 +16,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-alert-routing-oncall-check.ps1",
     "run-incident-drill-automation-check.ps1",
     "run-load-profile-framework-check.ps1",
+    "run-canary-guardrails-check.ps1",
     "run-rto-rpo-assertion-suite.ps1",
     "run-power-loss-durability-drill.ps1",
     "run-disk-pressure-fault-injection-drill.ps1",

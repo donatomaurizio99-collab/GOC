@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -23,6 +23,7 @@ This gate covers:
 - alert-routing/on-call check (severity route policy, escalation SLA budgets, and runbook-section references)
 - incident drill automation check (tabletop + technical drill cadence, evidence completeness, and follow-up budget)
 - load profile framework check (versioned production-like traffic profile with deterministic latency/error budgets)
+- canary guardrails check (staged ring exposure with deterministic halt/freeze policy and promotion-block validation)
 - RTO/RPO assertion suite (restore duration budgets plus bounded data-loss budget assertions)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
@@ -111,6 +112,12 @@ Manual load profile framework invocation:
 
 ```powershell
 .\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
+```
+
+Manual canary guardrails invocation:
+
+```powershell
+.\scripts\run-canary-guardrails-check.ps1 -PolicyFile "docs\canary-guardrails-policy.json" -ExpectedDecision halt -MockSloStatuses "ok,ok,critical,critical" -MockErrorBudgetBurnRates "0.5,0.8,2.5,2.5"
 ```
 
 Manual RTO/RPO assertion suite invocation:
@@ -995,6 +1002,42 @@ Actions:
    - `bounded_loss_rto_budget = true`
 3. Track `bounded_rows_lost` trend over releases; investigate increases even if still within budget.
 4. If bounded-loss budget is exceeded, freeze promotion and open incident with report JSON attached.
+
+### 3.35 Canary promotion guardrails
+
+Symptoms:
+- release candidate canary rollout has no deterministic evidence for staged promotion rules
+- operators cannot prove that non-ok status or burn-rate spikes halt further exposure
+
+Actions:
+1. Run guardrail evaluation:
+   ```powershell
+   .\scripts\run-canary-guardrails-check.ps1 -PolicyFile "docs\canary-guardrails-policy.json" -ExpectedDecision halt -MockSloStatuses "ok,ok,critical,critical" -MockErrorBudgetBurnRates "0.5,0.8,2.5,2.5"
+   ```
+2. Verify stage verdicts are deterministic:
+   - staged traffic percentages are strictly increasing (`10 -> 25 -> 50 -> 100`)
+   - threshold evaluation identifies first halt stage (`decision.result = halt`)
+   - `decision_matches_expected = true`
+3. Confirm candidate remains only on canary ring (`canary_seeded_with_candidate = true`) while stable ring does not promote in halt path.
+4. Attach JSON report to release evidence bundle before promotion decision.
+
+### 3.36 Canary automatic halt and freeze
+
+Symptoms:
+- canary thresholds are breached but promotion path still appears possible
+- release freeze activation state is unclear during incident triage
+
+Actions:
+1. Validate halt-path safety criteria from report:
+   - `release_freeze_active = true`
+   - `stable_not_promoted_when_halted = true`
+   - `promotion_blocked_by_freeze = true`
+2. If any halt criterion fails, stop rollout and keep ring frozen until root cause is mitigated.
+3. After recovery signals return to `ok` and burn-rate normalizes, run guardrails again with a promote expectation:
+   ```powershell
+   .\scripts\run-canary-guardrails-check.ps1 -PolicyFile "docs\canary-guardrails-policy.json" -ExpectedDecision promote -MockSloStatuses "ok,ok,ok,ok" -MockErrorBudgetBurnRates "0.4,0.5,0.6,0.7"
+   ```
+4. Only clear freeze and continue promotion after a green guardrail report is attached to incident/change record.
 
 ## 4. Operational Defaults
 

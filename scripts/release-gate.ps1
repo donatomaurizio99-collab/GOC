@@ -16,6 +16,8 @@ param(
     [switch]$StrictIncidentDrillAutomationCheck,
     [switch]$SkipLoadProfileFrameworkCheck,
     [switch]$StrictLoadProfileFrameworkCheck,
+    [switch]$SkipCanaryGuardrailCheck,
+    [switch]$StrictCanaryGuardrailCheck,
     [switch]$SkipRtoRpoAssertionCheck,
     [switch]$StrictRtoRpoAssertionCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
@@ -320,6 +322,39 @@ if (-not $SkipLoadProfileFrameworkCheck) {
             }
             Write-Warning (
                 "Load profile framework check failed but StrictLoadProfileFrameworkCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipCanaryGuardrailCheck) {
+    Invoke-GateStep -Name "Canary guardrails check (staged promotion with automatic halt/freeze)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\canary-guardrails"
+        $manifestPath = Join-Path $workspace "desktop-rings.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\canary-guardrails-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\canary-guardrails-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--workspace", $workspace,
+                "--manifest-path", $manifestPath,
+                "--policy-file", "docs/canary-guardrails-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--stable-baseline-version", "0.0.1",
+                "--canary-candidate-version", "0.0.2",
+                "--expected-decision", "halt",
+                "--mock-slo-statuses", "ok,ok,critical,critical",
+                "--mock-error-budget-burn-rates", "0.5,0.8,2.5,2.5",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictCanaryGuardrailCheck) {
+                throw
+            }
+            Write-Warning (
+                "Canary guardrails check failed but StrictCanaryGuardrailCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
