@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label", default="p0-release-evidence-bundle")
     parser.add_argument("--project-root")
     parser.add_argument("--artifacts-dir", default="artifacts")
-    parser.add_argument("--include-glob", default="p0-*-release-gate.json")
+    parser.add_argument("--include-glob", default="*-release-gate.json")
     parser.add_argument("--required-files", default="")
     parser.add_argument("--output-file", default="artifacts/p0-release-evidence-bundle.json")
     parser.add_argument("--bundle-dir", default="artifacts/p0-release-evidence-files")

@@ -330,7 +330,7 @@ Verify before release:
   - `Desktop Smoke (Windows)`
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
-- release evidence bundle report confirms all required P0 reports present and successful (`success=true`)
+- release evidence bundle report confirms all required `*-release-gate.json` reports are present and successful (`success=true`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
 - failure budget dashboard report is present and green (`artifacts\failure-budget-dashboard-release-gate.json`, `success=true`)
 - Stage-D runtime evidence reports are present and green:

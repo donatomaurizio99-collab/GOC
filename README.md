@@ -726,7 +726,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-p0-runbook-contract-check.ps1
 ```
 
-Standalone P0 release evidence bundle (aggregate P0 + Stage-D runtime evidence into one manifest):
+Standalone P0 release evidence bundle (aggregate all `*-release-gate.json` evidence into one manifest):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"

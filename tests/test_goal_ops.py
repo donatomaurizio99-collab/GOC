@@ -5355,6 +5355,9 @@ def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_sta
 def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     project_root = Path(__file__).resolve().parents[1]
     ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    bundle_script = (project_root / "scripts" / "p0-release-evidence-bundle.py").read_text(encoding="utf-8")
+    bundle_wrapper = (project_root / "scripts" / "run-p0-release-evidence-bundle.ps1").read_text(encoding="utf-8")
 
     required_artifact_paths = [
         "artifacts/safe-mode-ux-degradation-release-gate.json",
@@ -5364,3 +5367,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
+
+    assert '"--include-glob", "*-release-gate.json"' in release_gate
+    assert 'default="*-release-gate.json"' in bundle_script
+    assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper

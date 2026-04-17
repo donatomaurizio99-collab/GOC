@@ -1,7 +1,7 @@
 param(
     [string]$PythonExe = "python",
     [string]$ArtifactsDir = "artifacts",
-    [string]$IncludeGlob = "p0-*-release-gate.json",
+    [string]$IncludeGlob = "*-release-gate.json",
     [string]$RequiredFiles = "",
     [string]$OutputFile = "artifacts\\p0-release-evidence-bundle.json",
     [string]$BundleDir = "artifacts\\p0-release-evidence-files",

@@ -1281,7 +1281,7 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
             ".\scripts\p0-release-evidence-bundle.py",
             "--label", "release-gate",
             "--artifacts-dir", "artifacts",
-            "--include-glob", "p0-*-release-gate.json",
+            "--include-glob", "*-release-gate.json",
             "--output-file", $bundleOutputPath,
             "--bundle-dir", $bundleDir
         )
