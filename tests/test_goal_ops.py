@@ -2283,6 +2283,8 @@ def test_94_stability_canary_reports_success_with_short_soak():
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
                     "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
                     "invariant_burst": {"baseline_duration_seconds": 0.1},
+                    "safe_mode_ux_degradation": {"baseline_duration_seconds": 0.1},
+                    "a11y_test_harness": {"baseline_duration_seconds": 0.1},
                     "long_soak_budget": {
                         "baseline_duration_seconds": 0.1,
                         "max_http_429_rate_percent": 1.0,
@@ -2319,6 +2321,8 @@ def test_94_stability_canary_reports_success_with_short_soak():
     output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     payload = json.loads(output_lines[-1])
     assert payload["success"] is True
+    assert payload["drills"]["safe_mode_ux_degradation"]["payload"]["success"] is True
+    assert payload["drills"]["a11y_test_harness"]["payload"]["success"] is True
     assert report_file.exists()
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -5181,3 +5185,76 @@ def test_150_runtime_stability_and_flake_gate_defaults_include_stage_d_checks():
         assert test_name in critical_script
         assert test_name in critical_wrapper
         assert test_name in release_gate
+
+
+def test_151_stability_canary_baseline_includes_stage_d_drills():
+    project_root = Path(__file__).resolve().parents[1]
+    baseline = json.loads((project_root / "docs" / "stability-canary-baseline.json").read_text(encoding="utf-8"))
+    drills = baseline.get("drills") or {}
+
+    assert "safe_mode_ux_degradation" in drills
+    assert "a11y_test_harness" in drills
+    assert float(drills["safe_mode_ux_degradation"]["baseline_duration_seconds"]) > 0
+    assert float(drills["a11y_test_harness"]["baseline_duration_seconds"]) > 0
+
+
+def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
+    workspace = _local_test_dir("pytest-stability-canary-missing-stage-d-baseline")
+    project_root = Path(__file__).resolve().parents[1]
+    baseline_file = workspace / "baseline-missing-stage-d.json"
+    report_file = workspace / "report.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "max_duration_regression_percent": 10_000.0,
+                "drills": {
+                    "release_freeze_policy": {"baseline_duration_seconds": 0.1},
+                    "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
+                    "power_loss_durability": {"baseline_duration_seconds": 0.1},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
+                    "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
+                    "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
+                    "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
+                    "invariant_burst": {"baseline_duration_seconds": 0.1},
+                    "long_soak_budget": {
+                        "baseline_duration_seconds": 0.1,
+                        "max_http_429_rate_percent": 1.0,
+                        "max_error_rate_percent": 1.0,
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "stability-canary.py"),
+        "--baseline-file",
+        str(baseline_file),
+        "--output-file",
+        str(report_file),
+        "--long-soak-duration-seconds",
+        "6",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode != 0
+    assert report_file.exists()
+    payload = json.loads(report_file.read_text(encoding="utf-8"))
+    assert payload["success"] is False
+    missing_entries = [
+        entry for entry in payload.get("regressions", []) if entry.get("type") == "missing_baseline_entry"
+    ]
+    missing_drills = {str(entry.get("drill")) for entry in missing_entries}
+    assert "safe_mode_ux_degradation" in missing_drills
+    assert "a11y_test_harness" in missing_drills
+    shutil.rmtree(workspace, ignore_errors=True)

@@ -25,6 +25,12 @@
     "invariant_burst": {
       "baseline_duration_seconds": 8.0
     },
+    "safe_mode_ux_degradation": {
+      "baseline_duration_seconds": 3.0
+    },
+    "a11y_test_harness": {
+      "baseline_duration_seconds": 3.0
+    },
     "long_soak_budget": {
       "baseline_duration_seconds": 140.0,
       "max_http_429_rate_percent": 1.0,
