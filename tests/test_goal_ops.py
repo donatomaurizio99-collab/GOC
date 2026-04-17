@@ -5358,6 +5358,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
     bundle_script = (project_root / "scripts" / "p0-release-evidence-bundle.py").read_text(encoding="utf-8")
     bundle_wrapper = (project_root / "scripts" / "run-p0-release-evidence-bundle.ps1").read_text(encoding="utf-8")
+    closure_script = (project_root / "scripts" / "p0-closure-report.py").read_text(encoding="utf-8")
+    closure_wrapper = (project_root / "scripts" / "run-p0-closure-report.ps1").read_text(encoding="utf-8")
 
     required_artifact_paths = [
         "artifacts/safe-mode-ux-degradation-release-gate.json",
@@ -5370,10 +5372,13 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
 
     assert '"--include-glob", "*-release-gate.json"' in release_gate
     assert '"--required-label", "release-gate"' in release_gate
+    assert '"--required-evidence-reports"' in release_gate
     assert 'default="*-release-gate.json"' in bundle_script
     assert 'parser.add_argument("--required-label", default="")' in bundle_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
     assert '[string]$RequiredLabel = ""' in bundle_wrapper
+    assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
+    assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
 
 
 def test_155_p0_release_evidence_bundle_fails_when_required_label_is_mismatched():
@@ -5455,3 +5460,80 @@ def test_156_release_gate_preflight_cleanup_contract_is_documented():
     assert "preflight cleanup" in readme.lower()
     assert "preflight cleanup" in runbook.lower()
     assert "metrics.label_mismatch_reports=0" in runbook
+
+
+def test_157_p0_closure_report_fails_when_required_evidence_report_is_missing():
+    workspace = _local_test_dir("pytest-p0-closure-report-required-evidence-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+    present_required_report = str((artifacts_dir / "safe-mode-ux-degradation-release-gate.json").resolve())
+    missing_required_report = str((artifacts_dir / "a11y-test-harness-release-gate.json").resolve())
+
+    evidence_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"label_mismatch_reports": 0},
+                "reports": [{"path": present_required_report, "success": True}],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 12}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--required-evidence-reports",
+        ",".join([present_required_report, missing_required_report]),
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 closure report is not green: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["required_evidence_reports_missing"] == 1
+    assert missing_required_report in payload["missing_required_evidence_reports"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

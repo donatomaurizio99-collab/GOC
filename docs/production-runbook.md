@@ -341,7 +341,7 @@ Verify before release:
   - `artifacts\a11y-test-harness-release-gate.json`
   - `artifacts\release-gate-runtime-stability-release-gate.json`
   - `artifacts\critical-drill-flake-gate-release-gate.json`
-- closure report confirms all readiness criteria are green (`success=true`, `metrics.criteria_failed=0`)
+- closure report confirms all readiness criteria and required evidence checks are green (`success=true`, `metrics.criteria_failed=0`, `metrics.required_evidence_reports_missing=0`, `metrics.required_evidence_reports_non_green=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
 - No unresolved high-severity bug tickets for release scope.

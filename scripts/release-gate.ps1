@@ -1362,16 +1362,20 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
 if (-not $SkipP0ClosureReport) {
     Invoke-GateStep -Name "P0 closure go/no-go report (consolidated readiness signal)" -Action {
         $outputPath = Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json"
+        $arguments = @(
+            ".\scripts\p0-closure-report.py",
+            "--label", "release-gate",
+            "--required-consecutive", "10",
+            "--evidence-bundle-file", "artifacts\p0-release-evidence-bundle-release-gate.json",
+            "--burnin-file", "artifacts\p0-burnin-consecutive-green-release-gate.json",
+            "--runbook-contract-file", "artifacts\p0-runbook-contract-check-release-gate.json",
+            "--output-file", $outputPath
+        )
+        if ($P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-evidence-reports", ($P0EvidenceReportPaths -join ","))
+        }
         try {
-            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
-                ".\scripts\p0-closure-report.py",
-                "--label", "release-gate",
-                "--required-consecutive", "10",
-                "--evidence-bundle-file", "artifacts\p0-release-evidence-bundle-release-gate.json",
-                "--burnin-file", "artifacts\p0-burnin-consecutive-green-release-gate.json",
-                "--runbook-contract-file", "artifacts\p0-runbook-contract-check-release-gate.json",
-                "--output-file", $outputPath
-            )
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
         } catch {
             if ($StrictP0ClosureReport) {
                 throw

@@ -1,6 +1,7 @@
 param(
     [string]$PythonExe = "python",
     [int]$RequiredConsecutive = 10,
+    [string]$RequiredEvidenceReports = "",
     [string]$EvidenceBundleFile = "artifacts\\p0-release-evidence-bundle-release-gate.json",
     [string]$BurnInFile = "artifacts\\p0-burnin-consecutive-green-release-gate.json",
     [string]$RunbookContractFile = "artifacts\\p0-runbook-contract-check-release-gate.json",
@@ -22,6 +23,9 @@ $arguments = @(
     "--runbook-contract-file", $RunbookContractFile,
     "--output-file", $OutputFile
 )
+if (-not [string]::IsNullOrWhiteSpace($RequiredEvidenceReports)) {
+    $arguments += @("--required-evidence-reports", $RequiredEvidenceReports)
+}
 if ($AllowNotReady) {
     $arguments += "--allow-not-ready"
 }
