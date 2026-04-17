@@ -403,7 +403,7 @@ After release is live:
 
 ### 1.6 Nightly stability canary
 
-The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including power-loss durability, DB corruption quarantine startup recovery, upgrade/downgrade compatibility, Stage-D safe-mode UX + A11y baseline checks, a P0 report-schema contract drill against required canary evidence reports, a P0 runbook-contract consistency drill, and a P0 release-evidence bundle drill.
+The scheduled workflow [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml) runs a nightly trend check against [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json), including power-loss durability, DB corruption quarantine startup recovery, upgrade/downgrade compatibility, Stage-D safe-mode UX + A11y baseline checks, a P0 burn-in consecutive-green fixture drill, a P0 report-schema contract drill against required canary evidence reports, a P0 runbook-contract consistency drill, a P0 release-evidence bundle drill, and a P0 closure go/no-go drill.
 Missing baseline entries are treated as regressions and fail the canary.
 
 Manual canary invocation:
