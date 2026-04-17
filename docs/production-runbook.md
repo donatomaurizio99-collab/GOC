@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -57,6 +57,7 @@ This gate covers:
 - disaster-recovery rehearsal pack (aggregated backup/snapshot/switch/RTO-RPO drills with deterministic release-block decision + evidence files)
 - failure budget dashboard (aggregated machine-readable release-block signal across critical budget reports)
 - safe-mode UX degradation check (runtime rail + mutation-lock UX contract + release/CI/runbook wiring)
+- A11y test harness check (keyboard navigation baseline, screen-reader semantics smoke, and contrast ratios across visual presets)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
@@ -283,6 +284,12 @@ Manual safe-mode/degradation UX contract check invocation:
 
 ```powershell
 .\scripts\run-safe-mode-ux-degradation-check.ps1
+```
+
+Manual A11y test harness check invocation:
+
+```powershell
+.\scripts\run-a11y-test-harness-check.ps1
 ```
 
 Manual release-gate runtime stability drill invocation:
@@ -1168,6 +1175,26 @@ Actions:
    - `checks.release_gate_has_strict_flag = true`
    - `checks.ci_has_strict_flag = true`
 3. If check fails, hold release and restore runtime rail + mutation-lock behavior before retry.
+
+### 3.43 Accessibility baseline regression (keyboard/contrast/screen-reader smoke)
+
+Symptoms:
+- keyboard-first navigation flow regresses (skip link, focus handling, or shortcut handling)
+- live-region or semantic labels drift, reducing screen-reader operability in operator workflows
+- contrast baseline drifts below release thresholds in one or more visual presets
+
+Actions:
+1. Execute A11y harness check:
+   ```powershell
+   .\scripts\run-a11y-test-harness-check.ps1
+   ```
+2. Validate report criteria:
+   - `success = true`
+   - `checks.sr_only_label_count >= checks.min_sr_only_labels`
+   - `checks.aria_live_count >= checks.min_aria_live_regions`
+   - `checks.contrast_failures = []`
+   - `checks.release_gate_has_strict_flag = true`
+3. If check fails, treat as release blocker and restore the failing keyboard, semantics, or contrast contract before retrying gate.
 
 ## 4. Operational Defaults
 

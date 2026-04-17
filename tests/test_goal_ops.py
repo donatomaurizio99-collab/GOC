@@ -5058,3 +5058,100 @@ def test_146_safe_mode_ux_degradation_check_fails_when_runtime_rail_tokens_missi
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_147_a11y_test_harness_check_reports_success():
+    workspace = _local_test_dir("pytest-a11y-test-harness-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "a11y-test-harness-check-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "a11y-test-harness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_template_tokens"] == []
+    assert payload["checks"]["missing_app_js_tokens"] == []
+    assert payload["checks"]["missing_runbook_tokens"] == []
+    assert payload["checks"]["contrast_failures"] == []
+    assert payload["checks"]["release_gate_has_strict_flag"] is True
+    assert payload["checks"]["ci_has_strict_flag"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_148_a11y_test_harness_check_fails_when_required_template_tokens_are_missing():
+    workspace = _local_test_dir("pytest-a11y-test-harness-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "a11y-test-harness-check-report.json"
+    broken_template = workspace / "broken-index.html"
+    broken_template.write_text(
+        "<html><head><style>"
+        ":root { --ink: #111111; --panel: #ffffff; --muted: #555555; --info: #005a9c; --good: #176b2c; --bad: #8a0f1a; --warn: #7a4f00; }"
+        "body.visual-graphite {}"
+        "body.visual-signal {}"
+        "</style></head>"
+        "<body><main id='main-content'></main></body></html>",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "a11y-test-harness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--template-file",
+        str(broken_template.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[a11y-test-harness-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "A11y test harness check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert len(payload["checks"]["missing_template_tokens"]) >= 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'class="skip-link"' in html
+    assert 'href="#main-content"' in html
+    assert 'id="main-content" tabindex="-1"' in html
+    assert html.count('class="sr-only"') >= 10
+    assert html.count('aria-live="polite"') >= 5

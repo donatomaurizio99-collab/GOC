@@ -82,6 +82,8 @@ param(
     [switch]$StrictFailureBudgetDashboard,
     [switch]$SkipSafeModeUxDegradationCheck,
     [switch]$StrictSafeModeUxDegradationCheck,
+    [switch]$SkipA11yTestHarnessCheck,
+    [switch]$StrictA11yTestHarnessCheck,
     [switch]$SkipReleaseGateRuntimeStabilityDrill,
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -1133,6 +1135,27 @@ if (-not $SkipSafeModeUxDegradationCheck) {
             }
             Write-Warning (
                 "Safe-mode UX degradation check failed but StrictSafeModeUxDegradationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipA11yTestHarnessCheck) {
+    Invoke-GateStep -Name "A11y test harness check (keyboard + screen-reader smoke + contrast baseline)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\a11y-test-harness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\a11y-test-harness-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictA11yTestHarnessCheck) {
+                throw
+            }
+            Write-Warning (
+                "A11y test harness check failed but StrictA11yTestHarnessCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
