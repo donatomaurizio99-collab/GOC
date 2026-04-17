@@ -92,6 +92,8 @@ param(
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
     [switch]$StrictP0RunbookContractCheck,
+    [switch]$SkipP0ReportSchemaContractCheck,
+    [switch]$StrictP0ReportSchemaContractCheck,
     [switch]$SkipP0ReleaseEvidenceBundle,
     [switch]$StrictP0ReleaseEvidenceBundle,
     [switch]$SkipP0ClosureReport,
@@ -102,7 +104,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
-$P0EvidenceReportPaths = @()
+$script:P0EvidenceReportPaths = @()
 
 function Invoke-NativeCommand {
     param(
@@ -1117,7 +1119,7 @@ if (-not $SkipDisasterRecoveryRehearsalPack) {
         $workspace = Join-Path $ProjectRoot ".tmp\disaster-recovery-rehearsal-pack"
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
         $evidenceDir = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-evidence-release-gate"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\disaster-recovery-rehearsal-pack.py",
@@ -1153,7 +1155,7 @@ if (-not $SkipFailureBudgetDashboard) {
             "artifacts\auto-rollback-policy-release-gate.json",
             "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
         ) -join ","
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\failure-budget-dashboard.py",
@@ -1177,7 +1179,7 @@ if (-not $SkipFailureBudgetDashboard) {
 if (-not $SkipSafeModeUxDegradationCheck) {
     Invoke-GateStep -Name "Safe-mode UX degradation check (runtime rail + mutation lock + release/runbook contract)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\safe-mode-ux-degradation-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\safe-mode-ux-degradation-check.py",
@@ -1199,7 +1201,7 @@ if (-not $SkipSafeModeUxDegradationCheck) {
 if (-not $SkipA11yTestHarnessCheck) {
     Invoke-GateStep -Name "A11y test harness check (keyboard + screen-reader smoke + contrast baseline)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\a11y-test-harness-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\a11y-test-harness-check.py",
@@ -1221,7 +1223,7 @@ if (-not $SkipA11yTestHarnessCheck) {
 if (-not $SkipReleaseGateRuntimeStabilityDrill) {
     Invoke-GateStep -Name "Release-gate runtime stability drill (duration/variance budget on critical drills)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-runtime-stability-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\release-gate-runtime-stability-drill.py",
@@ -1251,7 +1253,7 @@ if (-not $SkipReleaseGateRuntimeStabilityDrill) {
 if (-not $SkipCriticalDrillFlakeGate) {
     Invoke-GateStep -Name "Critical drill flake gate (repeat critical drill tests)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\critical-drill-flake-gate-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\critical-drill-flake-gate.py",
@@ -1276,7 +1278,7 @@ if (-not $SkipCriticalDrillFlakeGate) {
 if (-not $SkipP0BurnInConsecutiveGreen) {
     Invoke-GateStep -Name "P0 burn-in consecutive-green monitor (CI history hard gate)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-burnin-consecutive-green-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         $repository = if ($env:GITHUB_REPOSITORY) {
             $env:GITHUB_REPOSITORY
         } else {
@@ -1309,7 +1311,7 @@ if (-not $SkipP0BurnInConsecutiveGreen) {
 if (-not $SkipP0RunbookContractCheck) {
     Invoke-GateStep -Name "P0 runbook contract check (release-gate/CI/runbook consistency)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\p0-runbook-contract-check-release-gate.json"
-        $P0EvidenceReportPaths += $reportPath
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\p0-runbook-contract-check.py",
@@ -1322,6 +1324,39 @@ if (-not $SkipP0RunbookContractCheck) {
             }
             Write-Warning (
                 "P0 runbook contract check failed but StrictP0RunbookContractCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ReportSchemaContractCheck) {
+    Invoke-GateStep -Name "P0 report schema contract check (release-gate evidence baseline schema)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-report-schema-contract-release-gate.json"
+        $requiredReportPaths = @($script:P0EvidenceReportPaths)
+        $script:P0EvidenceReportPaths += $reportPath
+        $arguments = @(
+            ".\scripts\p0-report-schema-contract-check.py",
+            "--label", "release-gate",
+            "--artifacts-dir", "artifacts",
+            "--include-glob", "*-release-gate.json",
+            "--required-top-level-keys", "label,success",
+            "--required-label", "release-gate",
+            "--output-file", $reportPath
+        )
+        if ($requiredReportPaths.Count -gt 0) {
+            $arguments += @("--required-files", ($requiredReportPaths -join ","))
+        } else {
+            $arguments += "--allow-empty"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
+        } catch {
+            if ($StrictP0ReportSchemaContractCheck) {
+                throw
+            }
+            Write-Warning (
+                "P0 report schema contract check failed but StrictP0ReportSchemaContractCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
@@ -1341,8 +1376,8 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
             "--output-file", $bundleOutputPath,
             "--bundle-dir", $bundleDir
         )
-        if ($P0EvidenceReportPaths.Count -gt 0) {
-            $arguments += @("--required-files", ($P0EvidenceReportPaths -join ","))
+        if ($script:P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-files", ($script:P0EvidenceReportPaths -join ","))
         } else {
             $arguments += "--allow-empty"
         }
@@ -1372,8 +1407,8 @@ if (-not $SkipP0ClosureReport) {
             "--runbook-contract-file", "artifacts\p0-runbook-contract-check-release-gate.json",
             "--output-file", $outputPath
         )
-        if ($P0EvidenceReportPaths.Count -gt 0) {
-            $arguments += @("--required-evidence-reports", ($P0EvidenceReportPaths -join ","))
+        if ($script:P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-evidence-reports", ($script:P0EvidenceReportPaths -join ","))
         }
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
@@ -1390,3 +1425,4 @@ if (-not $SkipP0ClosureReport) {
 }
 
 Write-Host "Release gate passed." -ForegroundColor Green
+

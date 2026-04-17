@@ -5394,6 +5394,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     project_root = Path(__file__).resolve().parents[1]
     ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    schema_script = (project_root / "scripts" / "p0-report-schema-contract-check.py").read_text(encoding="utf-8")
+    schema_wrapper = (
+        project_root / "scripts" / "run-p0-report-schema-contract-check.ps1"
+    ).read_text(encoding="utf-8")
     bundle_script = (project_root / "scripts" / "p0-release-evidence-bundle.py").read_text(encoding="utf-8")
     bundle_wrapper = (project_root / "scripts" / "run-p0-release-evidence-bundle.ps1").read_text(encoding="utf-8")
     closure_script = (project_root / "scripts" / "p0-closure-report.py").read_text(encoding="utf-8")
@@ -5406,19 +5410,33 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/a11y-test-harness-release-gate.json",
         "artifacts/release-gate-runtime-stability-release-gate.json",
         "artifacts/critical-drill-flake-gate-release-gate.json",
+        "artifacts/p0-report-schema-contract-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
 
+    assert '"--required-top-level-keys", "label,success"' in release_gate
+    assert '"--required-decision-keys", "release_blocked"' not in release_gate
     assert '"--include-glob", "*-release-gate.json"' in release_gate
     assert '"--required-label", "release-gate"' in release_gate
+    assert "$script:P0EvidenceReportPaths = @()" in release_gate
+    assert "$requiredReportPaths = @($script:P0EvidenceReportPaths)" in release_gate
+    assert 'if ($script:P0EvidenceReportPaths.Count -gt 0)' in release_gate
     assert '"--required-evidence-reports"' in release_gate
+    assert 'default="*-release-gate.json"' in schema_script
+    assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
+    assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
+    assert '[string]$IncludeGlob = "*-release-gate.json"' in schema_wrapper
+    assert '[string]$RequiredTopLevelKeys = "label,success"' in schema_wrapper
+    assert '[string]$RequiredDecisionKeys = ""' in schema_wrapper
     assert 'default="*-release-gate.json"' in bundle_script
     assert 'parser.add_argument("--required-label", default="")' in bundle_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
     assert '[string]$RequiredLabel = ""' in bundle_wrapper
     assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
     assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
+    assert "run-p0-report-schema-contract-check.ps1" in runbook_contract_script
+    assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -5717,5 +5735,229 @@ def test_160_p0_runbook_contract_check_fails_when_required_runbook_token_is_miss
     assert payload["success"] is False
     missing_tokens = set(payload["checks"]["missing_required_runbook_tokens"])
     assert "metrics.required_evidence_reports_non_green=0" in missing_tokens
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_161_p0_report_schema_contract_check_reports_success_with_fixture_reports():
+    workspace = _local_test_dir("pytest-p0-report-schema-contract-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    report_one = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    report_two = artifacts_dir / "a11y-test-harness-release-gate.json"
+    output_file = artifacts_dir / "p0-report-schema-contract-release-gate.json"
+
+    report_one.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "paths": {"output_file": str(report_one.resolve())},
+                "metrics": {"checks_passed": 1},
+                "decision": {"release_blocked": False},
+                "generated_at_utc": "2026-04-17T12:00:00Z",
+                "duration_ms": 15,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    report_two.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "paths": {"output_file": str(report_two.resolve())},
+                "metrics": {"checks_passed": 1},
+                "decision": {"release_blocked": False},
+                "generated_at_utc": "2026-04-17T12:00:01Z",
+                "duration_ms": 22,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-report-schema-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-files",
+        ",".join([str(report_one.resolve()), str(report_two.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["schema_failed_reports"] == 0
+    assert payload["metrics"]["missing_required_files"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_162_p0_report_schema_contract_check_fails_when_required_keys_are_missing():
+    workspace = _local_test_dir("pytest-p0-report-schema-contract-check-missing-keys").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    broken_report = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    output_file = artifacts_dir / "p0-report-schema-contract-release-gate.json"
+    broken_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "paths": {"output_file": str(broken_report.resolve())},
+                "metrics": {"checks_passed": 1},
+                "generated_at_utc": "2026-04-17T12:00:00Z",
+                "duration_ms": 12,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-report-schema-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-top-level-keys",
+        "label,success,generated_at_utc,duration_ms,paths,metrics,decision",
+        "--required-decision-keys",
+        "release_blocked",
+        "--required-files",
+        str(broken_report.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-report-schema-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 report schema contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["schema_failed_reports"] == 1
+    assert any(
+        str(entry.get("path") or "") == str(broken_report.resolve())
+        for entry in payload.get("schema_failed_reports", [])
+        if isinstance(entry, dict)
+    )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_163_p0_report_schema_contract_check_ignores_out_of_scope_reports_when_required_files_are_set():
+    workspace = _local_test_dir("pytest-p0-report-schema-contract-check-out-of-scope").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    required_report = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    out_of_scope_report = artifacts_dir / "legacy-alert-routing-release-gate.json"
+    output_file = artifacts_dir / "p0-report-schema-contract-release-gate.json"
+
+    required_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "paths": {"output_file": str(required_report.resolve())},
+                "metrics": {"checks_passed": 1},
+                "decision": {"release_blocked": False},
+                "generated_at_utc": "2026-04-17T12:00:00Z",
+                "duration_ms": 9,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    # Intentionally incomplete legacy report schema. This should be ignored
+    # because it is not listed in --required-files.
+    out_of_scope_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-report-schema-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-files",
+        str(required_report.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["schema_failed_reports"] == 0
+    assert payload["metrics"]["reports_out_of_scope"] == 1
+    assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
