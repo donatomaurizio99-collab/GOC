@@ -42,6 +42,7 @@ def _expect(condition: bool, message: str) -> None:
 
 def run_gate(
     *,
+    label: str,
     repeats: int,
     max_failed_iterations: int,
     target_file: Path,
@@ -88,6 +89,7 @@ def run_gate(
     success = len(failed) <= int(max_failed_iterations)
 
     return {
+        "label": str(label),
         "success": bool(success),
         "config": {
             "repeats": int(repeats),
@@ -113,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             "for N iterations and fail when failed-iteration budget is exceeded."
         )
     )
+    parser.add_argument("--label", default="critical-drill-flake-gate")
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--max-failed-iterations", type=int, default=0)
     parser.add_argument("--target-file", default=str(PROJECT_ROOT / "tests" / "test_goal_ops.py"))
@@ -140,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         report = run_gate(
+            label=str(args.label),
             repeats=int(args.repeats),
             max_failed_iterations=int(args.max_failed_iterations),
             target_file=target_file,

@@ -89,7 +89,7 @@ def _load_project_metadata(project_root: Path) -> dict[str, Any]:
     }
 
 
-def _build_sbom(project_root: Path, output_file: Path) -> dict[str, Any]:
+def _build_sbom(project_root: Path, output_file: Path, *, label: str) -> dict[str, Any]:
     metadata = _load_project_metadata(project_root)
     installed_versions: dict[str, str] = {}
     for distribution in importlib.metadata.distributions():
@@ -113,6 +113,8 @@ def _build_sbom(project_root: Path, output_file: Path) -> dict[str, Any]:
         )
 
     sbom = {
+        "label": str(label),
+        "success": True,
         "format": "goal-ops-sbom-v1",
         "generated_at_utc": _utc_now(),
         "project": {
@@ -274,7 +276,7 @@ def run_check(
 
     if not skip_sbom:
         try:
-            sbom_payload = _build_sbom(project_root, sbom_output_file)
+            sbom_payload = _build_sbom(project_root, sbom_output_file, label=label)
             sbom_report["generated"] = True
             sbom_report["component_count"] = int(sbom_payload.get("component_count") or 0)
         except Exception as exc:  # pragma: no cover - defensive

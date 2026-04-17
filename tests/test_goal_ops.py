@@ -2401,6 +2401,41 @@ def test_95_startup_db_corruption_quarantine_activates_safe_mode():
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_95_safe_mode_block_is_not_overridden_by_observability_write_error():
+    app = create_app(Settings(workflow_worker_poll_interval_seconds=0.05))
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+        services.runtime_guard.activate_safe_mode(
+            reason="Test safe mode guard",
+            source="test",
+            auto=False,
+        )
+
+        original_record_audit = services.observability.record_audit
+
+        def _failing_audit(*args, **kwargs):
+            raise sqlite3.OperationalError("database or disk is full")
+
+        services.observability.record_audit = _failing_audit
+        try:
+            blocked = local_client.post(
+                "/goals",
+                json={
+                    "title": "Blocked by safe mode",
+                    "description": "mutation should remain blocked",
+                    "urgency": 0.4,
+                    "value": 0.5,
+                    "deadline_score": 0.2,
+                },
+            )
+        finally:
+            services.observability.record_audit = original_record_audit
+
+        assert blocked.status_code == 503
+        payload = blocked.json()
+        assert "Runtime safe mode active" in payload["detail"]
+
+
 def test_96_db_corruption_quarantine_drill_reports_success():
     workspace = _local_test_dir("pytest-db-corruption-quarantine-drill")
     project_root = Path(__file__).resolve().parents[1]

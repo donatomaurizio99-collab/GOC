@@ -221,25 +221,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 .replace("}", "")
                 or "root"
             )
-            services.observability.increment_metric("http.requests.total")
-            services.observability.increment_metric(f"http.requests.method.{method}")
-            services.observability.increment_metric(f"http.requests.status.{status_code}")
-            services.observability.increment_metric(f"http.requests.route.{route_metric}")
+            try:
+                services.observability.increment_metric("http.requests.total")
+                services.observability.increment_metric(f"http.requests.method.{method}")
+                services.observability.increment_metric(f"http.requests.status.{status_code}")
+                services.observability.increment_metric(f"http.requests.route.{route_metric}")
 
-            if method in {"POST", "PUT", "PATCH", "DELETE"} and not route.startswith("/static"):
-                services.observability.record_audit(
-                    action="http.mutation",
-                    actor="api",
-                    status="success" if status_code < 400 else "error",
-                    entity_type="route",
-                    entity_id=route,
-                    correlation_id=request.headers.get("x-correlation-id"),
-                    details={
-                        "method": method,
-                        "status_code": status_code,
-                        "duration_ms": duration_ms,
-                    },
+                if method in {"POST", "PUT", "PATCH", "DELETE"} and not route.startswith("/static"):
+                    services.observability.record_audit(
+                        action="http.mutation",
+                        actor="api",
+                        status="success" if status_code < 400 else "error",
+                        entity_type="route",
+                        entity_id=route,
+                        correlation_id=request.headers.get("x-correlation-id"),
+                        details={
+                            "method": method,
+                            "status_code": status_code,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+            except sqlite3.OperationalError as exc:
+                services.runtime_guard.record_database_error(
+                    message=str(exc),
+                    source="observability_middleware",
                 )
+            except Exception:
+                # Telemetry writes must never alter request outcome.
+                pass
 
     @app.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:

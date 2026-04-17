@@ -1255,6 +1255,7 @@ if (-not $SkipCriticalDrillFlakeGate) {
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\critical-drill-flake-gate.py",
+                "--label", "release-gate",
                 "--repeats", "2",
                 "--max-failed-iterations", "0",
                 "--target-file", ".\tests\test_goal_ops.py",
