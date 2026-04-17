@@ -104,6 +104,10 @@ param(
     [switch]$StrictReleaseGateStagingSoakReadinessCheck,
     [switch]$SkipReleaseGateRcCanaryRolloutCheck,
     [switch]$StrictReleaseGateRcCanaryRolloutCheck,
+    [switch]$SkipReleaseGateEvidenceLineageCheck,
+    [switch]$StrictReleaseGateEvidenceLineageCheck,
+    [switch]$SkipReleaseGateProductionReadinessCertificationCheck,
+    [switch]$StrictReleaseGateProductionReadinessCertificationCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -1712,6 +1716,56 @@ if (-not $SkipReleaseGateRcCanaryRolloutCheck) {
             }
             Write-Warning (
                 "Release-gate RC canary rollout check failed but StrictReleaseGateRcCanaryRolloutCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateEvidenceLineageCheck) {
+    Invoke-GateStep -Name "Release-gate evidence lineage check (Stage S timestamp + manifest coherence gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-lineage-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-evidence-lineage-check.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/release-gate-stability-final-readiness-release-gate.json,artifacts/release-gate-staging-soak-readiness-release-gate.json,artifacts/release-gate-rc-canary-rollout-release-gate.json,artifacts/p0-closure-report-release-gate.json",
+                "--manifest-file", "artifacts/release-gate-evidence-manifest-release-gate.json",
+                "--required-label", "release-gate",
+                "--max-report-timestamp-skew-seconds", "900",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateEvidenceLineageCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate evidence lineage check failed but StrictReleaseGateEvidenceLineageCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateProductionReadinessCertificationCheck) {
+    Invoke-GateStep -Name "Release-gate production readiness certification (Stage T final go/no-go certificate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-production-readiness-certification-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-production-readiness-certification.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/release-gate-stability-final-readiness-release-gate.json,artifacts/release-gate-staging-soak-readiness-release-gate.json,artifacts/release-gate-rc-canary-rollout-release-gate.json,artifacts/release-gate-evidence-lineage-release-gate.json,artifacts/p0-closure-report-release-gate.json,artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--required-label", "release-gate",
+                "--burnin-report-file", "artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--required-consecutive", "10",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateProductionReadinessCertificationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate production readiness certification failed but StrictReleaseGateProductionReadinessCertificationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
