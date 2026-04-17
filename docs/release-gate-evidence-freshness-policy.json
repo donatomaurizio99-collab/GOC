@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "max_report_age_hours": 24.0,
+  "required_reports": [
+    "artifacts/safe-mode-ux-degradation-release-gate.json",
+    "artifacts/a11y-test-harness-release-gate.json",
+    "artifacts/release-gate-runtime-stability-release-gate.json",
+    "artifacts/critical-drill-flake-gate-release-gate.json",
+    "artifacts/p0-report-schema-contract-release-gate.json",
+    "artifacts/p0-release-evidence-bundle-release-gate.json",
+    "artifacts/p0-closure-report-release-gate.json"
+  ]
+}

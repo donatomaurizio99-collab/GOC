@@ -88,6 +88,18 @@ param(
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
     [switch]$StrictCriticalDrillFlakeGate,
+    [switch]$SkipReleaseGateEvidenceFreshnessCheck,
+    [switch]$StrictReleaseGateEvidenceFreshnessCheck,
+    [switch]$SkipReleaseGateEvidenceHashManifestCheck,
+    [switch]$StrictReleaseGateEvidenceHashManifestCheck,
+    [switch]$SkipReleaseGateStepTimingSchemaCheck,
+    [switch]$StrictReleaseGateStepTimingSchemaCheck,
+    [switch]$SkipReleaseGatePerformanceHistoryCheck,
+    [switch]$StrictReleaseGatePerformanceHistoryCheck,
+    [switch]$SkipReleaseGatePerformanceBudgetCheck,
+    [switch]$StrictReleaseGatePerformanceBudgetCheck,
+    [switch]$SkipReleaseGateStabilityFinalReadinessCheck,
+    [switch]$StrictReleaseGateStabilityFinalReadinessCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -105,6 +117,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 $script:P0EvidenceReportPaths = @()
+$script:GateStepTimingRecords = @()
 
 function Invoke-NativeCommand {
     param(
@@ -129,9 +142,27 @@ function Invoke-GateStep {
 
     $startedAt = Get-Date
     Write-Host "==> $Name" -ForegroundColor Cyan
-    & $Action
-    $duration = [int]((Get-Date) - $startedAt).TotalSeconds
-    Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
+    $stepCompletedAtUtc = $null
+    $stepSucceeded = $false
+    try {
+        & $Action
+        $stepSucceeded = $true
+    } finally {
+        $stepCompletedAtUtc = (Get-Date).ToUniversalTime()
+        $duration = [int][Math]::Round(($stepCompletedAtUtc - $startedAt.ToUniversalTime()).TotalSeconds, 0)
+        if ($duration -lt 0) {
+            $duration = 0
+        }
+        $script:GateStepTimingRecords += [ordered]@{
+            name = $Name
+            duration_seconds = $duration
+            success = [bool]$stepSucceeded
+            completed_at_utc = $stepCompletedAtUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        }
+        if ($stepSucceeded) {
+            Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
+        }
+    }
 }
 
 function Resolve-PathInsideProjectRoot {
@@ -182,6 +213,45 @@ function Clear-ReleaseGateArtifacts {
             Remove-Item -LiteralPath $resolvedDir -Recurse -Force
         }
     }
+}
+
+function Write-ReleaseGateStepTimingsReport {
+    param(
+        [string]$OutputFile,
+        [string]$Label = "release-gate"
+    )
+
+    $outputPath = Resolve-PathInsideProjectRoot -PathToResolve $OutputFile -ProjectRootPath $ProjectRoot
+    $outputDir = Split-Path -Parent $outputPath
+    if ($outputDir) {
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+    }
+
+    $totalDurationSeconds = 0
+    $successfulSteps = 0
+    foreach ($entry in $script:GateStepTimingRecords) {
+        if ($entry -and $entry.duration_seconds -is [ValueType]) {
+            $totalDurationSeconds += [int]$entry.duration_seconds
+        }
+        if ($entry -and $entry.success) {
+            $successfulSteps += 1
+        }
+    }
+
+    $payload = [ordered]@{
+        label = $Label
+        success = $true
+        metrics = [ordered]@{
+            steps_recorded = [int]$script:GateStepTimingRecords.Count
+            successful_steps = [int]$successfulSteps
+            total_duration_seconds = [int]$totalDurationSeconds
+        }
+        steps = @($script:GateStepTimingRecords)
+        generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    }
+
+    $json = $payload | ConvertTo-Json -Depth 8
+    Set-Content -Path $outputPath -Value $json -Encoding UTF8
 }
 
 Invoke-GateStep -Name "Release-gate artifact preflight (clean stale release-gate evidence)" -Action {
@@ -1424,5 +1494,170 @@ if (-not $SkipP0ClosureReport) {
     }
 }
 
-Write-Host "Release gate passed." -ForegroundColor Green
+if (-not $SkipReleaseGateEvidenceFreshnessCheck) {
+    Invoke-GateStep -Name "Release-gate evidence freshness check (required reports are recent + green)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-freshness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-evidence-freshness-check.py",
+                "--label", "release-gate",
+                "--policy-file", ".\docs\release-gate-evidence-freshness-policy.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateEvidenceFreshnessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate evidence freshness check failed but StrictReleaseGateEvidenceFreshnessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
 
+if (-not $SkipReleaseGateEvidenceHashManifestCheck) {
+    Invoke-GateStep -Name "Release-gate evidence hash manifest check (deterministic evidence digest contract)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-hash-manifest-release-gate.json"
+        $manifestPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-manifest-release-gate.json"
+        $requiredFiles = @(
+            (Join-Path $ProjectRoot "artifacts\safe-mode-ux-degradation-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\a11y-test-harness-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-runtime-stability-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\critical-drill-flake-gate-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\p0-report-schema-contract-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\p0-release-evidence-bundle-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json")
+        )
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-evidence-hash-manifest-check.py",
+                "--label", "release-gate",
+                "--required-files", ($requiredFiles -join ","),
+                "--required-label", "release-gate",
+                "--output-file", $reportPath,
+                "--manifest-file", $manifestPath
+            )
+        } catch {
+            if ($StrictReleaseGateEvidenceHashManifestCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate evidence hash manifest check failed but StrictReleaseGateEvidenceHashManifestCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateStepTimingSchemaCheck) {
+    Invoke-GateStep -Name "Release-gate step timing schema check (step ledger schema + success contract)" -Action {
+        $stepTimingsPath = Join-Path $ProjectRoot "artifacts\release-gate-step-timings-release-gate.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-step-timing-schema-release-gate.json"
+        Write-ReleaseGateStepTimingsReport -OutputFile $stepTimingsPath -Label "release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-step-timing-schema-check.py",
+                "--label", "release-gate",
+                "--step-timings-file", $stepTimingsPath,
+                "--required-label", "release-gate",
+                "--required-keys", "name,duration_seconds,success,completed_at_utc",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateStepTimingSchemaCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate step timing schema check failed but StrictReleaseGateStepTimingSchemaCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGatePerformanceHistoryCheck) {
+    Invoke-GateStep -Name "Release-gate performance history check (baseline regression budget trend)" -Action {
+        $stepTimingsPath = Join-Path $ProjectRoot "artifacts\release-gate-step-timings-release-gate.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-performance-history-release-gate.json"
+        Write-ReleaseGateStepTimingsReport -OutputFile $stepTimingsPath -Label "release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-performance-history-check.py",
+                "--label", "release-gate",
+                "--history-baseline-file", ".\docs\release-gate-performance-history-baseline.json",
+                "--step-timings-file", $stepTimingsPath,
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePerformanceHistoryCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate performance history check failed but StrictReleaseGatePerformanceHistoryCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGatePerformanceBudgetCheck) {
+    Invoke-GateStep -Name "Release-gate performance budget check (step runtime budgets + trend report)" -Action {
+        $stepTimingsPath = Join-Path $ProjectRoot "artifacts\release-gate-step-timings-release-gate.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-performance-budget-release-gate.json"
+        Write-ReleaseGateStepTimingsReport -OutputFile $stepTimingsPath -Label "release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-performance-budget-check.py",
+                "--label", "release-gate",
+                "--policy-file", ".\docs\release-gate-performance-budget-policy.json",
+                "--step-timings-file", $stepTimingsPath,
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePerformanceBudgetCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate performance budget check failed but StrictReleaseGatePerformanceBudgetCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateStabilityFinalReadinessCheck) {
+    Invoke-GateStep -Name "Release-gate stability final readiness check (Stage L-P consolidated go/no-go)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-stability-final-readiness-release-gate.json"
+        $requiredReports = @(
+            (Join-Path $ProjectRoot "artifacts\release-gate-evidence-freshness-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-evidence-hash-manifest-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-step-timing-schema-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-performance-history-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-performance-budget-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json")
+        )
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-stability-final-readiness.py",
+                "--label", "release-gate",
+                "--required-reports", ($requiredReports -join ","),
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateStabilityFinalReadinessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate stability final readiness check failed but StrictReleaseGateStabilityFinalReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+Write-Host "Release gate passed." -ForegroundColor Green

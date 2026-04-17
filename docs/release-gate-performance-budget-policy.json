@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "max_total_duration_seconds": 7200.0,
+  "max_step_regression_percent": 250.0,
+  "trend_top_n": 8,
+  "steps": [
+    {
+      "name": "Pytest suite",
+      "baseline_duration_seconds": 300.0,
+      "max_duration_seconds": 2400.0
+    },
+    {
+      "name": "Migration rehearsal (S/M/L/XL DB copies)",
+      "baseline_duration_seconds": 120.0,
+      "max_duration_seconds": 1200.0
+    },
+    {
+      "name": "Long soak budget drill (latency/429/error budget gate)",
+      "baseline_duration_seconds": 120.0,
+      "max_duration_seconds": 1800.0
+    },
+    {
+      "name": "Release-gate runtime stability drill (duration/variance budget on critical drills)",
+      "baseline_duration_seconds": 180.0,
+      "max_duration_seconds": 2400.0
+    },
+    {
+      "name": "Critical drill flake gate (repeat critical drill tests)",
+      "baseline_duration_seconds": 120.0,
+      "max_duration_seconds": 1800.0
+    },
+    {
+      "name": "P0 burn-in consecutive-green monitor (CI history hard gate)",
+      "baseline_duration_seconds": 20.0,
+      "max_duration_seconds": 600.0
+    },
+    {
+      "name": "P0 report schema contract check (release-gate evidence baseline schema)",
+      "baseline_duration_seconds": 20.0,
+      "max_duration_seconds": 300.0
+    },
+    {
+      "name": "P0 closure go/no-go report (consolidated readiness signal)",
+      "baseline_duration_seconds": 20.0,
+      "max_duration_seconds": 300.0
+    }
+  ]
+}
