@@ -133,6 +133,8 @@ def run_canary(
     p0_evidence_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-evidence"
     p0_evidence_bundle_file = p0_evidence_artifacts_dir / "p0-release-evidence-bundle-report.json"
     p0_evidence_bundle_dir = p0_evidence_artifacts_dir / "p0-release-evidence-files"
+    canary_determinism_workspace = PROJECT_ROOT / ".tmp" / "stability-canary-determinism"
+    canary_determinism_report_file = canary_determinism_workspace / "canary-determinism-flake-report.json"
     p0_burnin_required_jobs = [
         "Release Gate (Windows)",
         "Pytest (Python 3.11)",
@@ -287,6 +289,28 @@ def run_canary(
             "stability-canary",
             "--output-file",
             str(a11y_report_file),
+        ],
+        "canary_determinism_flake_intelligence": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "canary-determinism-flake-check.py"),
+            "--label",
+            "stability-canary",
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--policy-file",
+            str(PROJECT_ROOT / "docs" / "canary-determinism-policy.json"),
+            "--quarantine-file",
+            str(PROJECT_ROOT / "docs" / "canary-determinism-quarantine.json"),
+            "--runbook-file",
+            str(PROJECT_ROOT / "docs" / "production-runbook.md"),
+            "--workspace",
+            str(canary_determinism_workspace),
+            "--required-label",
+            "stability-canary",
+            "--probe-repeats",
+            "2",
+            "--output-file",
+            str(canary_determinism_report_file),
         ],
         "p0_report_schema_contract": [
             sys.executable,

@@ -2285,6 +2285,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                     "invariant_burst": {"baseline_duration_seconds": 0.1},
                     "safe_mode_ux_degradation": {"baseline_duration_seconds": 0.1},
                     "a11y_test_harness": {"baseline_duration_seconds": 0.1},
+                    "canary_determinism_flake_intelligence": {"baseline_duration_seconds": 0.1},
                     "p0_report_schema_contract": {"baseline_duration_seconds": 0.1},
                     "p0_runbook_contract": {"baseline_duration_seconds": 0.1},
                     "p0_release_evidence_bundle": {"baseline_duration_seconds": 0.1},
@@ -2328,6 +2329,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
     assert payload["success"] is True
     assert payload["drills"]["safe_mode_ux_degradation"]["payload"]["success"] is True
     assert payload["drills"]["a11y_test_harness"]["payload"]["success"] is True
+    assert payload["drills"]["canary_determinism_flake_intelligence"]["payload"]["success"] is True
     assert payload["drills"]["p0_report_schema_contract"]["payload"]["success"] is True
     assert payload["drills"]["p0_runbook_contract"]["payload"]["success"] is True
     assert payload["drills"]["p0_release_evidence_bundle"]["payload"]["success"] is True
@@ -5272,6 +5274,7 @@ def test_151_stability_canary_baseline_includes_stage_d_drills():
 
     assert "safe_mode_ux_degradation" in drills
     assert "a11y_test_harness" in drills
+    assert "canary_determinism_flake_intelligence" in drills
     assert "p0_report_schema_contract" in drills
     assert "p0_runbook_contract" in drills
     assert "p0_release_evidence_bundle" in drills
@@ -5279,6 +5282,7 @@ def test_151_stability_canary_baseline_includes_stage_d_drills():
     assert "p0_closure_report" in drills
     assert float(drills["safe_mode_ux_degradation"]["baseline_duration_seconds"]) > 0
     assert float(drills["a11y_test_harness"]["baseline_duration_seconds"]) > 0
+    assert float(drills["canary_determinism_flake_intelligence"]["baseline_duration_seconds"]) > 0
     assert float(drills["p0_report_schema_contract"]["baseline_duration_seconds"]) > 0
     assert float(drills["p0_runbook_contract"]["baseline_duration_seconds"]) > 0
     assert float(drills["p0_release_evidence_bundle"]["baseline_duration_seconds"]) > 0
@@ -5345,6 +5349,7 @@ def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
     missing_drills = {str(entry.get("drill")) for entry in missing_entries}
     assert "safe_mode_ux_degradation" in missing_drills
     assert "a11y_test_harness" in missing_drills
+    assert "canary_determinism_flake_intelligence" in missing_drills
     assert "p0_report_schema_contract" in missing_drills
     assert "p0_runbook_contract" in missing_drills
     assert "p0_release_evidence_bundle" in missing_drills
@@ -5411,6 +5416,7 @@ def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_sta
     missing = set(payload["checks"]["missing_required_canary_drills"])
     assert "safe_mode_ux_degradation" in missing
     assert "a11y_test_harness" in missing
+    assert "canary_determinism_flake_intelligence" in missing
     assert "p0_report_schema_contract" in missing
     assert "p0_runbook_contract" in missing
     assert "p0_release_evidence_bundle" in missing
@@ -5988,6 +5994,155 @@ def test_163_p0_report_schema_contract_check_ignores_out_of_scope_reports_when_r
     assert payload["success"] is True
     assert payload["metrics"]["schema_failed_reports"] == 0
     assert payload["metrics"]["reports_out_of_scope"] == 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_164_canary_determinism_flake_check_reports_success_with_mock_results():
+    workspace = _local_test_dir("pytest-canary-determinism-flake-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-results.json"
+    output_file = workspace / "canary-determinism-flake-report.json"
+    run_workspace = workspace / "run-workspace"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "probes": [
+                    {
+                        "id": "safe_mode_ux_degradation",
+                        "runs": [
+                            {"success": True, "label": "stability-canary", "duration_ms": 120},
+                            {"success": True, "label": "stability-canary", "duration_ms": 126},
+                        ],
+                    },
+                    {
+                        "id": "a11y_test_harness",
+                        "runs": [
+                            {"success": True, "label": "stability-canary", "duration_ms": 130},
+                            {"success": True, "label": "stability-canary", "duration_ms": 135},
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-determinism-flake-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--policy-file",
+        str((project_root / "docs" / "canary-determinism-policy.json").resolve()),
+        "--quarantine-file",
+        str((project_root / "docs" / "canary-determinism-quarantine.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--required-label",
+        "stability-canary",
+        "--mock-results-file",
+        str(mock_results_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["checks"]["runbook_section_present"] is True
+    assert payload["metrics"]["blocking_flaky_probe_count"] == 0
+    assert payload["metrics"]["unknown_mock_probe_count"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_165_canary_determinism_flake_check_fails_when_probe_is_flaky_and_unquarantined():
+    workspace = _local_test_dir("pytest-canary-determinism-flake-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-results.json"
+    output_file = workspace / "canary-determinism-flake-report.json"
+    run_workspace = workspace / "run-workspace"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "probes": [
+                    {
+                        "id": "safe_mode_ux_degradation",
+                        "runs": [
+                            {"success": True, "label": "stability-canary", "duration_ms": 120},
+                            {"success": False, "label": "stability-canary", "duration_ms": 460},
+                        ],
+                    },
+                    {
+                        "id": "a11y_test_harness",
+                        "runs": [
+                            {"success": True, "label": "stability-canary", "duration_ms": 130},
+                            {"success": True, "label": "stability-canary", "duration_ms": 131},
+                        ],
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-determinism-flake-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--policy-file",
+        str((project_root / "docs" / "canary-determinism-policy.json").resolve()),
+        "--quarantine-file",
+        str((project_root / "docs" / "canary-determinism-quarantine.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--required-label",
+        "stability-canary",
+        "--mock-results-file",
+        str(mock_results_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[canary-determinism-flake-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Canary determinism flake check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["blocking_flaky_probe_count"] >= 1
+    assert "safe_mode_ux_degradation" in payload["checks"]["blocking_flaky_probe_ids"]
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

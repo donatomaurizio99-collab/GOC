@@ -714,6 +714,13 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-release-gate-runtime-stability-drill.ps1 -Samples 2 -RepeatsPerSample 1
 ```
 
+Standalone canary determinism + flake intelligence check (repeat Stage-D UX/A11y probes with quarantine-aware flake budget):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-canary-determinism-flake-check.ps1 -ProbeRepeats 2
+```
+
 Standalone P0 burn-in consecutive-green monitor (CI history hard gate):
 
 ```powershell
@@ -800,7 +807,7 @@ python .\scripts\desktop-smoke.py
 
 ## Nightly Stability Canary
 
-Run the full canary profile locally (includes release-freeze policy, power-loss durability, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, Stage-D safe-mode UX/A11y checks, P0 burn-in consecutive-green fixture checks, P0 report-schema contract validation on required canary evidence reports, P0 runbook-contract consistency checks, P0 release-evidence bundle checks, P0 closure go/no-go checks, and long soak budgets). Missing baseline drill entries are treated as regressions.
+Run the full canary profile locally (includes release-freeze policy, power-loss durability, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, Stage-D safe-mode UX/A11y checks, canary determinism + flake-intelligence checks with quarantine policy, P0 burn-in consecutive-green fixture checks, P0 report-schema contract validation on required canary evidence reports, P0 runbook-contract consistency checks, P0 release-evidence bundle checks, P0 closure go/no-go checks, and long soak budgets). Missing baseline drill entries are treated as regressions.
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"

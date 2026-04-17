@@ -31,6 +31,9 @@
     "a11y_test_harness": {
       "baseline_duration_seconds": 3.0
     },
+    "canary_determinism_flake_intelligence": {
+      "baseline_duration_seconds": 5.0
+    },
     "p0_report_schema_contract": {
       "baseline_duration_seconds": 3.0
     },

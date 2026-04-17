@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "required_runbook_section": "### 1.6 Nightly stability canary",
+  "thresholds": {
+    "default_probe_repeats": 2,
+    "min_success_rate_percent": 100.0,
+    "max_flaky_probes": 0
+  },
+  "probes": [
+    {
+      "id": "safe_mode_ux_degradation",
+      "max_duration_cv_percent": 45.0,
+      "max_failed_runs": 0
+    },
+    {
+      "id": "a11y_test_harness",
+      "max_duration_cv_percent": 45.0,
+      "max_failed_runs": 0
+    }
+  ]
+}
