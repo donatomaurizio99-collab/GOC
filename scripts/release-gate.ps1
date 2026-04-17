@@ -78,6 +78,8 @@ param(
     [switch]$StrictIncidentRollbackDrill,
     [switch]$SkipDisasterRecoveryRehearsalPack,
     [switch]$StrictDisasterRecoveryRehearsalPack,
+    [switch]$SkipFailureBudgetDashboard,
+    [switch]$StrictFailureBudgetDashboard,
     [switch]$SkipReleaseGateRuntimeStabilityDrill,
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
@@ -1077,6 +1079,37 @@ if (-not $SkipDisasterRecoveryRehearsalPack) {
             }
             Write-Warning (
                 "Disaster-recovery rehearsal pack failed but StrictDisasterRecoveryRehearsalPack is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipFailureBudgetDashboard) {
+    Invoke-GateStep -Name "Failure budget dashboard (aggregated budget checks + release blocker hook)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\failure-budget-dashboard-release-gate.json"
+        $budgetReportFiles = @(
+            "artifacts\load-profile-framework-release-gate.json",
+            "artifacts\rto-rpo-assertion-release-gate.json",
+            "artifacts\canary-guardrails-release-gate.json",
+            "artifacts\auto-rollback-policy-release-gate.json",
+            "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
+        ) -join ","
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\failure-budget-dashboard.py",
+                "--label", "release-gate",
+                "--runbook-file", "docs/production-runbook.md",
+                "--budget-report-files", $budgetReportFiles,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictFailureBudgetDashboard) {
+                throw
+            }
+            Write-Warning (
+                "Failure budget dashboard failed but StrictFailureBudgetDashboard is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

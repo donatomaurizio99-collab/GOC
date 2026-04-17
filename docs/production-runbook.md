@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -55,6 +55,7 @@ This gate covers:
 - multi-db atomic-switch drill (pointer update crash simulation, corrupted-candidate reject, and deterministic switch rollback path)
 - incident/rollback drill with controlled burst load, SLO incident detection, and stable-ring rollback validation
 - disaster-recovery rehearsal pack (aggregated backup/snapshot/switch/RTO-RPO drills with deterministic release-block decision + evidence files)
+- failure budget dashboard (aggregated machine-readable release-block signal across critical budget reports)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
@@ -271,6 +272,12 @@ Manual disaster-recovery rehearsal pack invocation:
 .\scripts\run-disaster-recovery-rehearsal-pack.ps1 -Profile scheduled -MaxTotalDurationSeconds 2400
 ```
 
+Manual failure budget dashboard invocation:
+
+```powershell
+.\scripts\run-failure-budget-dashboard.ps1
+```
+
 Manual release-gate runtime stability drill invocation:
 
 ```powershell
@@ -311,6 +318,7 @@ Verify before release:
 - runbook contract report confirms zero missing flags/scripts (`success=true`)
 - release evidence bundle report confirms all required P0 reports present and successful (`success=true`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
+- failure budget dashboard report is present and green (`artifacts\failure-budget-dashboard-release-gate.json`, `success=true`)
 - closure report confirms all readiness criteria are green (`success=true`, `metrics.criteria_failed=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
@@ -1115,6 +1123,25 @@ Actions:
 2. Verify report criteria remain green (`success=true`, `metrics.drills_failed=0`, `decision.release_blocked=false`).
 3. Track report timestamp (`generated_at_utc`) and keep at least one recent successful scheduled report available during release review.
 4. If scheduled report fails, open incident and hold promotion until fresh green evidence is produced.
+
+### 3.41 Failure budget dashboard and release blocker
+
+Symptoms:
+- critical budget reports are distributed across multiple artifacts and release decision is not deterministic at a glance
+- operators cannot quickly prove that all budget-relevant checks stayed green in the same gate execution
+
+Actions:
+1. Run aggregated failure-budget dashboard:
+   ```powershell
+   .\scripts\run-failure-budget-dashboard.ps1
+   ```
+2. Validate release-block signal:
+   - `success = true`
+   - `decision.release_blocked = false`
+   - `metrics.reports_failed = 0`
+   - `metrics.reports_missing = 0`
+3. Confirm dashboard includes critical report set (load-profile, RTO/RPO, canary, auto-rollback, DR rehearsal pack).
+4. If dashboard is red, treat as hard release blocker and remediate failing/missing budget report before promotion.
 
 ## 4. Operational Defaults
 

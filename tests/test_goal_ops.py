@@ -4858,3 +4858,115 @@ def test_141_disaster_recovery_rehearsal_pack_fails_when_duration_budget_is_exce
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_142_failure_budget_dashboard_reports_success_with_fixture_reports():
+    workspace = _local_test_dir("pytest-failure-budget-dashboard-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_file = artifacts_dir / "failure-budget-dashboard-report.json"
+
+    report_paths = [
+        artifacts_dir / "load-profile-framework-release-gate.json",
+        artifacts_dir / "rto-rpo-assertion-release-gate.json",
+        artifacts_dir / "canary-guardrails-release-gate.json",
+        artifacts_dir / "auto-rollback-policy-release-gate.json",
+        artifacts_dir / "p0-disaster-recovery-rehearsal-pack-release-gate.json",
+    ]
+    for path in report_paths:
+        path.write_text(
+            json.dumps({"label": path.stem, "success": True, "metrics": {"criteria_failed": 0}}, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "failure-budget-dashboard.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--budget-report-files",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["reports_expected"] == 5
+    assert payload["metrics"]["reports_present"] == 5
+    assert payload["metrics"]["reports_failed"] == 0
+    assert payload["metrics"]["reports_missing"] == 0
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_143_failure_budget_dashboard_fails_when_any_budget_report_is_red():
+    workspace = _local_test_dir("pytest-failure-budget-dashboard-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_file = artifacts_dir / "failure-budget-dashboard-report.json"
+
+    success_paths = [
+        artifacts_dir / "load-profile-framework-release-gate.json",
+        artifacts_dir / "rto-rpo-assertion-release-gate.json",
+        artifacts_dir / "canary-guardrails-release-gate.json",
+        artifacts_dir / "auto-rollback-policy-release-gate.json",
+    ]
+    failed_path = artifacts_dir / "p0-disaster-recovery-rehearsal-pack-release-gate.json"
+
+    for path in success_paths:
+        path.write_text(
+            json.dumps({"label": path.stem, "success": True}, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+    failed_path.write_text(
+        json.dumps({"label": failed_path.stem, "success": False}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    all_paths = success_paths + [failed_path]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "failure-budget-dashboard.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--budget-report-files",
+        ",".join(str(path.resolve()) for path in all_paths),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[failure-budget-dashboard] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Failure budget dashboard is red: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["reports_failed"] == 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
