@@ -100,6 +100,10 @@ param(
     [switch]$StrictReleaseGatePerformanceBudgetCheck,
     [switch]$SkipReleaseGateStabilityFinalReadinessCheck,
     [switch]$StrictReleaseGateStabilityFinalReadinessCheck,
+    [switch]$SkipReleaseGateStagingSoakReadinessCheck,
+    [switch]$StrictReleaseGateStagingSoakReadinessCheck,
+    [switch]$SkipReleaseGateRcCanaryRolloutCheck,
+    [switch]$StrictReleaseGateRcCanaryRolloutCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -1654,6 +1658,59 @@ if (-not $SkipReleaseGateStabilityFinalReadinessCheck) {
             }
             Write-Warning (
                 "Release-gate stability final readiness check failed but StrictReleaseGateStabilityFinalReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateStagingSoakReadinessCheck) {
+    Invoke-GateStep -Name "Release-gate staging soak readiness check (Stage Q incident/restore gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-staging-soak-readiness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-staging-soak-readiness-check.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/canary-guardrails-release-gate.json,artifacts/auto-rollback-policy-release-gate.json,artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json,artifacts/failure-budget-dashboard-release-gate.json",
+                "--canary-report-file", "artifacts/canary-guardrails-release-gate.json",
+                "--rollback-report-file", "artifacts/auto-rollback-policy-release-gate.json",
+                "--disaster-recovery-report-file", "artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json",
+                "--failure-budget-report-file", "artifacts/failure-budget-dashboard-release-gate.json",
+                "--required-label", "release-gate",
+                "--required-canary-stage-count", "4",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateStagingSoakReadinessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate staging soak readiness check failed but StrictReleaseGateStagingSoakReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateRcCanaryRolloutCheck) {
+    Invoke-GateStep -Name "Release-gate RC canary rollout check (Stage R rollout policy gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-rc-canary-rollout-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-rc-canary-rollout-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-candidate-rollout-policy.json",
+                "--required-reports", "artifacts/release-gate-staging-soak-readiness-release-gate.json,artifacts/release-gate-stability-final-readiness-release-gate.json,artifacts/p0-closure-report-release-gate.json,artifacts/canary-guardrails-release-gate.json",
+                "--required-label", "release-gate",
+                "--candidate-version", "0.0.2-rc1",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateRcCanaryRolloutCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate RC canary rollout check failed but StrictReleaseGateRcCanaryRolloutCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

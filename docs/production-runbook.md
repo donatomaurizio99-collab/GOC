@@ -1,4 +1,4 @@
-# Goal Ops Console Production Runbook
+﻿# Goal Ops Console Production Runbook
 
 This runbook is optimized for reliability-first releases of the desktop app and API.
 
@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
@@ -67,6 +67,8 @@ This gate covers:
 - release-gate performance history check (total/step runtime regression budget against history baseline)
 - release-gate performance budget check (step-runtime budget policy + regression trend summary from step timing ledger)
 - release-gate stability final readiness check (Stage L-P consolidated go/no-go signal over stability reports)
+- release-gate staging soak readiness check (Stage Q incident/restore release criterion across canary + rollback + DR + failure-budget evidence)
+- release-gate RC canary rollout check (Stage R rollout policy contract with deterministic staged promotion plan)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
 - P0 report schema contract check (baseline `label/success` schema contract across required release-gate evidence reports)
@@ -343,6 +345,30 @@ Manual release-gate stability final readiness invocation:
 .\scripts\run-release-gate-stability-final-readiness.ps1
 ```
 
+Manual master burn-in window invocation (3-5 CI runs + flake cleanup signal):
+
+```powershell
+.\scripts\run-release-gate-master-burnin-window-check.ps1 -MinConsecutive 3 -TargetConsecutive 5
+```
+
+Manual release-gate performance policy calibration invocation (from recent step-timing reports):
+
+```powershell
+.\scripts\run-release-gate-performance-policy-calibrate.ps1 -StepTimingsGlob "artifacts/release-gate-step-timings*.json" -MinSamples 3 -WriteUpdates
+```
+
+Manual release-gate staging soak readiness invocation:
+
+```powershell
+.\scripts\run-release-gate-staging-soak-readiness-check.ps1
+```
+
+Manual release-gate RC canary rollout invocation:
+
+```powershell
+.\scripts\run-release-gate-rc-canary-rollout-check.ps1 -PolicyFile "docs\release-candidate-rollout-policy.json" -CandidateVersion "0.0.2-rc1"
+```
+
 Manual canary determinism + flake intelligence invocation:
 
 ```powershell
@@ -406,11 +432,15 @@ Verify before release:
   - `artifacts\release-gate-performance-history-release-gate.json`
   - `artifacts\release-gate-performance-budget-release-gate.json`
 - Stage-P final readiness report is present and green (`artifacts\release-gate-stability-final-readiness-release-gate.json`, `success=true`)
+- Stage-Q staging soak readiness report is present and green (`artifacts\release-gate-staging-soak-readiness-release-gate.json`, `success=true`)
+- Stage-R RC canary rollout report is present and green (`artifacts\release-gate-rc-canary-rollout-release-gate.json`, `success=true`)
 - release-gate evidence freshness report confirms zero freshness regressions (`success=true`, `metrics.stale_reports=0`, `metrics.non_green_reports=0`)
 - release-gate step timing schema report confirms zero schema violations (`success=true`, `metrics.schema_failed_steps=0`)
 - release-gate performance history report confirms zero history regressions (`success=true`, `metrics.history_regression_violations=0`)
 - release-gate performance budget report confirms zero budget violations (`success=true`, `metrics.steps_over_budget=0`, `metrics.regression_budget_exceeded=0`)
 - release-gate final readiness report confirms no required report regressions (`success=true`, `metrics.required_reports_non_green=0`, `metrics.criteria_failed=0`)
+- release-gate staging soak readiness report confirms incident/restore criteria are proven (`success=true`, `metrics.staging_reports_non_green=0`, `metrics.incident_rollback_proof_failed=0`, `metrics.restore_proof_failed=0`)
+- release-gate RC canary rollout report confirms rollout policy and required reports are green (`success=true`, `metrics.rollout_required_reports_non_green=0`, `metrics.rollout_policy_invalid=0`)
 - closure report confirms all readiness criteria and required evidence checks are green (`success=true`, `metrics.criteria_failed=0`, `metrics.required_evidence_reports_missing=0`, `metrics.required_evidence_reports_non_green=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
@@ -1299,3 +1329,4 @@ Actions:
 - Keep diagnostics export enabled for operators.
 - Keep crash-loop protection enabled; only bypass for supervised triage.
 - Prefer rollback over hotfix-in-place during active outage.
+

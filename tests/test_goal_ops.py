@@ -5455,6 +5455,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-performance-history-release-gate.json",
         "artifacts/release-gate-performance-budget-release-gate.json",
         "artifacts/release-gate-stability-final-readiness-release-gate.json",
+        "artifacts/release-gate-staging-soak-readiness-release-gate.json",
+        "artifacts/release-gate-rc-canary-rollout-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5473,11 +5475,14 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "Release-gate step timing schema check (step ledger schema + success contract)" in release_gate
     assert "Release-gate performance history check (baseline regression budget trend)" in release_gate
     assert "Release-gate stability final readiness check (Stage L-P consolidated go/no-go)" in release_gate
+    assert "Release-gate staging soak readiness check (Stage Q incident/restore gate)" in release_gate
+    assert "Release-gate RC canary rollout check (Stage R rollout policy gate)" in release_gate
     assert "--step-timings-file" in release_gate
     assert "release-gate-performance-budget-policy.json" in release_gate
     assert "release-gate-evidence-freshness-policy.json" in release_gate
     assert "release-gate-performance-history-baseline.json" in release_gate
     assert "release-gate-evidence-manifest-release-gate.json" in release_gate
+    assert "release-candidate-rollout-policy.json" in release_gate
     assert "artifacts\\release-gate-step-timings-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-freshness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-hash-manifest-release-gate.json" in release_gate
@@ -5485,6 +5490,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-performance-history-release-gate.json" in release_gate
     assert "artifacts\\release-gate-performance-budget-release-gate.json" in release_gate
     assert "artifacts\\release-gate-stability-final-readiness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-staging-soak-readiness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-rc-canary-rollout-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5504,17 +5511,28 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-step-timing-schema-check.ps1" in runbook_contract_script
     assert "run-release-gate-performance-history-check.ps1" in runbook_contract_script
     assert "run-release-gate-stability-final-readiness.ps1" in runbook_contract_script
+    assert "run-release-gate-master-burnin-window-check.ps1" in runbook_contract_script
+    assert "run-release-gate-performance-policy-calibrate.ps1" in runbook_contract_script
+    assert "run-release-gate-staging-soak-readiness-check.ps1" in runbook_contract_script
+    assert "run-release-gate-rc-canary-rollout-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-history-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-budget-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-stability-final-readiness-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-staging-soak-readiness-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-rc-canary-rollout-release-gate.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
     assert "metrics.steps_over_budget=0" in runbook_contract_script
     assert "metrics.regression_budget_exceeded=0" in runbook_contract_script
     assert "metrics.required_reports_non_green=0" in runbook_contract_script
+    assert "metrics.staging_reports_non_green=0" in runbook_contract_script
+    assert "metrics.incident_rollback_proof_failed=0" in runbook_contract_script
+    assert "metrics.restore_proof_failed=0" in runbook_contract_script
+    assert "metrics.rollout_required_reports_non_green=0" in runbook_contract_script
+    assert "metrics.rollout_policy_invalid=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -6659,6 +6677,416 @@ def test_172_release_gate_stability_final_readiness_fails_when_required_report_i
     payload = json.loads(payload_text)
     assert payload["success"] is False
     assert payload["metrics"]["required_reports_non_green"] == 1
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_173_release_gate_master_burnin_window_check_reports_success_when_target_is_met():
+    workspace = _local_test_dir("pytest-release-gate-master-burnin-window-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    output_file = artifacts_dir / "release-gate-master-burnin-window-release-gate.json"
+
+    burnin_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {
+                    "consecutive_green": 5,
+                    "required_consecutive": 5,
+                    "evaluated_runs": 5,
+                },
+                "first_non_green": None,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-master-burnin-window-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--burnin-report-file",
+        str(burnin_report.resolve()),
+        "--min-consecutive",
+        "3",
+        "--target-consecutive",
+        "5",
+        "--max-failing-jobs",
+        "0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["minimum_consecutive_met"] == 1
+    assert payload["metrics"]["target_consecutive_met"] == 1
+    assert payload["metrics"]["unique_failing_jobs"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_174_release_gate_master_burnin_window_check_fails_when_threshold_and_flake_budget_are_not_met():
+    workspace = _local_test_dir("pytest-release-gate-master-burnin-window-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    output_file = artifacts_dir / "release-gate-master-burnin-window-release-gate.json"
+
+    burnin_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": False,
+                "metrics": {
+                    "consecutive_green": 2,
+                    "required_consecutive": 5,
+                    "evaluated_runs": 3,
+                },
+                "first_non_green": {
+                    "run_id": 101,
+                    "failing_jobs": [{"name": "Release Gate (Windows)", "conclusion": "failure"}],
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-master-burnin-window-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--burnin-report-file",
+        str(burnin_report.resolve()),
+        "--min-consecutive",
+        "3",
+        "--target-consecutive",
+        "5",
+        "--max-failing-jobs",
+        "0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-master-burnin-window-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate master burn-in window check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["minimum_consecutive_met"] == 0
+    assert payload["metrics"]["unique_failing_jobs"] == 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_175_release_gate_performance_policy_calibration_reports_success_with_fixture_timings():
+    workspace = _local_test_dir("pytest-release-gate-performance-policy-calibration-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_file = artifacts_dir / "release-gate-performance-policy-calibration-release-gate.json"
+    policy_output_file = workspace / "release-gate-performance-budget-policy.json"
+    history_output_file = workspace / "release-gate-performance-history-baseline.json"
+
+    for index, (pytest_s, smoke_s) in enumerate([(240, 40), (260, 45), (250, 43)], start=1):
+        sample_file = artifacts_dir / f"release-gate-step-timings-sample-{index}.json"
+        sample_file.write_text(
+            json.dumps(
+                {
+                    "label": "release-gate",
+                    "success": True,
+                    "steps": [
+                        {"name": "Pytest suite", "duration_seconds": pytest_s, "success": True, "completed_at_utc": "2026-04-17T12:00:00Z"},
+                        {"name": "Desktop smoke", "duration_seconds": smoke_s, "success": True, "completed_at_utc": "2026-04-17T12:05:00Z"},
+                    ],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-performance-policy-calibrate.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--step-timings-glob",
+        "artifacts/release-gate-step-timings-sample-*.json",
+        "--required-label",
+        "release-gate",
+        "--min-samples",
+        "3",
+        "--output-file",
+        str(output_file.resolve()),
+        "--policy-output-file",
+        str(policy_output_file.resolve()),
+        "--history-baseline-output-file",
+        str(history_output_file.resolve()),
+        "--write-updates",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["timing_files_used"] == 3
+    assert payload["metrics"]["calibrated_steps"] >= 2
+    assert payload["metrics"]["sample_requirements_met"] == 1
+    assert output_file.exists()
+    assert policy_output_file.exists()
+    assert history_output_file.exists()
+
+    policy_payload = json.loads(policy_output_file.read_text(encoding="utf-8"))
+    history_payload = json.loads(history_output_file.read_text(encoding="utf-8"))
+    assert float(policy_payload["max_total_duration_seconds"]) > 0
+    assert float(history_payload["baseline_total_duration_seconds"]) > 0
+    assert "Pytest suite" in history_payload["baseline_step_durations"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_176_release_gate_staging_soak_readiness_check_reports_success_with_fixture_reports():
+    workspace = _local_test_dir("pytest-release-gate-staging-soak-readiness-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    canary_report = artifacts_dir / "canary-guardrails-release-gate.json"
+    rollback_report = artifacts_dir / "auto-rollback-policy-release-gate.json"
+    dr_report = artifacts_dir / "p0-disaster-recovery-rehearsal-pack-release-gate.json"
+    failure_report = artifacts_dir / "failure-budget-dashboard-release-gate.json"
+    output_file = artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json"
+
+    canary_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"result": "halt"},
+                "stage_evaluations": [{}, {}, {}, {}],
+                "rings": {"post_state": {"release_freeze": {"active": True}}},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    rollback_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"triggered": True, "expected_reason_matched": True},
+                "rollback": {"executed": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    dr_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False},
+                "metrics": {"duration_budget_exceeded": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    failure_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-staging-soak-readiness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-reports",
+        ",".join(
+            [
+                str(canary_report.resolve()),
+                str(rollback_report.resolve()),
+                str(dr_report.resolve()),
+                str(failure_report.resolve()),
+            ]
+        ),
+        "--canary-report-file",
+        str(canary_report.resolve()),
+        "--rollback-report-file",
+        str(rollback_report.resolve()),
+        "--disaster-recovery-report-file",
+        str(dr_report.resolve()),
+        "--failure-budget-report-file",
+        str(failure_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--required-canary-stage-count",
+        "4",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["staging_reports_non_green"] == 0
+    assert payload["metrics"]["incident_rollback_proof_failed"] == 0
+    assert payload["metrics"]["restore_proof_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_177_release_gate_rc_canary_rollout_check_fails_when_rollout_policy_is_invalid():
+    workspace = _local_test_dir("pytest-release-gate-rc-canary-rollout-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    policy_file = workspace / "release-candidate-rollout-policy.json"
+    output_file = artifacts_dir / "release-gate-rc-canary-rollout-release-gate.json"
+
+    staging_report = artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json"
+    final_report = artifacts_dir / "release-gate-stability-final-readiness-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    canary_report = artifacts_dir / "canary-guardrails-release-gate.json"
+
+    for report_path in [staging_report, final_report, closure_report]:
+        report_path.write_text(
+            json.dumps({"label": "release-gate", "success": True}, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+    canary_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"result": "halt"},
+                "stage_evaluations": [{}, {}, {}, {}],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "rollout_stages": [
+                    {"name": "canary-10", "traffic_percent": 10, "min_observation_minutes": 15},
+                    {"name": "canary-25", "traffic_percent": 25, "min_observation_minutes": 15},
+                    {"name": "full", "traffic_percent": 90, "min_observation_minutes": 30},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-rc-canary-rollout-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            [
+                str(staging_report.resolve()),
+                str(final_report.resolve()),
+                str(closure_report.resolve()),
+                str(canary_report.resolve()),
+            ]
+        ),
+        "--required-label",
+        "release-gate",
+        "--candidate-version",
+        "0.0.2-rc1",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-rc-canary-rollout-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate RC canary rollout check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["rollout_policy_invalid"] >= 1
     assert payload["metrics"]["criteria_failed"] >= 1
     assert output_file.exists()
 
