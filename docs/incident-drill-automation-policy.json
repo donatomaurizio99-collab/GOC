@@ -1,0 +1,31 @@
+{
+  "owners": {
+    "incident_commander": "primary-oncall",
+    "scribe": "ops-duty-manager",
+    "communications": "support-lead"
+  },
+  "cadence": {
+    "tabletop_max_age_days": 30,
+    "technical_drill_max_age_days": 14,
+    "max_open_followup_actions": 3
+  },
+  "quality": {
+    "technical_min_load_requests": 20
+  },
+  "evidence": {
+    "require_postmortem_link": true,
+    "require_followup_tracking": true
+  },
+  "required_scenarios": [
+    {
+      "id": "tabletop.release-rollback",
+      "type": "tabletop",
+      "runbook_section": "### 3.29 Incident tabletop drill automation"
+    },
+    {
+      "id": "technical.incident-rollback",
+      "type": "technical",
+      "runbook_section": "### 3.30 Incident technical drill automation"
+    }
+  ]
+}

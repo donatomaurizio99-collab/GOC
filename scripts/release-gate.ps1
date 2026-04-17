@@ -4,6 +4,22 @@ param(
     [switch]$SkipDesktopSmoke,
     [switch]$SkipApiProbe,
     [switch]$SkipSloAlertCheck,
+    [switch]$SkipSecurityConfigHardeningCheck,
+    [switch]$StrictSecurityConfigHardeningCheck,
+    [switch]$SkipAuditTrailHardeningCheck,
+    [switch]$StrictAuditTrailHardeningCheck,
+    [switch]$SkipSecurityCiLaneCheck,
+    [switch]$StrictSecurityCiLaneCheck,
+    [switch]$SkipAlertRoutingOnCallCheck,
+    [switch]$StrictAlertRoutingOnCallCheck,
+    [switch]$SkipIncidentDrillAutomationCheck,
+    [switch]$StrictIncidentDrillAutomationCheck,
+    [switch]$SkipLoadProfileFrameworkCheck,
+    [switch]$StrictLoadProfileFrameworkCheck,
+    [switch]$SkipCanaryGuardrailCheck,
+    [switch]$StrictCanaryGuardrailCheck,
+    [switch]$SkipRtoRpoAssertionCheck,
+    [switch]$StrictRtoRpoAssertionCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -14,8 +30,22 @@ param(
     [switch]$StrictDesktopUpdateSafetyDrill,
     [switch]$SkipRecoveryHardAbortDrill,
     [switch]$StrictRecoveryHardAbortDrill,
+    [switch]$SkipRecoveryIdempotenceDrill,
+    [switch]$StrictRecoveryIdempotenceDrill,
+    [switch]$SkipPowerLossDurabilityDrill,
+    [switch]$StrictPowerLossDurabilityDrill,
+    [switch]$SkipWalCheckpointCrashDrill,
+    [switch]$StrictWalCheckpointCrashDrill,
+    [switch]$SkipDiskPressureFaultInjectionDrill,
+    [switch]$StrictDiskPressureFaultInjectionDrill,
+    [switch]$SkipFsyncIoStallDrill,
+    [switch]$StrictFsyncIoStallDrill,
+    [switch]$SkipSqliteRealFullDrill,
+    [switch]$StrictSqliteRealFullDrill,
     [switch]$SkipDbCorruptionQuarantineDrill,
     [switch]$StrictDbCorruptionQuarantineDrill,
+    [switch]$SkipStorageCorruptionHardeningDrill,
+    [switch]$StrictStorageCorruptionHardeningDrill,
     [switch]$SkipWorkflowLockResilienceDrill,
     [switch]$StrictWorkflowLockResilienceDrill,
     [switch]$SkipWorkflowSoakDrill,
@@ -34,16 +64,45 @@ param(
     [switch]$StrictLongSoakBudgetDrill,
     [switch]$SkipMigrationRehearsal,
     [switch]$StrictMigrationRehearsal,
+    [switch]$SkipUpgradeDowngradeCompatibilityDrill,
+    [switch]$StrictUpgradeDowngradeCompatibilityDrill,
     [switch]$SkipBackupRestoreDrill,
     [switch]$StrictBackupRestoreDrill,
+    [switch]$SkipBackupRestoreStressDrill,
+    [switch]$StrictBackupRestoreStressDrill,
+    [switch]$SkipSnapshotRestoreCrashConsistencyDrill,
+    [switch]$StrictSnapshotRestoreCrashConsistencyDrill,
+    [switch]$SkipMultiDbAtomicSwitchDrill,
+    [switch]$StrictMultiDbAtomicSwitchDrill,
     [switch]$SkipIncidentRollbackDrill,
-    [switch]$StrictIncidentRollbackDrill
+    [switch]$StrictIncidentRollbackDrill,
+    [switch]$SkipDisasterRecoveryRehearsalPack,
+    [switch]$StrictDisasterRecoveryRehearsalPack,
+    [switch]$SkipFailureBudgetDashboard,
+    [switch]$StrictFailureBudgetDashboard,
+    [switch]$SkipSafeModeUxDegradationCheck,
+    [switch]$StrictSafeModeUxDegradationCheck,
+    [switch]$SkipA11yTestHarnessCheck,
+    [switch]$StrictA11yTestHarnessCheck,
+    [switch]$SkipReleaseGateRuntimeStabilityDrill,
+    [switch]$StrictReleaseGateRuntimeStabilityDrill,
+    [switch]$SkipCriticalDrillFlakeGate,
+    [switch]$StrictCriticalDrillFlakeGate,
+    [switch]$SkipP0BurnInConsecutiveGreen,
+    [switch]$StrictP0BurnInConsecutiveGreen,
+    [switch]$SkipP0RunbookContractCheck,
+    [switch]$StrictP0RunbookContractCheck,
+    [switch]$SkipP0ReleaseEvidenceBundle,
+    [switch]$StrictP0ReleaseEvidenceBundle,
+    [switch]$SkipP0ClosureReport,
+    [switch]$StrictP0ClosureReport
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
+$P0EvidenceReportPaths = @()
 
 function Invoke-NativeCommand {
     param(
@@ -71,6 +130,60 @@ function Invoke-GateStep {
     & $Action
     $duration = [int]((Get-Date) - $startedAt).TotalSeconds
     Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
+}
+
+function Resolve-PathInsideProjectRoot {
+    param(
+        [string]$PathToResolve,
+        [string]$ProjectRootPath
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($PathToResolve)
+    $resolvedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRootPath)
+    $rootWithSeparator = if (
+        $resolvedProjectRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar) -or
+        $resolvedProjectRoot.EndsWith([System.IO.Path]::AltDirectorySeparatorChar)
+    ) {
+        $resolvedProjectRoot
+    } else {
+        $resolvedProjectRoot + [System.IO.Path]::DirectorySeparatorChar
+    }
+    if (
+        ($resolvedPath -ne $resolvedProjectRoot) -and
+        -not $resolvedPath.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+    ) {
+        throw "Resolved path escapes project root. Project root: $resolvedProjectRoot ; Path: $resolvedPath"
+    }
+    return $resolvedPath
+}
+
+function Clear-ReleaseGateArtifacts {
+    param(
+        [string]$ProjectRootPath
+    )
+
+    $resolvedArtifactsDir = Resolve-PathInsideProjectRoot -PathToResolve (Join-Path $ProjectRootPath "artifacts") -ProjectRootPath $ProjectRootPath
+    New-Item -ItemType Directory -Force -Path $resolvedArtifactsDir | Out-Null
+
+    $staleReportFiles = Get-ChildItem -Path $resolvedArtifactsDir -File -Filter "*-release-gate.json" -ErrorAction SilentlyContinue
+    foreach ($staleReport in $staleReportFiles) {
+        Remove-Item -LiteralPath $staleReport.FullName -Force
+    }
+
+    $staleEvidenceDirs = @(
+        (Join-Path $resolvedArtifactsDir "p0-release-evidence-files-release-gate"),
+        (Join-Path $resolvedArtifactsDir "p0-disaster-recovery-rehearsal-pack-evidence-release-gate")
+    )
+    foreach ($candidateDir in $staleEvidenceDirs) {
+        $resolvedDir = Resolve-PathInsideProjectRoot -PathToResolve $candidateDir -ProjectRootPath $ProjectRootPath
+        if (Test-Path -LiteralPath $resolvedDir) {
+            Remove-Item -LiteralPath $resolvedDir -Recurse -Force
+        }
+    }
+}
+
+Invoke-GateStep -Name "Release-gate artifact preflight (clean stale release-gate evidence)" -Action {
+    Clear-ReleaseGateArtifacts -ProjectRootPath $ProjectRoot
 }
 
 if (-not $SkipPytest) {
@@ -103,6 +216,210 @@ if (-not $SkipSloAlertCheck) {
             "--database-url", ":memory:",
             "--allowed-status", "ok"
         )
+    }
+}
+
+if (-not $SkipSecurityConfigHardeningCheck) {
+    Invoke-GateStep -Name "Security config hardening check (production profile)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\security-config-hardening-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\security-config-hardening-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--operator-auth-required",
+                "--operator-auth-token", "release-gate-operator-token-0001",
+                "--min-operator-token-length", "16",
+                "--database-url", "goal_ops.db",
+                "--startup-corruption-recovery-enabled",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSecurityConfigHardeningCheck) {
+                throw
+            }
+            Write-Warning (
+                "Security config hardening check failed but StrictSecurityConfigHardeningCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipAuditTrailHardeningCheck) {
+    Invoke-GateStep -Name "Audit trail hardening check (immutable hash-chain + tamper detection + retention policy)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\audit-trail-hardening-release-gate.json"
+        $workspace = Join-Path $ProjectRoot ".tmp\audit-trail-hardening-release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\audit-trail-hardening-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--audit-retention-days", "365",
+                "--min-audit-retention-days", "90",
+                "--seed-entries", "8",
+                "--workspace", $workspace,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictAuditTrailHardeningCheck) {
+                throw
+            }
+            Write-Warning (
+                "Audit trail hardening check failed but StrictAuditTrailHardeningCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSecurityCiLaneCheck) {
+    Invoke-GateStep -Name "Security CI lane check (dependency audit + SAST + SBOM + fail policy)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\security-ci-lane-release-gate.json"
+        $sbomPath = Join-Path $ProjectRoot "artifacts\security-sbom-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\security-ci-lane-check.py",
+                "--label", "release-gate",
+                "--python-exe", $PythonExe,
+                "--deployment-profile", "production",
+                "--scan-path", "goal_ops_console",
+                "--max-dependency-vulnerabilities", "0",
+                "--max-sast-high", "0",
+                "--max-sast-medium", "200",
+                "--timeout-seconds", "300",
+                "--sbom-output-file", $sbomPath,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSecurityCiLaneCheck) {
+                throw
+            }
+            Write-Warning (
+                "Security CI lane check failed but StrictSecurityCiLaneCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipAlertRoutingOnCallCheck) {
+    Invoke-GateStep -Name "Alert routing + on-call runbook automation check (severity routing + escalation plan)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\alert-routing-oncall-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\alert-routing-oncall-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--mock-slo-status", "critical",
+                "--mock-alert-count", "2",
+                "--routing-policy-file", "docs/oncall-alert-routing-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--max-critical-ack-minutes", "15",
+                "--max-warning-ack-minutes", "120",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictAlertRoutingOnCallCheck) {
+                throw
+            }
+            Write-Warning (
+                "Alert routing on-call check failed but StrictAlertRoutingOnCallCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipIncidentDrillAutomationCheck) {
+    Invoke-GateStep -Name "Incident drill automation check (tabletop cadence + technical rollback evidence)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\incident-drill-automation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\incident-drill-automation-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--mock-report",
+                "--mock-days-since-tabletop", "7",
+                "--mock-days-since-technical", "3",
+                "--mock-tabletop-status", "completed",
+                "--mock-technical-status", "completed",
+                "--mock-open-followups", "0",
+                "--policy-file", "docs/incident-drill-automation-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--max-tabletop-age-days", "30",
+                "--max-technical-age-days", "14",
+                "--min-technical-load-requests", "20",
+                "--max-open-followups", "3",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictIncidentDrillAutomationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Incident drill automation check failed but StrictIncidentDrillAutomationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipLoadProfileFrameworkCheck) {
+    Invoke-GateStep -Name "Load profile framework check (versioned prod-like load profile budgets)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\load-profile-framework-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\load-profile-framework-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--profile-file", "docs/load-profile-catalog.json",
+                "--profile-name", "prod_like_ci_smoke",
+                "--profile-version", "1.0.0",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictLoadProfileFrameworkCheck) {
+                throw
+            }
+            Write-Warning (
+                "Load profile framework check failed but StrictLoadProfileFrameworkCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipCanaryGuardrailCheck) {
+    Invoke-GateStep -Name "Canary guardrails check (staged promotion with automatic halt/freeze)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\canary-guardrails"
+        $manifestPath = Join-Path $workspace "desktop-rings.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\canary-guardrails-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\canary-guardrails-check.py",
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--workspace", $workspace,
+                "--manifest-path", $manifestPath,
+                "--policy-file", "docs/canary-guardrails-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--stable-baseline-version", "0.0.1",
+                "--canary-candidate-version", "0.0.2",
+                "--expected-decision", "halt",
+                "--mock-slo-statuses", "ok,ok,critical,critical",
+                "--mock-error-budget-burn-rates", "0.5,0.8,2.5,2.5",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictCanaryGuardrailCheck) {
+                throw
+            }
+            Write-Warning (
+                "Canary guardrails check failed but StrictCanaryGuardrailCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
     }
 }
 
@@ -141,9 +458,10 @@ if (-not $SkipReleaseFreezePolicyDrill) {
 }
 
 if (-not $SkipAutoRollbackPolicyDrill) {
-    Invoke-GateStep -Name "Auto rollback policy drill (sustained critical => ring rollback)" -Action {
+    Invoke-GateStep -Name "Auto rollback hard-trigger drill (readiness regression + burn-rate + sustained critical => ring rollback)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\auto-rollback-policy-drills"
         $manifestPath = Join-Path $workspace "desktop-rings.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\auto-rollback-policy-release-gate.json"
         New-Item -ItemType Directory -Force -Path $workspace | Out-Null
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
@@ -152,12 +470,18 @@ if (-not $SkipAutoRollbackPolicyDrill) {
                 "--label", "release-gate",
                 "--manifest-path", $manifestPath,
                 "--ring", "stable",
-                "--mock-slo-statuses", "critical,critical,critical,critical",
-                "--critical-window-seconds", "2",
+                "--mock-slo-statuses", "ok,degraded,degraded,degraded",
+                "--mock-error-budget-burn-rates", "0.5,0.8,0.9,0.9",
+                "--mock-readiness-values", "true,false,false,false",
+                "--critical-window-seconds", "4",
+                "--readiness-regression-window-seconds", "1",
                 "--poll-interval-seconds", "1",
                 "--max-observation-seconds", "8",
+                "--max-error-budget-burn-rate-percent", "2.0",
                 "--seed-previous-version", "0.0.1",
-                "--seed-incident-version", "0.0.2"
+                "--seed-incident-version", "0.0.2",
+                "--expected-trigger-reason", "readiness_regression",
+                "--output-file", $reportPath
             )
         } catch {
             if ($StrictAutoRollbackPolicyDrill) {
@@ -207,6 +531,150 @@ if (-not $SkipRecoveryHardAbortDrill) {
             }
             Write-Warning (
                 "Recovery hard-abort drill failed but StrictRecoveryHardAbortDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipRecoveryIdempotenceDrill) {
+    Invoke-GateStep -Name "Recovery idempotence drill (restarts do not duplicate startup recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\recovery-idempotence-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\recovery-idempotence-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--recovery-cycles", "3",
+                "--startup-timeout-seconds", "15"
+            )
+        } catch {
+            if ($StrictRecoveryIdempotenceDrill) {
+                throw
+            }
+            Write-Warning (
+                "Recovery idempotence drill failed but StrictRecoveryIdempotenceDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipPowerLossDurabilityDrill) {
+    Invoke-GateStep -Name "Power-loss durability drill (pre/post-commit hard-abort persistence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\power-loss-durability-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\power-loss-durability-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--transaction-rows", "240",
+                "--payload-bytes", "256",
+                "--startup-timeout-seconds", "15"
+            )
+        } catch {
+            if ($StrictPowerLossDurabilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Power-loss durability drill failed but StrictPowerLossDurabilityDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipWalCheckpointCrashDrill) {
+    Invoke-GateStep -Name "WAL checkpoint crash drill (hard-abort before checkpoint + post-restart recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\wal-checkpoint-crash-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\wal-checkpoint-crash-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--rows", "240",
+                "--payload-bytes", "1024",
+                "--startup-timeout-seconds", "15",
+                "--sleep-before-checkpoint-seconds", "30",
+                "--checkpoint-mode", "TRUNCATE"
+            )
+        } catch {
+            if ($StrictWalCheckpointCrashDrill) {
+                throw
+            }
+            Write-Warning (
+                "WAL checkpoint crash drill failed but StrictWalCheckpointCrashDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDiskPressureFaultInjectionDrill) {
+    Invoke-GateStep -Name "Disk-pressure fault-injection drill (SQLITE_FULL/IOERR/readonly safe-mode recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\disk-pressure-fault-injection-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\disk-pressure-fault-injection-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--fault-injections", "2"
+            )
+        } catch {
+            if ($StrictDiskPressureFaultInjectionDrill) {
+                throw
+            }
+            Write-Warning (
+                "Disk-pressure fault-injection drill failed but StrictDiskPressureFaultInjectionDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipFsyncIoStallDrill) {
+    Invoke-GateStep -Name "fsync/io stall drill (bounded write stalls + io-error safe-mode recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\fsync-io-stall-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\fsync-io-stall-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--fault-injections", "2",
+                "--stall-seconds", "0.35",
+                "--max-stall-request-seconds", "3.0"
+            )
+        } catch {
+            if ($StrictFsyncIoStallDrill) {
+                throw
+            }
+            Write-Warning (
+                "fsync/io stall drill failed but StrictFsyncIoStallDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSqliteRealFullDrill) {
+    Invoke-GateStep -Name "SQLite real FULL drill (actual max_page_count saturation + recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\sqlite-real-full-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\sqlite-real-full-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--payload-bytes", "8192",
+                "--max-write-attempts", "240",
+                "--max-page-growth", "24",
+                "--recovery-page-growth", "160"
+            )
+        } catch {
+            if ($StrictSqliteRealFullDrill) {
+                throw
+            }
+            Write-Warning (
+                "SQLite real full drill failed but StrictSqliteRealFullDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
@@ -450,6 +918,56 @@ if (-not $SkipMigrationRehearsal) {
     }
 }
 
+if (-not $SkipStorageCorruptionHardeningDrill) {
+    Invoke-GateStep -Name "Storage corruption hardening drill (WAL/JOURNAL anomalies + startup quarantine recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\storage-corruption-hardening-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\storage-corruption-hardening-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--corruption-bytes", "192",
+                "--rows", "80",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictStorageCorruptionHardeningDrill) {
+                throw
+            }
+            Write-Warning (
+                "Storage corruption hardening drill failed but StrictStorageCorruptionHardeningDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipUpgradeDowngradeCompatibilityDrill) {
+    Invoke-GateStep -Name "Upgrade/downgrade compatibility drill (N-1 -> N -> N-1 rollback path)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\upgrade-downgrade-compatibility-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\upgrade-downgrade-compatibility-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--n-minus-1-runs", "800",
+                "--payload-bytes", "512",
+                "--max-upgrade-ms", "10000",
+                "--max-rollback-restore-ms", "10000",
+                "--max-reupgrade-ms", "10000"
+            )
+        } catch {
+            if ($StrictUpgradeDowngradeCompatibilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Upgrade/downgrade compatibility drill failed but StrictUpgradeDowngradeCompatibilityDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
 if (-not $SkipBackupRestoreDrill) {
     Invoke-GateStep -Name "Backup/restore drill (file-backed DB)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\backup-restore-drills"
@@ -465,6 +983,107 @@ if (-not $SkipBackupRestoreDrill) {
             }
             Write-Warning (
                 "Backup/restore drill failed but StrictBackupRestoreDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipBackupRestoreStressDrill) {
+    Invoke-GateStep -Name "Backup/restore stress drill (round-based load + restore idempotence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\backup-restore-stress-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\backup-restore-stress-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--rounds", "3",
+                "--goals-per-round", "120",
+                "--tasks-per-goal", "2",
+                "--workflow-runs-per-round", "24"
+            )
+        } catch {
+            if ($StrictBackupRestoreStressDrill) {
+                throw
+            }
+            Write-Warning (
+                "Backup/restore stress drill failed but StrictBackupRestoreStressDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipRtoRpoAssertionCheck) {
+    Invoke-GateStep -Name "RTO/RPO assertion suite (restore-time and bounded data-loss budgets)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\rto-rpo-assertion-suite"
+        $reportPath = Join-Path $ProjectRoot "artifacts\rto-rpo-assertion-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\rto-rpo-assertion-suite.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--policy-file", "docs/rto-rpo-assertion-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--seed-rows", "48",
+                "--tail-write-rows", "12",
+                "--max-rto-seconds", "20",
+                "--max-rpo-rows-lost", "96",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictRtoRpoAssertionCheck) {
+                throw
+            }
+            Write-Warning (
+                "RTO/RPO assertion suite failed but StrictRtoRpoAssertionCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSnapshotRestoreCrashConsistencyDrill) {
+    Invoke-GateStep -Name "Snapshot/restore crash-consistency drill (fault matrix + aborted copy recovery)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\snapshot-restore-crash-consistency-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\snapshot-restore-crash-consistency-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--seed-rows", "96",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictSnapshotRestoreCrashConsistencyDrill) {
+                throw
+            }
+            Write-Warning (
+                "Snapshot/restore crash-consistency drill failed but StrictSnapshotRestoreCrashConsistencyDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipMultiDbAtomicSwitchDrill) {
+    Invoke-GateStep -Name "Multi-DB atomic-switch drill (failover pointer crash + integrity reject + rollback)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\multi-db-atomic-switch-drills"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\multi-db-atomic-switch-drill.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--seed-rows", "96",
+                "--payload-bytes", "128"
+            )
+        } catch {
+            if ($StrictMultiDbAtomicSwitchDrill) {
+                throw
+            }
+            Write-Warning (
+                "Multi-DB atomic-switch drill failed but StrictMultiDbAtomicSwitchDrill is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
@@ -487,6 +1106,283 @@ if (-not $SkipIncidentRollbackDrill) {
             }
             Write-Warning (
                 "Incident/rollback drill failed but StrictIncidentRollbackDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipDisasterRecoveryRehearsalPack) {
+    Invoke-GateStep -Name "Disaster-recovery rehearsal pack (consolidated restore/switch/RTO-RPO evidence)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\disaster-recovery-rehearsal-pack"
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
+        $evidenceDir = Join-Path $ProjectRoot "artifacts\p0-disaster-recovery-rehearsal-pack-evidence-release-gate"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\disaster-recovery-rehearsal-pack.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--profile", "release-gate",
+                "--runbook-file", "docs/production-runbook.md",
+                "--rto-rpo-policy-file", "docs/rto-rpo-assertion-policy.json",
+                "--max-failed-drills", "0",
+                "--max-total-duration-seconds", "2400",
+                "--output-file", $reportPath,
+                "--evidence-dir", $evidenceDir
+            )
+        } catch {
+            if ($StrictDisasterRecoveryRehearsalPack) {
+                throw
+            }
+            Write-Warning (
+                "Disaster-recovery rehearsal pack failed but StrictDisasterRecoveryRehearsalPack is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipFailureBudgetDashboard) {
+    Invoke-GateStep -Name "Failure budget dashboard (aggregated budget checks + release blocker hook)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\failure-budget-dashboard-release-gate.json"
+        $budgetReportFiles = @(
+            "artifacts\load-profile-framework-release-gate.json",
+            "artifacts\rto-rpo-assertion-release-gate.json",
+            "artifacts\canary-guardrails-release-gate.json",
+            "artifacts\auto-rollback-policy-release-gate.json",
+            "artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json"
+        ) -join ","
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\failure-budget-dashboard.py",
+                "--label", "release-gate",
+                "--runbook-file", "docs/production-runbook.md",
+                "--budget-report-files", $budgetReportFiles,
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictFailureBudgetDashboard) {
+                throw
+            }
+            Write-Warning (
+                "Failure budget dashboard failed but StrictFailureBudgetDashboard is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipSafeModeUxDegradationCheck) {
+    Invoke-GateStep -Name "Safe-mode UX degradation check (runtime rail + mutation lock + release/runbook contract)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\safe-mode-ux-degradation-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\safe-mode-ux-degradation-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictSafeModeUxDegradationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Safe-mode UX degradation check failed but StrictSafeModeUxDegradationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipA11yTestHarnessCheck) {
+    Invoke-GateStep -Name "A11y test harness check (keyboard + screen-reader smoke + contrast baseline)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\a11y-test-harness-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\a11y-test-harness-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictA11yTestHarnessCheck) {
+                throw
+            }
+            Write-Warning (
+                "A11y test harness check failed but StrictA11yTestHarnessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateRuntimeStabilityDrill) {
+    Invoke-GateStep -Name "Release-gate runtime stability drill (duration/variance budget on critical drills)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-runtime-stability-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-runtime-stability-drill.py",
+                "--label", "release-gate",
+                "--samples", "2",
+                "--repeats-per-sample", "1",
+                "--target-file", ".\tests\test_goal_ops.py",
+                "--keyword-expression", "test_105_storage_corruption_hardening_drill_reports_success or test_106_backup_restore_stress_drill_reports_success or test_107_snapshot_restore_crash_consistency_drill_reports_success or test_108_multi_db_atomic_switch_drill_reports_success or test_144_dashboard_template_contains_runtime_rail_contract or test_145_safe_mode_ux_degradation_check_reports_success or test_147_a11y_test_harness_check_reports_success or test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline",
+                "--timeout-seconds", "900",
+                "--max-mean-duration-ms", "120000",
+                "--max-stddev-ms", "60000",
+                "--max-iteration-duration-ms", "180000",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateRuntimeStabilityDrill) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate runtime stability drill failed but StrictReleaseGateRuntimeStabilityDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipCriticalDrillFlakeGate) {
+    Invoke-GateStep -Name "Critical drill flake gate (repeat critical drill tests)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\critical-drill-flake-gate-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\critical-drill-flake-gate.py",
+                "--label", "release-gate",
+                "--repeats", "2",
+                "--max-failed-iterations", "0",
+                "--target-file", ".\tests\test_goal_ops.py",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictCriticalDrillFlakeGate) {
+                throw
+            }
+            Write-Warning (
+                "Critical drill flake gate failed but StrictCriticalDrillFlakeGate is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0BurnInConsecutiveGreen) {
+    Invoke-GateStep -Name "P0 burn-in consecutive-green monitor (CI history hard gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-burnin-consecutive-green-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        $repository = if ($env:GITHUB_REPOSITORY) {
+            $env:GITHUB_REPOSITORY
+        } else {
+            "donatomaurizio99-collab/GOC"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\p0-burnin-consecutive-green.py",
+                "--label", "release-gate",
+                "--repo", $repository,
+                "--branch", "master",
+                "--workflow-name", "CI",
+                "--required-jobs", "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+                "--required-consecutive", "10",
+                "--per-page", "50",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictP0BurnInConsecutiveGreen) {
+                throw
+            }
+            Write-Warning (
+                "P0 burn-in consecutive-green monitor failed but StrictP0BurnInConsecutiveGreen is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0RunbookContractCheck) {
+    Invoke-GateStep -Name "P0 runbook contract check (release-gate/CI/runbook consistency)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\p0-runbook-contract-check-release-gate.json"
+        $P0EvidenceReportPaths += $reportPath
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\p0-runbook-contract-check.py",
+                "--label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictP0RunbookContractCheck) {
+                throw
+            }
+            Write-Warning (
+                "P0 runbook contract check failed but StrictP0RunbookContractCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ReleaseEvidenceBundle) {
+    Invoke-GateStep -Name "P0 release evidence bundle (aggregate release-gate reports)" -Action {
+        $bundleOutputPath = Join-Path $ProjectRoot "artifacts\p0-release-evidence-bundle-release-gate.json"
+        $bundleDir = Join-Path $ProjectRoot "artifacts\p0-release-evidence-files-release-gate"
+        $arguments = @(
+            ".\scripts\p0-release-evidence-bundle.py",
+            "--label", "release-gate",
+            "--artifacts-dir", "artifacts",
+            "--include-glob", "*-release-gate.json",
+            "--required-label", "release-gate",
+            "--output-file", $bundleOutputPath,
+            "--bundle-dir", $bundleDir
+        )
+        if ($P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-files", ($P0EvidenceReportPaths -join ","))
+        } else {
+            $arguments += "--allow-empty"
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
+        } catch {
+            if ($StrictP0ReleaseEvidenceBundle) {
+                throw
+            }
+            Write-Warning (
+                "P0 release evidence bundle failed but StrictP0ReleaseEvidenceBundle is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipP0ClosureReport) {
+    Invoke-GateStep -Name "P0 closure go/no-go report (consolidated readiness signal)" -Action {
+        $outputPath = Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json"
+        $arguments = @(
+            ".\scripts\p0-closure-report.py",
+            "--label", "release-gate",
+            "--required-consecutive", "10",
+            "--evidence-bundle-file", "artifacts\p0-release-evidence-bundle-release-gate.json",
+            "--burnin-file", "artifacts\p0-burnin-consecutive-green-release-gate.json",
+            "--runbook-contract-file", "artifacts\p0-runbook-contract-check-release-gate.json",
+            "--output-file", $outputPath
+        )
+        if ($P0EvidenceReportPaths.Count -gt 0) {
+            $arguments += @("--required-evidence-reports", ($P0EvidenceReportPaths -join ","))
+        }
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments $arguments
+        } catch {
+            if ($StrictP0ClosureReport) {
+                throw
+            }
+            Write-Warning (
+                "P0 closure report failed but StrictP0ClosureReport is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

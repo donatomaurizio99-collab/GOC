@@ -1,0 +1,24 @@
+{
+  "routes": {
+    "critical": {
+      "channel": "ops-pager-critical",
+      "primary": "primary-oncall",
+      "backup": "secondary-oncall",
+      "max_ack_minutes": 15,
+      "runbook_section": "### 3.27 On-call critical alert routing"
+    },
+    "warning": {
+      "channel": "ops-slack-warning",
+      "primary": "ops-duty-manager",
+      "backup": "ops-secondary",
+      "max_ack_minutes": 60,
+      "runbook_section": "### 3.28 On-call warning alert routing"
+    }
+  },
+  "escalation": {
+    "critical_page_within_minutes": 5,
+    "critical_backup_after_minutes": 10,
+    "warning_notify_within_minutes": 15,
+    "warning_ticket_within_minutes": 30
+  }
+}

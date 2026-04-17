@@ -102,6 +102,38 @@ def run_canary(
             "--corruption-bytes",
             "256",
         ],
+        "power_loss_durability": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "power-loss-durability-drill.py"),
+            "--workspace",
+            str(PROJECT_ROOT / ".tmp" / "stability-canary-power-loss"),
+            "--label",
+            "stability-canary",
+            "--transaction-rows",
+            "180",
+            "--payload-bytes",
+            "192",
+            "--startup-timeout-seconds",
+            "15",
+        ],
+        "upgrade_downgrade_compatibility": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "upgrade-downgrade-compatibility-drill.py"),
+            "--workspace",
+            str(PROJECT_ROOT / ".tmp" / "stability-canary-upgrade-downgrade"),
+            "--label",
+            "stability-canary",
+            "--n-minus-1-runs",
+            "300",
+            "--payload-bytes",
+            "256",
+            "--max-upgrade-ms",
+            "15000",
+            "--max-rollback-restore-ms",
+            "15000",
+            "--max-reupgrade-ms",
+            "15000",
+        ],
         "db_safe_mode_watchdog": [
             sys.executable,
             str(PROJECT_ROOT / "scripts" / "db-safe-mode-watchdog-drill.py"),
@@ -131,6 +163,22 @@ def run_canary(
             str(PROJECT_ROOT / "scripts" / "invariant-burst-drill.py"),
             "--goal-count",
             "36",
+        ],
+        "safe_mode_ux_degradation": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "safe-mode-ux-degradation-check.py"),
+            "--label",
+            "stability-canary",
+            "--output-file",
+            str(PROJECT_ROOT / ".tmp" / "stability-canary-safe-mode-ux" / "safe-mode-ux-degradation-report.json"),
+        ],
+        "a11y_test_harness": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "a11y-test-harness-check.py"),
+            "--label",
+            "stability-canary",
+            "--output-file",
+            str(PROJECT_ROOT / ".tmp" / "stability-canary-a11y" / "a11y-test-harness-report.json"),
         ],
         "long_soak_budget": [
             sys.executable,
@@ -167,25 +215,55 @@ def run_canary(
     regressions: list[dict[str, Any]] = []
     baseline_drills = baseline.get("drills") or {}
     for drill_name, result in drill_results.items():
-        baseline_config = baseline_drills.get(drill_name) or {}
+        baseline_config = baseline_drills.get(drill_name)
+        if not isinstance(baseline_config, dict):
+            regressions.append(
+                {
+                    "type": "missing_baseline_entry",
+                    "drill": drill_name,
+                    "message": "No baseline drill configuration found.",
+                }
+            )
+            continue
         baseline_duration = float(baseline_config.get("baseline_duration_seconds", 0.0))
-        if baseline_duration > 0:
-            regression_percent = _regression_percent(result["duration_seconds"], baseline_duration)
-            if regression_percent > max_duration_regression_percent:
-                regressions.append(
-                    {
-                        "type": "duration_regression",
-                        "drill": drill_name,
-                        "current_duration_seconds": result["duration_seconds"],
-                        "baseline_duration_seconds": baseline_duration,
-                        "regression_percent": round(regression_percent, 3),
-                        "max_allowed_regression_percent": max_duration_regression_percent,
-                    }
-                )
+        if baseline_duration <= 0:
+            regressions.append(
+                {
+                    "type": "invalid_baseline_duration",
+                    "drill": drill_name,
+                    "baseline_duration_seconds": baseline_duration,
+                    "message": "baseline_duration_seconds must be > 0.",
+                }
+            )
+            continue
+        regression_percent = _regression_percent(result["duration_seconds"], baseline_duration)
+        if regression_percent > max_duration_regression_percent:
+            regressions.append(
+                {
+                    "type": "duration_regression",
+                    "drill": drill_name,
+                    "current_duration_seconds": result["duration_seconds"],
+                    "baseline_duration_seconds": baseline_duration,
+                    "regression_percent": round(regression_percent, 3),
+                    "max_allowed_regression_percent": max_duration_regression_percent,
+                }
+            )
 
     long_soak_payload = drill_results["long_soak_budget"]["payload"]
-    max_429_rate = float((baseline_drills.get("long_soak_budget") or {}).get("max_http_429_rate_percent", 1.0))
-    max_error_rate = float((baseline_drills.get("long_soak_budget") or {}).get("max_error_rate_percent", 1.0))
+    long_soak_baseline = baseline_drills.get("long_soak_budget")
+    if not isinstance(long_soak_baseline, dict):
+        regressions.append(
+            {
+                "type": "missing_baseline_entry",
+                "drill": "long_soak_budget",
+                "message": "No baseline drill configuration found.",
+            }
+        )
+        max_429_rate = 1.0
+        max_error_rate = 1.0
+    else:
+        max_429_rate = float(long_soak_baseline.get("max_http_429_rate_percent", 1.0))
+        max_error_rate = float(long_soak_baseline.get("max_error_rate_percent", 1.0))
     observed_429_rate = float(long_soak_payload["observed_rates_percent"]["http_429_rate"])
     observed_error_rate = float(long_soak_payload["observed_rates_percent"]["error_rate"])
     if observed_429_rate > max_429_rate:

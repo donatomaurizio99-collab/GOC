@@ -531,18 +531,38 @@ def test_29_retention_cleanup_deletes_old_records(client):
         " 'old-fingerprint', 1, 'old', 'recorded', 1, datetime('now', '-120 days'), datetime('now', '-120 days'))",
         old_failure_id,
     )
+    old_audit_id = services.observability.record_audit(
+        action="retention.old.audit",
+        actor="test",
+        status="success",
+        entity_type="retention",
+        entity_id="old-audit-entry",
+    )
+    services.db.execute(
+        "UPDATE audit_log SET created_at = datetime('now', '-400 days') WHERE audit_id = ?",
+        old_audit_id,
+    )
+    services.db.execute(
+        "UPDATE audit_log_integrity SET created_at = datetime('now', '-400 days') WHERE audit_id = ?",
+        old_audit_id,
+    )
     response = client.post("/system/maintenance/retention")
     assert response.status_code == 200
     payload = response.json()
     assert payload["event_processing_deleted"] == 1
     assert payload["events_deleted"] == 1
     assert payload["failure_log_deleted"] == 1
+    assert payload["audit_log_deleted"] == 1
+    assert payload["audit_integrity_deleted"] == 1
+    assert payload["retention_days"]["audit_log"] == services.settings.audit_log_retention_days
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM events WHERE event_id = ?", old_event_id) == 0
     assert (
         services.db.fetch_scalar("SELECT COUNT(*) FROM event_processing WHERE event_id = ?", old_event_id)
         == 0
     )
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM failure_log WHERE id = ?", old_failure_id) == 0
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log WHERE audit_id = ?", old_audit_id) == 0
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log_integrity WHERE audit_id = ?", old_audit_id) == 0
 
 
 def test_30_backpressure_endpoint_and_health_include_limits(client):
@@ -1714,6 +1734,7 @@ def test_76_auto_rollback_policy_triggers_and_executes_rollback():
     payload = json.loads(output_lines[-1])
     assert payload["success"] is True
     assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "critical_window"
     assert payload["rollback"]["attempted"] is True
     assert payload["rollback"]["executed"] is True
     assert payload["decision"]["recommended_action"] == "rollback_executed"
@@ -2256,10 +2277,14 @@ def test_94_stability_canary_reports_success_with_short_soak():
                 "drills": {
                     "release_freeze_policy": {"baseline_duration_seconds": 0.1},
                     "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
+                    "power_loss_durability": {"baseline_duration_seconds": 0.1},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
                     "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
                     "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
                     "invariant_burst": {"baseline_duration_seconds": 0.1},
+                    "safe_mode_ux_degradation": {"baseline_duration_seconds": 0.1},
+                    "a11y_test_harness": {"baseline_duration_seconds": 0.1},
                     "long_soak_budget": {
                         "baseline_duration_seconds": 0.1,
                         "max_http_429_rate_percent": 1.0,
@@ -2296,6 +2321,8 @@ def test_94_stability_canary_reports_success_with_short_soak():
     output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     payload = json.loads(output_lines[-1])
     assert payload["success"] is True
+    assert payload["drills"]["safe_mode_ux_degradation"]["payload"]["success"] is True
+    assert payload["drills"]["a11y_test_harness"]["payload"]["success"] is True
     assert report_file.exists()
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -2374,6 +2401,41 @@ def test_95_startup_db_corruption_quarantine_activates_safe_mode():
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_95_safe_mode_block_is_not_overridden_by_observability_write_error():
+    app = create_app(Settings(workflow_worker_poll_interval_seconds=0.05))
+    with TestClient(app) as local_client:
+        services = local_client.app.state.services
+        services.runtime_guard.activate_safe_mode(
+            reason="Test safe mode guard",
+            source="test",
+            auto=False,
+        )
+
+        original_record_audit = services.observability.record_audit
+
+        def _failing_audit(*args, **kwargs):
+            raise sqlite3.OperationalError("database or disk is full")
+
+        services.observability.record_audit = _failing_audit
+        try:
+            blocked = local_client.post(
+                "/goals",
+                json={
+                    "title": "Blocked by safe mode",
+                    "description": "mutation should remain blocked",
+                    "urgency": 0.4,
+                    "value": 0.5,
+                    "deadline_score": 0.2,
+                },
+            )
+        finally:
+            services.observability.record_audit = original_record_audit
+
+        assert blocked.status_code == 503
+        payload = blocked.json()
+        assert "Runtime safe mode active" in payload["detail"]
+
+
 def test_96_db_corruption_quarantine_drill_reports_success():
     workspace = _local_test_dir("pytest-db-corruption-quarantine-drill")
     project_root = Path(__file__).resolve().parents[1]
@@ -2405,4 +2467,3255 @@ def test_96_db_corruption_quarantine_drill_reports_success():
     assert payload["startup_recovery"]["recovered"] is True
     assert payload["blocked_status_code"] == 503
     assert payload["post_disable_goal_create_status_code"] == 201
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_97_upgrade_downgrade_compatibility_drill_reports_success():
+    workspace = _local_test_dir("pytest-upgrade-downgrade-compatibility-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "upgrade-downgrade-compatibility-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--n-minus-1-runs",
+        "120",
+        "--payload-bytes",
+        "128",
+        "--max-upgrade-ms",
+        "15000",
+        "--max-rollback-restore-ms",
+        "15000",
+        "--max-reupgrade-ms",
+        "15000",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["probes"]["upgrade"]["readiness_ready"] is True
+    assert payload["probes"]["upgrade"]["slo_status"] == "ok"
+    assert payload["probes"]["reupgrade"]["readiness_ready"] is True
+    assert payload["probes"]["reupgrade"]["slo_status"] == "ok"
+    assert payload["snapshots"]["n_minus_1"]["schema"]["has_idempotency_key"] is False
+    assert payload["snapshots"]["upgrade"]["schema"]["has_idempotency_key"] is True
+    assert payload["snapshots"]["rollback"]["schema"]["has_idempotency_key"] is False
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_98_power_loss_durability_drill_reports_success():
+    workspace = _local_test_dir("pytest-power-loss-durability-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "power-loss-durability-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--transaction-rows",
+        "60",
+        "--payload-bytes",
+        "96",
+        "--startup-timeout-seconds",
+        "15",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["scenarios"]["abort_before_commit"]["observed_rows"] == 0
+    assert payload["scenarios"]["abort_after_commit"]["observed_rows"] == 60
+    assert payload["app_probe"]["readiness_ready"] is True
+    assert payload["app_probe"]["slo_status"] == "ok"
+    assert payload["app_probe"]["integrity_ok"] is True
+    assert payload["post_recovery_write_rows"] == 1
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_99_disk_pressure_fault_injection_drill_reports_success():
+    workspace = _local_test_dir("pytest-disk-pressure-fault-injection-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disk-pressure-fault-injection-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--fault-injections",
+        "2",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == ["sqlite_full", "sqlite_ioerr", "readonly_permission_flip"]
+    for case in payload["cases"]:
+        assert case["success"] is True
+        assert case["safe_mode"]["active_after_faults"] is True
+        assert case["safe_mode"]["active_after_disable"] is False
+        assert case["status_codes"]["blocked_mutation"] == 503
+        assert case["status_codes"]["post_recovery_goal_create"] == 201
+        assert case["readiness"]["during_fault"] is False
+        assert case["readiness"]["after_recovery"] is True
+        assert case["slo"]["during_fault"] == "critical"
+        assert case["slo"]["after_recovery"] == "ok"
+        assert case["integrity"]["during_fault_quick_ok"] is True
+        assert case["integrity"]["during_fault_full_ok"] is True
+        assert case["integrity"]["after_recovery_quick_ok"] is True
+        assert case["integrity"]["after_recovery_full_ok"] is True
+        assert case["workflow_runs"]["running_during_fault"] == []
+        assert case["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_100_sqlite_real_full_drill_reports_success():
+    workspace = _local_test_dir("pytest-sqlite-real-full-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "sqlite-real-full-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--payload-bytes",
+        "4096",
+        "--max-write-attempts",
+        "160",
+        "--max-page-growth",
+        "16",
+        "--recovery-page-growth",
+        "120",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["fill"]["first_failure_status"] == 500
+    assert payload["safe_mode"]["after_full_trigger"]["active"] is True
+    assert payload["status_codes"]["blocked_mutation_during_safe_mode"] == 503
+    assert payload["status_codes"]["post_recovery_goal_create"] == 201
+    assert payload["readiness"]["during_fault"] is False
+    assert payload["readiness"]["after_recovery"] is True
+    assert payload["slo"]["during_fault"] == "critical"
+    assert payload["slo"]["after_recovery"] == "ok"
+    assert payload["integrity"]["during_fault_quick_ok"] is True
+    assert payload["integrity"]["during_fault_full_ok"] is True
+    assert payload["integrity"]["after_recovery_quick_ok"] is True
+    assert payload["integrity"]["after_recovery_full_ok"] is True
+    assert payload["runtime_metrics"]["io_error_count"] >= 1
+    assert payload["workflow_runs"]["running_during_fault"] == []
+    assert payload["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_101_wal_checkpoint_crash_drill_reports_success():
+    workspace = _local_test_dir("pytest-wal-checkpoint-crash-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "wal-checkpoint-crash-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--rows",
+        "60",
+        "--payload-bytes",
+        "128",
+        "--startup-timeout-seconds",
+        "15",
+        "--sleep-before-checkpoint-seconds",
+        "30",
+        "--checkpoint-mode",
+        "TRUNCATE",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["scenario"]["rows_persisted_before_crash"] == 60
+    assert payload["scenario"]["rows_observed_after_crash"] == 60
+    assert payload["checkpoint_recovery"]["busy"] == 0
+    assert payload["integrity"]["after_crash"]["quick_ok"] is True
+    assert payload["integrity"]["after_crash"]["full_ok"] is True
+    assert payload["integrity"]["after_recovery_checkpoint"]["quick_ok"] is True
+    assert payload["integrity"]["after_recovery_checkpoint"]["full_ok"] is True
+    assert payload["app_probe"]["readiness_ready"] is True
+    assert payload["app_probe"]["slo_status"] == "ok"
+    assert payload["app_probe"]["safe_mode_active"] is False
+    assert payload["app_probe"]["post_recovery_goal_status_code"] == 201
+    assert payload["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_102_recovery_idempotence_drill_reports_success():
+    workspace = _local_test_dir("pytest-recovery-idempotence-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "recovery-idempotence-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--recovery-cycles",
+        "3",
+        "--startup-timeout-seconds",
+        "15",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["status_before_abort"] == "running"
+    assert payload["recovery_cycles"] == 3
+    assert len(payload["cycles"]) == 3
+    assert payload["cycles"][0]["startup_recovery"]["recovered_count"] >= 1
+    assert payload["cycles"][0]["recovered_event_count"] == 1
+    assert payload["cycles"][1]["startup_recovery"]["recovered_count"] == 0
+    assert payload["cycles"][1]["recovered_event_count"] == 1
+    assert payload["cycles"][2]["startup_recovery"]["recovered_count"] == 0
+    assert payload["cycles"][2]["recovered_event_count"] == 1
+    for cycle in payload["cycles"]:
+        assert cycle["run_status"] == "failed"
+        assert cycle["run_error_type"] == "ProcessAbortRecovery"
+        assert cycle["readiness_ready"] is True
+        assert cycle["slo_status"] == "ok"
+        assert cycle["goal_create_status_code"] == 201
+        assert cycle["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_103_fsync_io_stall_drill_reports_success():
+    workspace = _local_test_dir("pytest-fsync-io-stall-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "fsync-io-stall-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--fault-injections",
+        "2",
+        "--stall-seconds",
+        "0.15",
+        "--max-stall-request-seconds",
+        "2.0",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["safe_mode"]["active_after_faults"] is True
+    assert payload["safe_mode"]["active_after_disable"] is False
+    assert payload["status_codes"]["blocked_mutation"] == 503
+    assert payload["status_codes"]["post_recovery_goal_create"] == 201
+    assert payload["readiness"]["during_fault"] is False
+    assert payload["readiness"]["after_recovery"] is True
+    assert payload["slo"]["during_fault"] == "critical"
+    assert payload["slo"]["after_recovery"] == "ok"
+    assert payload["integrity"]["during_fault_quick_ok"] is True
+    assert payload["integrity"]["during_fault_full_ok"] is True
+    assert payload["integrity"]["after_recovery_quick_ok"] is True
+    assert payload["integrity"]["after_recovery_full_ok"] is True
+    assert payload["runtime_metrics"]["io_error_count"] >= 2
+    assert payload["workflow_runs"]["running_during_fault"] == []
+    assert payload["workflow_runs"]["running_after_recovery"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_104_critical_drill_flake_gate_reports_success():
+    workspace = _local_test_dir("pytest-critical-drill-flake-gate").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "critical-drill-flake-gate-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "critical-drill-flake-gate.py"),
+        "--repeats",
+        "2",
+        "--max-failed-iterations",
+        "0",
+        "--target-file",
+        str(project_root / "tests" / "test_goal_ops.py"),
+        "--keyword-expression",
+        (
+            "test_144_dashboard_template_contains_runtime_rail_contract or "
+            "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline"
+        ),
+        "--timeout-seconds",
+        "600",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["repeats"] == 2
+    assert payload["summary"]["failed_iterations"] == 0
+    assert payload["summary"]["passed_iterations"] == 2
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+    assert len(payload["iterations"]) == 2
+    for iteration in payload["iterations"]:
+        assert iteration["success"] is True
+        assert iteration["return_code"] == 0
+
+
+def test_105_storage_corruption_hardening_drill_reports_success():
+    workspace = _local_test_dir("pytest-storage-corruption-hardening-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "storage-corruption-hardening-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--corruption-bytes",
+        "128",
+        "--rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert len(payload["cases"]) == 2
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == ["wal_file_anomaly", "rollback_journal_anomaly"]
+    for case in payload["cases"]:
+        assert case["success"] is True
+        assert case["recovery"]["startup_recovery"]["triggered"] is True
+        assert case["recovery"]["startup_recovery"]["recovered"] is True
+        assert case["recovery"]["blocked_status_code"] == 503
+        assert case["recovery"]["post_disable_goal_create_status_code"] == 201
+        assert case["recovery"]["readiness_before"]["ready"] is False
+        assert case["recovery"]["readiness_after"]["ready"] is True
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_106_backup_restore_stress_drill_reports_success():
+    workspace = _local_test_dir("pytest-backup-restore-stress-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "backup-restore-stress-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--rounds",
+        "2",
+        "--goals-per-round",
+        "30",
+        "--tasks-per-goal",
+        "2",
+        "--workflow-runs-per-round",
+        "8",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["rounds"] == 2
+    assert len(payload["rounds"]) == 2
+    for round_report in payload["rounds"]:
+        assert round_report["restore_matches_source"] is True
+        assert round_report["restore_idempotent"] is True
+        assert round_report["source"]["integrity"]["quick_ok"] is True
+        assert round_report["source"]["integrity"]["full_ok"] is True
+        assert round_report["restored_a"]["integrity"]["quick_ok"] is True
+        assert round_report["restored_a"]["integrity"]["full_ok"] is True
+        assert round_report["restored_b"]["integrity"]["quick_ok"] is True
+        assert round_report["restored_b"]["integrity"]["full_ok"] is True
+        assert round_report["app_probe"]["readiness_ready"] is True
+        assert round_report["app_probe"]["slo_status"] == "ok"
+        assert round_report["app_probe"]["post_restore_goal_status_code"] == 201
+        assert round_report["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_107_snapshot_restore_crash_consistency_drill_reports_success():
+    workspace = _local_test_dir("pytest-snapshot-restore-crash-consistency-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "snapshot-restore-crash-consistency-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--seed-rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["fault_matrix_cases"] == 4
+    assert len(payload["cases"]) == 4
+
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == [
+        "missing_manifest_after_snapshot_abort",
+        "tampered_snapshot_checksum_mismatch",
+        "restore_abort_then_recover",
+        "happy_path_restore",
+    ]
+    for case in payload["cases"]:
+        assert case["success"] is True
+
+    restore_abort_case = payload["cases"][2]
+    assert restore_abort_case["aborted_return_code"] != 0
+    assert restore_abort_case["app_probe"]["readiness_ready"] is True
+    assert restore_abort_case["app_probe"]["slo_status"] == "ok"
+    assert restore_abort_case["app_probe"]["goal_create_status_code"] == 201
+    assert restore_abort_case["app_probe"]["running_run_ids"] == []
+
+    happy_case = payload["cases"][3]
+    assert happy_case["app_probe"]["readiness_ready"] is True
+    assert happy_case["app_probe"]["slo_status"] == "ok"
+    assert happy_case["app_probe"]["goal_create_status_code"] == 201
+    assert happy_case["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_108_multi_db_atomic_switch_drill_reports_success():
+    workspace = _local_test_dir("pytest-multi-db-atomic-switch-drill")
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "multi-db-atomic-switch-drill.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--seed-rows",
+        "48",
+        "--payload-bytes",
+        "96",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["cases"] == 4
+    assert len(payload["cases"]) == 4
+
+    case_names = [case["name"] for case in payload["cases"]]
+    assert case_names == [
+        "abort_before_pointer_replace",
+        "candidate_integrity_reject",
+        "switch_to_candidate_success",
+        "switch_back_to_primary_success",
+    ]
+    for case in payload["cases"]:
+        assert case["success"] is True
+
+    abort_case = payload["cases"][0]
+    assert abort_case["aborted_return_code"] != 0
+    assert abort_case["pointer_active_after"] == "primary"
+    assert abort_case["app_probe"]["readiness_ready"] is True
+    assert abort_case["app_probe"]["slo_status"] == "ok"
+    assert abort_case["app_probe"]["running_run_ids"] == []
+
+    reject_case = payload["cases"][1]
+    assert reject_case["failure_reason"] in {"target_snapshot_failed", "target_integrity_failed"}
+    assert reject_case["pointer_active_before"] == "primary"
+    assert reject_case["pointer_active_after"] == "primary"
+
+    candidate_case = payload["cases"][2]
+    assert candidate_case["pointer_active_after"] == "candidate"
+    assert candidate_case["app_probe"]["readiness_ready"] is True
+    assert candidate_case["app_probe"]["slo_status"] == "ok"
+    assert candidate_case["app_probe"]["goal_create_status_code"] == 201
+    assert candidate_case["app_probe"]["running_run_ids"] == []
+
+    rollback_case = payload["cases"][3]
+    assert rollback_case["pointer_active_after"] == "primary"
+    assert rollback_case["app_probe"]["readiness_ready"] is True
+    assert rollback_case["app_probe"]["slo_status"] == "ok"
+    assert rollback_case["app_probe"]["goal_create_status_code"] == 201
+    assert rollback_case["app_probe"]["running_run_ids"] == []
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_109_release_gate_runtime_stability_drill_reports_success():
+    workspace = _local_test_dir("pytest-runtime-stability-drill").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "release-gate-runtime-stability-drill-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-runtime-stability-drill.py"),
+        "--label",
+        "pytest-drill",
+        "--samples",
+        "2",
+        "--repeats-per-sample",
+        "1",
+        "--target-file",
+        str(project_root / "tests" / "test_goal_ops.py"),
+        "--keyword-expression",
+        (
+            "test_105_storage_corruption_hardening_drill_reports_success or "
+            "test_106_backup_restore_stress_drill_reports_success or "
+            "test_107_snapshot_restore_crash_consistency_drill_reports_success or "
+            "test_108_multi_db_atomic_switch_drill_reports_success or "
+            "test_144_dashboard_template_contains_runtime_rail_contract or "
+            "test_145_safe_mode_ux_degradation_check_reports_success or "
+            "test_147_a11y_test_harness_check_reports_success or "
+            "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline"
+        ),
+        "--timeout-seconds",
+        "900",
+        "--max-mean-duration-ms",
+        "300000",
+        "--max-stddev-ms",
+        "180000",
+        "--max-iteration-duration-ms",
+        "480000",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "disk i/o error" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("File-backed SQLite is unavailable in this sandbox")
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["samples"] == 2
+    assert payload["config"]["repeats_per_sample"] == 1
+    assert payload["metrics"]["iterations_total"] >= 2
+    assert payload["metrics"]["failed_iterations"] == 0
+    assert payload["metrics"]["mean_duration_ms"] > 0
+    assert payload["metrics"]["max_duration_ms"] > 0
+    assert len(payload["samples"]) == 2
+    for sample in payload["samples"]:
+        assert sample["success"] is True
+        assert sample["return_code"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_110_p0_burnin_consecutive_green_reports_success_after_recovery_window():
+    workspace = _local_test_dir("pytest-p0-burnin-consecutive-green")
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_dir = workspace / "fixtures"
+    jobs_dir = fixtures_dir / "jobs"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    runs_payload = {
+        "workflow_runs": [
+            {
+                "id": 9003,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9003",
+                "updated_at": "2026-04-16T10:00:03Z",
+            },
+            {
+                "id": 9002,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9002",
+                "updated_at": "2026-04-16T10:00:02Z",
+            },
+            {
+                "id": 9001,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9001",
+                "updated_at": "2026-04-16T10:00:01Z",
+            },
+            {
+                "id": 9000,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "sha-9000",
+                "updated_at": "2026-04-16T10:00:00Z",
+            },
+        ]
+    }
+    # Older failure after a sequence of fresh green runs models recovery after a transient incident.
+    runs_file = fixtures_dir / "runs.json"
+    runs_file.write_text(json.dumps(runs_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    required_jobs = [
+        "Release Gate (Windows)",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    for run_id in (9003, 9002, 9001, 9000):
+        conclusion = "success" if run_id != 9000 else "failure"
+        jobs_payload = {
+            "jobs": [
+                {"name": required_jobs[0], "conclusion": conclusion},
+                {"name": required_jobs[1], "conclusion": conclusion},
+                {"name": required_jobs[2], "conclusion": conclusion},
+                {"name": required_jobs[3], "conclusion": conclusion},
+                {"name": "Auxiliary Check", "conclusion": "success"},
+            ]
+        }
+        (jobs_dir / f"{run_id}.json").write_text(
+            json.dumps(jobs_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "CI",
+        "--required-jobs",
+        ",".join(required_jobs),
+        "--required-consecutive",
+        "3",
+        "--per-page",
+        "10",
+        "--runs-file",
+        str(runs_file),
+        "--jobs-dir",
+        str(jobs_dir),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["config"]["required_consecutive"] == 3
+    assert payload["metrics"]["consecutive_green"] == 3
+    assert payload["metrics"]["evaluated_runs"] == 3
+    assert payload["first_non_green"] is None
+    assert len(payload["evaluations"]) == 3
+    for evaluation in payload["evaluations"]:
+        assert evaluation["is_green"] is True
+        assert evaluation["missing_jobs"] == []
+        assert evaluation["failing_jobs"] == []
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_111_p0_burnin_consecutive_green_reports_failure_for_latest_non_green_run():
+    workspace = _local_test_dir("pytest-p0-burnin-consecutive-green-failure")
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_dir = workspace / "fixtures"
+    jobs_dir = fixtures_dir / "jobs"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    required_jobs = [
+        "Release Gate (Windows)",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    runs_payload = {
+        "workflow_runs": [
+            {
+                "id": 9102,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "sha-9102",
+                "updated_at": "2026-04-16T11:00:02Z",
+            },
+            {
+                "id": 9101,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "sha-9101",
+                "updated_at": "2026-04-16T11:00:01Z",
+            },
+        ]
+    }
+    runs_file = fixtures_dir / "runs.json"
+    runs_file.write_text(json.dumps(runs_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    jobs_payload_failure = {
+        "jobs": [
+            {"name": required_jobs[0], "conclusion": "failure"},
+            {"name": required_jobs[1], "conclusion": "success"},
+            {"name": required_jobs[2], "conclusion": "success"},
+            {"name": required_jobs[3], "conclusion": "success"},
+        ]
+    }
+    (jobs_dir / "9102.json").write_text(
+        json.dumps(jobs_payload_failure, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    jobs_payload_success = {
+        "jobs": [{"name": job_name, "conclusion": "success"} for job_name in required_jobs]
+    }
+    (jobs_dir / "9101.json").write_text(
+        json.dumps(jobs_payload_success, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "CI",
+        "--required-jobs",
+        ",".join(required_jobs),
+        "--required-consecutive",
+        "2",
+        "--per-page",
+        "10",
+        "--runs-file",
+        str(runs_file),
+        "--jobs-dir",
+        str(jobs_dir),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 burn-in consecutive-green check not met: "
+    assert marker in completed.stderr
+
+    report = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert report["success"] is False
+    assert report["metrics"]["consecutive_green"] == 0
+    assert report["metrics"]["evaluated_runs"] == 1
+    assert report["first_non_green"]["run_id"] == 9102
+    assert report["first_non_green"]["is_green"] is False
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_112_p0_runbook_contract_check_reports_success():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check")
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "runbook-contract-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_strict_flags_in_ci_workflow"] == []
+    assert payload["checks"]["missing_strict_flags_in_runbook"] == []
+    assert payload["checks"]["missing_required_runbook_scripts"] == []
+    assert payload["checks"]["missing_script_files_for_runbook_references"] == []
+    assert payload["checks"]["missing_required_canary_drills"] == []
+    assert payload["checks"]["invalid_canary_baseline_durations"] == []
+    assert payload["checks"]["missing_required_release_gate_tokens"] == []
+    assert payload["checks"]["missing_required_ci_artifact_paths"] == []
+    assert payload["checks"]["missing_required_runbook_tokens"] == []
+    assert output_file.exists()
+
+    report_file_payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert report_file_payload["success"] is True
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_113_p0_release_evidence_bundle_reports_success_with_required_files():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_report = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    burnin_report.write_text(
+        json.dumps({"label": "burnin", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    runbook_report.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    bundle_dir = artifacts_dir / "p0-release-evidence-files-release-gate"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--required-files",
+        ",".join([str(burnin_report.resolve()), str(runbook_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+        "--bundle-dir",
+        str(bundle_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output_lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    payload = json.loads(output_lines[-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["required_missing_reports"] == 0
+    assert payload["metrics"]["failed_reports"] == 0
+    assert payload["metrics"]["success_reports"] == 2
+    assert output_file.exists()
+    assert (bundle_dir / burnin_report.name).exists()
+    assert (bundle_dir / runbook_report.name).exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_114_p0_release_evidence_bundle_fails_when_required_file_missing():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    missing_report = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    existing_report.write_text(
+        json.dumps({"label": "burnin", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--required-files",
+        ",".join([str(existing_report.resolve()), str(missing_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 release evidence bundle check failed: "
+    assert marker in completed.stderr
+    report = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert report["success"] is False
+    assert report["metrics"]["required_missing_reports"] == 1
+    assert str(missing_report) in report["required_missing"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_115_p0_closure_report_reports_success_when_all_criteria_pass():
+    workspace = _local_test_dir("pytest-p0-closure-report-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+
+    evidence_file.write_text(
+        json.dumps({"label": "evidence", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 12}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_116_p0_closure_report_fails_when_burnin_threshold_not_met():
+    workspace = _local_test_dir("pytest-p0-closure-report-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+
+    evidence_file.write_text(
+        json.dumps({"label": "evidence", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 3}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 closure report is not green: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_117_operator_auth_blocks_system_mutations_without_valid_token():
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            operator_auth_required=True,
+            operator_auth_token="operator-token-0123456789",
+            operator_auth_token_min_length=16,
+        )
+    )
+    with TestClient(app) as local_client:
+        health = local_client.get("/system/health")
+        blocked = local_client.post("/system/scheduler/age")
+        wrong = local_client.post(
+            "/system/scheduler/age",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        allowed = local_client.post(
+            "/system/scheduler/age",
+            headers={"Authorization": "Bearer operator-token-0123456789"},
+        )
+
+    assert health.status_code == 200
+    assert blocked.status_code == 401
+    assert blocked.headers.get("WWW-Authenticate") == "Bearer"
+    assert "Operator authentication required" in blocked.json()["detail"]
+    assert wrong.status_code == 401
+    assert allowed.status_code == 200
+
+
+def test_118_create_app_rejects_weak_operator_token_when_auth_required():
+    with pytest.raises(ValueError) as exc_info:
+        create_app(
+            Settings(
+                database_url=":memory:",
+                operator_auth_required=True,
+                operator_auth_token="short",
+                operator_auth_token_min_length=16,
+            )
+        )
+    assert "Operator auth is required" in str(exc_info.value)
+
+
+def test_119_security_config_hardening_check_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-config-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--operator-auth-required",
+        "--operator-auth-token",
+        "security-token-0123456789",
+        "--min-operator-token-length",
+        "16",
+        "--database-url",
+        "goal_ops.db",
+        "--startup-corruption-recovery-enabled",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+
+
+def test_120_security_config_hardening_check_reports_failure_without_auth_requirement():
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-config-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--operator-auth-token",
+        "security-token-0123456789",
+        "--min-operator-token-length",
+        "16",
+        "--database-url",
+        "goal_ops.db",
+        "--startup-corruption-recovery-enabled",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[security-config-hardening-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+
+def test_121_audit_integrity_endpoint_detects_tampering(client):
+    created = client.post(
+        "/goals",
+        json={
+            "title": "Audit integrity goal",
+            "description": "tamper detection",
+            "urgency": 0.6,
+            "value": 0.7,
+            "deadline_score": 0.1,
+        },
+    )
+    assert created.status_code == 201
+
+    baseline = client.get("/system/audit/integrity?verify_limit=500")
+    assert baseline.status_code == 200
+    baseline_payload = baseline.json()
+    assert baseline_payload["ok"] is True
+    assert baseline_payload["metrics"]["missing_integrity_rows"] == 0
+
+    services = client.app.state.services
+    latest_audit_id = services.db.fetch_scalar(
+        "SELECT audit_id FROM audit_log ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+    )
+    assert latest_audit_id is not None
+    services.db.execute(
+        "UPDATE audit_log_integrity SET entry_hash = ? WHERE audit_id = ?",
+        "0" * 64,
+        latest_audit_id,
+    )
+
+    tampered = client.get("/system/audit/integrity?verify_limit=500")
+    assert tampered.status_code == 200
+    tampered_payload = tampered.json()
+    assert tampered_payload["ok"] is False
+    assert tampered_payload["metrics"]["hash_mismatch_count"] >= 1
+
+
+def test_122_readiness_reports_not_ready_when_audit_integrity_is_tampered():
+    app = create_app(Settings(database_url=":memory:"))
+    with TestClient(app) as local_client:
+        created = local_client.post(
+            "/goals",
+            json={
+                "title": "Readiness tamper goal",
+                "description": "check",
+                "urgency": 0.5,
+                "value": 0.4,
+                "deadline_score": 0.1,
+            },
+        )
+        assert created.status_code == 201
+
+        services = local_client.app.state.services
+        latest_audit_id = services.db.fetch_scalar(
+            "SELECT audit_id FROM audit_log ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+        )
+        assert latest_audit_id is not None
+        services.db.execute(
+            "UPDATE audit_log_integrity SET entry_hash = ? WHERE audit_id = ?",
+            "0" * 64,
+            latest_audit_id,
+        )
+
+        readiness = local_client.get("/system/readiness")
+        assert readiness.status_code == 200
+        payload = readiness.json()
+        assert payload["ready"] is False
+        assert payload["checks"]["audit_integrity"]["ok"] is False
+        assert payload["checks"]["audit_integrity"]["metrics"]["hash_mismatch_count"] >= 1
+
+
+def test_123_audit_trail_hardening_check_reports_success():
+    workspace = _local_test_dir("pytest-audit-trail-hardening-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "audit-trail-hardening-check-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "audit-trail-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--audit-retention-days",
+        "365",
+        "--min-audit-retention-days",
+        "90",
+        "--seed-entries",
+        "8",
+        "--workspace",
+        str(workspace),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_124_audit_trail_hardening_check_fails_with_low_retention_policy():
+    workspace = _local_test_dir("pytest-audit-trail-hardening-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "audit-trail-hardening-check-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "audit-trail-hardening-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--audit-retention-days",
+        "14",
+        "--min-audit-retention-days",
+        "90",
+        "--seed-entries",
+        "8",
+        "--workspace",
+        str(workspace),
+        "--output-file",
+        str(output_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[audit-trail-hardening-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_125_service_startup_backfills_legacy_audit_integrity_rows():
+    workspace = _local_test_dir("pytest-audit-integrity-backfill")
+    db_path = workspace / "legacy-audit.db"
+    db = Database(str(db_path))
+    db.initialize()
+
+    legacy_audit_id = new_id()
+    db.execute(
+        """INSERT INTO audit_log
+           (audit_id, action, actor, status, entity_type, entity_id, correlation_id, details, created_at)
+           VALUES (?, 'legacy.audit', 'test', 'success', 'legacy', 'entry-1', NULL, NULL, ?)""",
+        legacy_audit_id,
+        now_utc(),
+    )
+
+    app = create_app(Settings(database_url=str(db_path)))
+    with TestClient(app) as local_client:
+        integrity = local_client.get("/system/audit/integrity?verify_limit=500")
+        assert integrity.status_code == 200
+        payload = integrity.json()
+        assert payload["ok"] is True
+        assert payload["metrics"]["missing_integrity_rows"] == 0
+        assert payload["metrics"]["chain_entries"] >= 1
+        assert payload["metrics"]["total_audit_entries"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_126_security_ci_lane_check_reports_success_with_fixture_inputs():
+    workspace = _local_test_dir("pytest-security-ci-lane-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    dependency_file = artifacts_dir / "dependency-audit.json"
+    sast_file = artifacts_dir / "sast-bandit.json"
+    sbom_file = artifacts_dir / "security-sbom.json"
+    output_file = artifacts_dir / "security-ci-lane-report.json"
+
+    dependency_file.write_text(json.dumps([], ensure_ascii=True), encoding="utf-8")
+    sast_file.write_text(
+        json.dumps({"results": [], "metrics": {}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-ci-lane-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--scan-path",
+        "goal_ops_console",
+        "--max-dependency-vulnerabilities",
+        "0",
+        "--max-sast-high",
+        "0",
+        "--max-sast-medium",
+        "0",
+        "--dependency-audit-json-file",
+        str(dependency_file.resolve()),
+        "--sast-json-file",
+        str(sast_file.resolve()),
+        "--sbom-output-file",
+        str(sbom_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert sbom_file.exists()
+    assert output_file.exists()
+
+    sbom_payload = json.loads(sbom_file.read_text(encoding="utf-8"))
+    assert sbom_payload["component_count"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_127_security_ci_lane_check_fails_when_dependency_budget_exceeded():
+    workspace = _local_test_dir("pytest-security-ci-lane-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    dependency_file = artifacts_dir / "dependency-audit.json"
+    sast_file = artifacts_dir / "sast-bandit.json"
+    output_file = artifacts_dir / "security-ci-lane-report.json"
+
+    dependency_file.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "example-package",
+                    "version": "1.2.3",
+                    "vulns": [{"id": "PYSEC-2026-0001", "fix_versions": ["1.2.4"]}],
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    sast_file.write_text(
+        json.dumps({"results": [], "metrics": {}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-ci-lane-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--scan-path",
+        "goal_ops_console",
+        "--max-dependency-vulnerabilities",
+        "0",
+        "--max-sast-high",
+        "0",
+        "--max-sast-medium",
+        "0",
+        "--dependency-audit-json-file",
+        str(dependency_file.resolve()),
+        "--sast-json-file",
+        str(sast_file.resolve()),
+        "--sbom-output-file",
+        str((artifacts_dir / "security-sbom.json").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[security-ci-lane-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert payload["metrics"]["dependency_vulnerability_count"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_128_alert_routing_oncall_check_reports_success_with_mock_critical():
+    workspace = _local_test_dir("pytest-alert-routing-oncall-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "alert-routing-oncall-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "alert-routing-oncall-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-slo-status",
+        "critical",
+        "--mock-alert-count",
+        "2",
+        "--routing-policy-file",
+        str((project_root / "docs" / "oncall-alert-routing-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["critical_alert_count"] >= 2
+    assert payload["metrics"]["action_count"] >= 4
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_129_alert_routing_oncall_check_fails_when_critical_route_missing():
+    workspace = _local_test_dir("pytest-alert-routing-oncall-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "broken-policy.json"
+    output_file = workspace / "alert-routing-oncall-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "routes": {
+                    "warning": {
+                        "channel": "ops-slack-warning",
+                        "primary": "ops-duty-manager",
+                        "backup": "ops-secondary",
+                        "max_ack_minutes": 60,
+                        "runbook_section": "### 3.28 On-call warning alert routing",
+                    }
+                },
+                "escalation": {
+                    "critical_page_within_minutes": 5,
+                    "critical_backup_after_minutes": 10,
+                    "warning_notify_within_minutes": 15,
+                    "warning_ticket_within_minutes": 30,
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "alert-routing-oncall-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-slo-status",
+        "critical",
+        "--mock-alert-count",
+        "1",
+        "--routing-policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[alert-routing-oncall-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_130_incident_drill_automation_check_reports_success_with_mock_data():
+    workspace = _local_test_dir("pytest-incident-drill-automation-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-drill-automation-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "incident-drill-automation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-report",
+        "--mock-days-since-tabletop",
+        "7",
+        "--mock-days-since-technical",
+        "3",
+        "--mock-tabletop-status",
+        "completed",
+        "--mock-technical-status",
+        "completed",
+        "--mock-open-followups",
+        "0",
+        "--policy-file",
+        str((project_root / "docs" / "incident-drill-automation-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["required_scenario_count"] >= 2
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_131_incident_drill_automation_check_fails_when_technical_drill_is_stale():
+    workspace = _local_test_dir("pytest-incident-drill-automation-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-drill-automation-report.json"
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "incident-drill-automation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--mock-report",
+        "--mock-days-since-tabletop",
+        "5",
+        "--mock-days-since-technical",
+        "45",
+        "--mock-tabletop-status",
+        "completed",
+        "--mock-technical-status",
+        "completed",
+        "--mock-open-followups",
+        "0",
+        "--max-technical-age-days",
+        "14",
+        "--policy-file",
+        str((project_root / "docs" / "incident-drill-automation-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[incident-drill-automation-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "technical.incident-rollback.recency_budget"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_132_load_profile_framework_check_reports_success_with_fixture_profile():
+    workspace = _local_test_dir("pytest-load-profile-framework-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    profile_file = workspace / "load-profile-catalog.json"
+    output_file = workspace / "load-profile-framework-report.json"
+
+    profile_file.write_text(
+        json.dumps(
+            {
+                "catalog_version": "pytest.stage-c.1",
+                "profiles": [
+                    {
+                        "name": "pytest_smoke",
+                        "version": "1.0.0",
+                        "description": "pytest profile",
+                        "stages": [
+                            {
+                                "name": "steady",
+                                "cycles": 4,
+                                "workflow_start_every_cycles": 0,
+                                "drain_batch_size": 50,
+                                "readiness_check_every_cycles": 2,
+                            },
+                            {
+                                "name": "burst",
+                                "cycles": 6,
+                                "workflow_start_every_cycles": 3,
+                                "drain_batch_size": 80,
+                                "readiness_check_every_cycles": 2,
+                            },
+                        ],
+                        "budgets": {
+                            "max_p95_latency_ms": 5000.0,
+                            "max_p99_latency_ms": 6000.0,
+                            "max_max_latency_ms": 12000.0,
+                            "max_http_429_rate_percent": 50.0,
+                            "max_error_rate_percent": 10.0,
+                            "min_total_requests": 40,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "load-profile-framework-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--profile-file",
+        str(profile_file.resolve()),
+        "--profile-name",
+        "pytest_smoke",
+        "--profile-version",
+        "1.0.0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["requests_total"] >= 40
+    assert payload["profile"]["name"] == "pytest_smoke"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_133_load_profile_framework_check_fails_when_min_requests_budget_is_unmet():
+    workspace = _local_test_dir("pytest-load-profile-framework-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    profile_file = workspace / "load-profile-catalog.json"
+    output_file = workspace / "load-profile-framework-report.json"
+
+    profile_file.write_text(
+        json.dumps(
+            {
+                "catalog_version": "pytest.stage-c.1",
+                "profiles": [
+                    {
+                        "name": "pytest_strict",
+                        "version": "1.0.0",
+                        "description": "pytest strict profile",
+                        "stages": [
+                            {
+                                "name": "steady",
+                                "cycles": 3,
+                                "workflow_start_every_cycles": 0,
+                                "drain_batch_size": 50,
+                                "readiness_check_every_cycles": 0,
+                            }
+                        ],
+                        "budgets": {
+                            "max_p95_latency_ms": 5000.0,
+                            "max_p99_latency_ms": 6000.0,
+                            "max_max_latency_ms": 12000.0,
+                            "max_http_429_rate_percent": 50.0,
+                            "max_error_rate_percent": 10.0,
+                            "min_total_requests": 2000,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "load-profile-framework-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--profile-file",
+        str(profile_file.resolve()),
+        "--profile-name",
+        "pytest_strict",
+        "--profile-version",
+        "1.0.0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[load-profile-framework-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "min_total_requests"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_134_rto_rpo_assertion_suite_reports_success_with_fixture_policy():
+    workspace = _local_test_dir("pytest-rto-rpo-assertion-suite-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "rto-rpo-policy.json"
+    output_file = workspace / "rto-rpo-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "pytest.1.0.0",
+                "max_rto_seconds": 30.0,
+                "max_rpo_rows_lost": 400,
+                "scenarios": [
+                    {
+                        "id": "restore.zero_loss",
+                        "runbook_section": "### 3.33 RTO zero-loss restore assertion",
+                    },
+                    {
+                        "id": "restore.bounded_loss",
+                        "runbook_section": "### 3.34 RPO bounded-loss assertion",
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "rto-rpo-assertion-suite.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str((workspace / "suite-workspace").resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--seed-rows",
+        "18",
+        "--tail-write-rows",
+        "6",
+        "--max-rto-seconds",
+        "30",
+        "--max-rpo-rows-lost",
+        "400",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["max_restore_duration_ms"] >= 0
+    assert payload["metrics"]["bounded_rows_lost"] <= 400
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_135_rto_rpo_assertion_suite_fails_when_rpo_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-rto-rpo-assertion-suite-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "rto-rpo-policy.json"
+    output_file = workspace / "rto-rpo-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "pytest.1.0.0",
+                "max_rto_seconds": 30.0,
+                "max_rpo_rows_lost": 0,
+                "scenarios": [
+                    {
+                        "id": "restore.zero_loss",
+                        "runbook_section": "### 3.33 RTO zero-loss restore assertion",
+                    },
+                    {
+                        "id": "restore.bounded_loss",
+                        "runbook_section": "### 3.34 RPO bounded-loss assertion",
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "rto-rpo-assertion-suite.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str((workspace / "suite-workspace").resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--seed-rows",
+        "18",
+        "--tail-write-rows",
+        "6",
+        "--max-rto-seconds",
+        "30",
+        "--max-rpo-rows-lost",
+        "0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[rto-rpo-assertion-suite] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "bounded_loss_rpo_budget"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_136_canary_guardrails_check_reports_halt_success_with_mock_critical():
+    workspace = _local_test_dir("pytest-canary-guardrails-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    run_workspace = workspace / "run-workspace"
+    manifest_path = run_workspace / "desktop-rings.json"
+    output_file = workspace / "canary-guardrails-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-guardrails-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--manifest-path",
+        str(manifest_path.resolve()),
+        "--policy-file",
+        str((project_root / "docs" / "canary-guardrails-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--stable-baseline-version",
+        "0.0.1",
+        "--canary-candidate-version",
+        "0.0.2",
+        "--expected-decision",
+        "halt",
+        "--mock-slo-statuses",
+        "ok,ok,critical,critical",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["result"] == "halt"
+    assert payload["rings"]["promotion_blocked"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_137_canary_guardrails_check_fails_when_expected_promote_but_halt_occurs():
+    workspace = _local_test_dir("pytest-canary-guardrails-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    run_workspace = workspace / "run-workspace"
+    manifest_path = run_workspace / "desktop-rings.json"
+    output_file = workspace / "canary-guardrails-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "canary-guardrails-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str(run_workspace.resolve()),
+        "--manifest-path",
+        str(manifest_path.resolve()),
+        "--policy-file",
+        str((project_root / "docs" / "canary-guardrails-policy.json").resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--stable-baseline-version",
+        "0.0.1",
+        "--canary-candidate-version",
+        "0.0.2",
+        "--expected-decision",
+        "promote",
+        "--mock-slo-statuses",
+        "ok,ok,critical,critical",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[canary-guardrails-check] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["result"] == "halt"
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "decision_matches_expected"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_138_auto_rollback_policy_triggers_on_error_budget_burn_rate():
+    workspace = _local_test_dir("pytest-auto-rollback-hard-trigger-burn-rate").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    output_file = workspace / "auto-rollback-burn-rate-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "auto-rollback-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "ok,ok,ok,ok",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,2.5,2.5",
+        "--mock-readiness-values",
+        "true,true,true,true",
+        "--critical-window-seconds",
+        "4",
+        "--readiness-regression-window-seconds",
+        "2",
+        "--max-error-budget-burn-rate-percent",
+        "2.0",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+        "--expected-trigger-reason",
+        "error_budget_burn_rate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "error_budget_burn_rate"
+    assert payload["decision"]["expected_reason_matched"] is True
+    assert payload["rollback"]["executed"] is True
+    assert payload["decision"]["recommended_action"] == "rollback_executed"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_139_auto_rollback_policy_triggers_on_readiness_regression():
+    workspace = _local_test_dir("pytest-auto-rollback-hard-trigger-readiness").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    manifest_path = workspace / "desktop-rings.json"
+    output_file = workspace / "auto-rollback-readiness-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "auto-rollback-policy.py"),
+        "--workspace",
+        str(workspace),
+        "--label",
+        "pytest-drill",
+        "--manifest-path",
+        str(manifest_path),
+        "--ring",
+        "stable",
+        "--mock-slo-statuses",
+        "ok,degraded,degraded,degraded",
+        "--mock-error-budget-burn-rates",
+        "0.5,0.8,0.9,0.9",
+        "--mock-readiness-values",
+        "true,false,false,false",
+        "--critical-window-seconds",
+        "4",
+        "--readiness-regression-window-seconds",
+        "1",
+        "--max-error-budget-burn-rate-percent",
+        "2.0",
+        "--poll-interval-seconds",
+        "1",
+        "--max-observation-seconds",
+        "8",
+        "--seed-previous-version",
+        "0.0.1",
+        "--seed-incident-version",
+        "0.0.2",
+        "--expected-trigger-reason",
+        "readiness_regression",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["observation"]["triggered"] is True
+    assert payload["observation"]["trigger_reason"] == "readiness_regression"
+    assert payload["decision"]["expected_reason_matched"] is True
+    assert payload["rollback"]["executed"] is True
+    assert payload["decision"]["recommended_action"] == "rollback_executed"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_140_disaster_recovery_rehearsal_pack_reports_success_with_mock_results():
+    workspace = _local_test_dir("pytest-disaster-recovery-rehearsal-pack-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-drill-results.json"
+    output_file = workspace / "disaster-recovery-rehearsal-pack-report.json"
+    evidence_dir = workspace / "evidence"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "drills": [
+                    {
+                        "name": "snapshot_restore_crash_consistency",
+                        "success": True,
+                        "duration_seconds": 0.8,
+                        "payload": {"success": True, "report": "snapshot"},
+                    },
+                    {
+                        "name": "multi_db_atomic_switch",
+                        "success": True,
+                        "duration_seconds": 0.7,
+                        "payload": {"success": True, "report": "switch"},
+                    },
+                    {
+                        "name": "rto_rpo_assertion",
+                        "success": True,
+                        "duration_seconds": 0.6,
+                        "payload": {"success": True, "report": "rto-rpo"},
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disaster-recovery-rehearsal-pack.py"),
+        "--label",
+        "pytest-drill",
+        "--profile",
+        "release-gate",
+        "--workspace",
+        str((workspace / "run-workspace").resolve()),
+        "--mock-drill-results-file",
+        str(mock_results_file.resolve()),
+        "--max-failed-drills",
+        "0",
+        "--max-total-duration-seconds",
+        "120",
+        "--output-file",
+        str(output_file.resolve()),
+        "--evidence-dir",
+        str(evidence_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["profile"] == "mock"
+    assert payload["metrics"]["drills_total"] == 3
+    assert payload["metrics"]["drills_failed"] == 0
+    assert payload["metrics"]["duration_budget_exceeded"] is False
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+    assert len(payload["paths"]["evidence_files"]) == 3
+    for evidence_file in payload["paths"]["evidence_files"]:
+        assert Path(evidence_file).exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_141_disaster_recovery_rehearsal_pack_fails_when_duration_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-disaster-recovery-rehearsal-pack-duration-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    mock_results_file = workspace / "mock-drill-results.json"
+    output_file = workspace / "disaster-recovery-rehearsal-pack-report.json"
+    evidence_dir = workspace / "evidence"
+
+    mock_results_file.write_text(
+        json.dumps(
+            {
+                "drills": [
+                    {
+                        "name": "snapshot_restore_crash_consistency",
+                        "success": True,
+                        "duration_seconds": 3.0,
+                        "payload": {"success": True},
+                    },
+                    {
+                        "name": "multi_db_atomic_switch",
+                        "success": True,
+                        "duration_seconds": 2.5,
+                        "payload": {"success": True},
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "disaster-recovery-rehearsal-pack.py"),
+        "--label",
+        "pytest-drill",
+        "--profile",
+        "release-gate",
+        "--workspace",
+        str((workspace / "run-workspace").resolve()),
+        "--mock-drill-results-file",
+        str(mock_results_file.resolve()),
+        "--max-failed-drills",
+        "0",
+        "--max-total-duration-seconds",
+        "1",
+        "--output-file",
+        str(output_file.resolve()),
+        "--evidence-dir",
+        str(evidence_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[disaster-recovery-rehearsal-pack] ERROR: "
+    assert marker in completed.stderr
+    error_text = completed.stderr.split(marker, 1)[1].strip()
+    payload_text = error_text
+    nested_marker = "Disaster recovery rehearsal pack failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["drills_failed"] == 0
+    assert payload["metrics"]["duration_budget_exceeded"] is True
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_142_failure_budget_dashboard_reports_success_with_fixture_reports():
+    workspace = _local_test_dir("pytest-failure-budget-dashboard-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_file = artifacts_dir / "failure-budget-dashboard-report.json"
+
+    report_paths = [
+        artifacts_dir / "load-profile-framework-release-gate.json",
+        artifacts_dir / "rto-rpo-assertion-release-gate.json",
+        artifacts_dir / "canary-guardrails-release-gate.json",
+        artifacts_dir / "auto-rollback-policy-release-gate.json",
+        artifacts_dir / "p0-disaster-recovery-rehearsal-pack-release-gate.json",
+    ]
+    for path in report_paths:
+        path.write_text(
+            json.dumps({"label": path.stem, "success": True, "metrics": {"criteria_failed": 0}}, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "failure-budget-dashboard.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--budget-report-files",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["reports_expected"] == 5
+    assert payload["metrics"]["reports_present"] == 5
+    assert payload["metrics"]["reports_failed"] == 0
+    assert payload["metrics"]["reports_missing"] == 0
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_143_failure_budget_dashboard_fails_when_any_budget_report_is_red():
+    workspace = _local_test_dir("pytest-failure-budget-dashboard-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    output_file = artifacts_dir / "failure-budget-dashboard-report.json"
+
+    success_paths = [
+        artifacts_dir / "load-profile-framework-release-gate.json",
+        artifacts_dir / "rto-rpo-assertion-release-gate.json",
+        artifacts_dir / "canary-guardrails-release-gate.json",
+        artifacts_dir / "auto-rollback-policy-release-gate.json",
+    ]
+    failed_path = artifacts_dir / "p0-disaster-recovery-rehearsal-pack-release-gate.json"
+
+    for path in success_paths:
+        path.write_text(
+            json.dumps({"label": path.stem, "success": True}, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+    failed_path.write_text(
+        json.dumps({"label": failed_path.stem, "success": False}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    all_paths = success_paths + [failed_path]
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "failure-budget-dashboard.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--budget-report-files",
+        ",".join(str(path.resolve()) for path in all_paths),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[failure-budget-dashboard] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Failure budget dashboard is red: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["reports_failed"] == 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_144_dashboard_template_contains_runtime_rail_contract(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="runtime-state-rail"' in html
+    assert 'id="runtime-state-summary"' in html
+    assert 'id="runtime-state-alerts"' in html
+    assert 'id="runtime-state-recommendations"' in html
+    assert 'data-mutation-control="true"' in html
+
+
+def test_145_safe_mode_ux_degradation_check_reports_success():
+    workspace = _local_test_dir("pytest-safe-mode-ux-degradation-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "safe-mode-ux-degradation-check-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "safe-mode-ux-degradation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_template_tokens"] == []
+    assert payload["checks"]["missing_app_js_tokens"] == []
+    assert payload["checks"]["missing_runbook_tokens"] == []
+    assert payload["checks"]["release_gate_has_strict_flag"] is True
+    assert payload["checks"]["ci_has_strict_flag"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_146_safe_mode_ux_degradation_check_fails_when_runtime_rail_tokens_missing():
+    workspace = _local_test_dir("pytest-safe-mode-ux-degradation-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "safe-mode-ux-degradation-check-report.json"
+    broken_template = workspace / "broken-index.html"
+    broken_template.write_text("<html><body><h1>Broken dashboard</h1></body></html>", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "safe-mode-ux-degradation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--template-file",
+        str(broken_template.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[safe-mode-ux-degradation-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Safe-mode UX degradation contract failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert len(payload["checks"]["missing_template_tokens"]) >= 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_147_a11y_test_harness_check_reports_success():
+    workspace = _local_test_dir("pytest-a11y-test-harness-check-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "a11y-test-harness-check-report.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "a11y-test-harness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["checks"]["missing_template_tokens"] == []
+    assert payload["checks"]["missing_app_js_tokens"] == []
+    assert payload["checks"]["missing_runbook_tokens"] == []
+    assert payload["checks"]["contrast_failures"] == []
+    assert payload["checks"]["release_gate_has_strict_flag"] is True
+    assert payload["checks"]["ci_has_strict_flag"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_148_a11y_test_harness_check_fails_when_required_template_tokens_are_missing():
+    workspace = _local_test_dir("pytest-a11y-test-harness-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "a11y-test-harness-check-report.json"
+    broken_template = workspace / "broken-index.html"
+    broken_template.write_text(
+        "<html><head><style>"
+        ":root { --ink: #111111; --panel: #ffffff; --muted: #555555; --info: #005a9c; --good: #176b2c; --bad: #8a0f1a; --warn: #7a4f00; }"
+        "body.visual-graphite {}"
+        "body.visual-signal {}"
+        "</style></head>"
+        "<body><main id='main-content'></main></body></html>",
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "a11y-test-harness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--template-file",
+        str(broken_template.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[a11y-test-harness-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "A11y test harness check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert len(payload["checks"]["missing_template_tokens"]) >= 1
+    assert payload["decision"]["release_blocked"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'class="skip-link"' in html
+    assert 'href="#main-content"' in html
+    assert 'id="main-content" tabindex="-1"' in html
+    assert html.count('class="sr-only"') >= 10
+    assert html.count('aria-live="polite"') >= 5
+
+
+def test_150_runtime_stability_and_flake_gate_defaults_include_stage_d_checks():
+    project_root = Path(__file__).resolve().parents[1]
+    runtime_script = (project_root / "scripts" / "release-gate-runtime-stability-drill.py").read_text(encoding="utf-8")
+    runtime_wrapper = (project_root / "scripts" / "run-release-gate-runtime-stability-drill.ps1").read_text(encoding="utf-8")
+    critical_script = (project_root / "scripts" / "critical-drill-flake-gate.py").read_text(encoding="utf-8")
+    critical_wrapper = (project_root / "scripts" / "run-critical-drill-flake-gate.ps1").read_text(encoding="utf-8")
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+
+    required_stage_d_tests = [
+        "test_144_dashboard_template_contains_runtime_rail_contract",
+        "test_145_safe_mode_ux_degradation_check_reports_success",
+        "test_147_a11y_test_harness_check_reports_success",
+        "test_149_dashboard_template_exposes_keyboard_and_screen_reader_baseline",
+    ]
+    for test_name in required_stage_d_tests:
+        assert test_name in runtime_script
+        assert test_name in runtime_wrapper
+        assert test_name in critical_script
+        assert test_name in critical_wrapper
+        assert test_name in release_gate
+
+    assert "artifacts\\safe-mode-ux-degradation-release-gate.json" in release_gate
+    assert "artifacts\\a11y-test-harness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-runtime-stability-release-gate.json" in release_gate
+    assert "artifacts\\critical-drill-flake-gate-release-gate.json" in release_gate
+    assert "--output-file" in runtime_script
+    assert "--output-file" in critical_script
+    assert "--output-file" in runtime_wrapper
+    assert "--output-file" in critical_wrapper
+
+
+def test_151_stability_canary_baseline_includes_stage_d_drills():
+    project_root = Path(__file__).resolve().parents[1]
+    baseline = json.loads((project_root / "docs" / "stability-canary-baseline.json").read_text(encoding="utf-8"))
+    drills = baseline.get("drills") or {}
+
+    assert "safe_mode_ux_degradation" in drills
+    assert "a11y_test_harness" in drills
+    assert float(drills["safe_mode_ux_degradation"]["baseline_duration_seconds"]) > 0
+    assert float(drills["a11y_test_harness"]["baseline_duration_seconds"]) > 0
+
+
+def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
+    workspace = _local_test_dir("pytest-stability-canary-missing-stage-d-baseline")
+    project_root = Path(__file__).resolve().parents[1]
+    baseline_file = workspace / "baseline-missing-stage-d.json"
+    report_file = workspace / "report.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "max_duration_regression_percent": 10_000.0,
+                "drills": {
+                    "release_freeze_policy": {"baseline_duration_seconds": 0.1},
+                    "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
+                    "power_loss_durability": {"baseline_duration_seconds": 0.1},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
+                    "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
+                    "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
+                    "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
+                    "invariant_burst": {"baseline_duration_seconds": 0.1},
+                    "long_soak_budget": {
+                        "baseline_duration_seconds": 0.1,
+                        "max_http_429_rate_percent": 1.0,
+                        "max_error_rate_percent": 1.0,
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "stability-canary.py"),
+        "--baseline-file",
+        str(baseline_file),
+        "--output-file",
+        str(report_file),
+        "--long-soak-duration-seconds",
+        "6",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 and "powershell executable not found" in completed.stderr.lower():
+        shutil.rmtree(workspace, ignore_errors=True)
+        pytest.skip("PowerShell is unavailable in this environment")
+    assert completed.returncode != 0
+    assert report_file.exists()
+    payload = json.loads(report_file.read_text(encoding="utf-8"))
+    assert payload["success"] is False
+    missing_entries = [
+        entry for entry in payload.get("regressions", []) if entry.get("type") == "missing_baseline_entry"
+    ]
+    missing_drills = {str(entry.get("drill")) for entry in missing_entries}
+    assert "safe_mode_ux_degradation" in missing_drills
+    assert "a11y_test_harness" in missing_drills
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_stage_d_entries():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-missing-canary-baseline")
+    project_root = Path(__file__).resolve().parents[1]
+    baseline_file = workspace / "stability-canary-baseline-missing-stage-d.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "max_duration_regression_percent": 25.0,
+                "drills": {
+                    "release_freeze_policy": {"baseline_duration_seconds": 1.0},
+                    "db_corruption_quarantine": {"baseline_duration_seconds": 1.0},
+                    "power_loss_durability": {"baseline_duration_seconds": 1.0},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 1.0},
+                    "db_safe_mode_watchdog": {"baseline_duration_seconds": 1.0},
+                    "invariant_monitor_watchdog": {"baseline_duration_seconds": 1.0},
+                    "event_consumer_recovery_chaos": {"baseline_duration_seconds": 1.0},
+                    "invariant_burst": {"baseline_duration_seconds": 1.0},
+                    "long_soak_budget": {
+                        "baseline_duration_seconds": 1.0,
+                        "max_http_429_rate_percent": 1.0,
+                        "max_error_rate_percent": 1.0,
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--stability-canary-baseline-file",
+        str(baseline_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing = set(payload["checks"]["missing_required_canary_drills"])
+    assert "safe_mode_ux_degradation" in missing
+    assert "a11y_test_harness" in missing
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
+    project_root = Path(__file__).resolve().parents[1]
+    ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    bundle_script = (project_root / "scripts" / "p0-release-evidence-bundle.py").read_text(encoding="utf-8")
+    bundle_wrapper = (project_root / "scripts" / "run-p0-release-evidence-bundle.ps1").read_text(encoding="utf-8")
+    closure_script = (project_root / "scripts" / "p0-closure-report.py").read_text(encoding="utf-8")
+    closure_wrapper = (project_root / "scripts" / "run-p0-closure-report.ps1").read_text(encoding="utf-8")
+    runbook_contract_script = (project_root / "scripts" / "p0-runbook-contract-check.py").read_text(encoding="utf-8")
+    runbook_contract_wrapper = (project_root / "scripts" / "run-p0-runbook-contract-check.ps1").read_text(encoding="utf-8")
+
+    required_artifact_paths = [
+        "artifacts/safe-mode-ux-degradation-release-gate.json",
+        "artifacts/a11y-test-harness-release-gate.json",
+        "artifacts/release-gate-runtime-stability-release-gate.json",
+        "artifacts/critical-drill-flake-gate-release-gate.json",
+    ]
+    for artifact_path in required_artifact_paths:
+        assert artifact_path in ci_workflow
+
+    assert '"--include-glob", "*-release-gate.json"' in release_gate
+    assert '"--required-label", "release-gate"' in release_gate
+    assert '"--required-evidence-reports"' in release_gate
+    assert 'default="*-release-gate.json"' in bundle_script
+    assert 'parser.add_argument("--required-label", default="")' in bundle_script
+    assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
+    assert '[string]$RequiredLabel = ""' in bundle_wrapper
+    assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
+    assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
+    assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
+    assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
+    assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
+    assert "[string]$RequiredRunbookTokens =" in runbook_contract_wrapper
+
+
+def test_155_p0_release_evidence_bundle_fails_when_required_label_is_mismatched():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-required-label-mismatch").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    matching_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    mismatched_report = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    bundle_dir = artifacts_dir / "p0-release-evidence-files-release-gate"
+
+    matching_report.write_text(
+        json.dumps({"label": "release-gate", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    mismatched_report.write_text(
+        json.dumps({"label": "manual", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-files",
+        ",".join([str(matching_report.resolve()), str(mismatched_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+        "--bundle-dir",
+        str(bundle_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 release evidence bundle check failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["label_mismatch_reports"] == 1
+    assert any(
+        str(item.get("path") or "") == str(mismatched_report.resolve())
+        for item in payload.get("label_mismatch_reports", [])
+        if isinstance(item, dict)
+    )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_156_release_gate_preflight_cleanup_contract_is_documented():
+    project_root = Path(__file__).resolve().parents[1]
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    runbook = (project_root / "docs" / "production-runbook.md").read_text(encoding="utf-8")
+
+    assert "function Resolve-PathInsideProjectRoot" in release_gate
+    assert "function Clear-ReleaseGateArtifacts" in release_gate
+    assert "Release-gate artifact preflight (clean stale release-gate evidence)" in release_gate
+    assert "Clear-ReleaseGateArtifacts -ProjectRootPath $ProjectRoot" in release_gate
+    assert '-Filter "*-release-gate.json"' in release_gate
+    assert "p0-release-evidence-files-release-gate" in release_gate
+    assert "p0-disaster-recovery-rehearsal-pack-evidence-release-gate" in release_gate
+    assert '"--required-label", "release-gate"' in release_gate
+    assert "preflight cleanup" in readme.lower()
+    assert "preflight cleanup" in runbook.lower()
+    assert "metrics.label_mismatch_reports=0" in runbook
+
+
+def test_157_p0_closure_report_fails_when_required_evidence_report_is_missing():
+    workspace = _local_test_dir("pytest-p0-closure-report-required-evidence-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evidence_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    runbook_file = artifacts_dir / "p0-runbook-contract-check-release-gate.json"
+    output_file = artifacts_dir / "p0-closure-report-release-gate.json"
+    present_required_report = str((artifacts_dir / "safe-mode-ux-degradation-release-gate.json").resolve())
+    missing_required_report = str((artifacts_dir / "a11y-test-harness-release-gate.json").resolve())
+
+    evidence_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"label_mismatch_reports": 0},
+                "reports": [{"path": present_required_report, "success": True}],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burnin_file.write_text(
+        json.dumps(
+            {"label": "burnin", "success": True, "metrics": {"consecutive_green": 12}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    runbook_file.write_text(
+        json.dumps({"label": "runbook", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-closure-report.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-consecutive",
+        "10",
+        "--required-evidence-reports",
+        ",".join([present_required_report, missing_required_report]),
+        "--evidence-bundle-file",
+        str(evidence_file.resolve()),
+        "--burnin-file",
+        str(burnin_file.resolve()),
+        "--runbook-contract-file",
+        str(runbook_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 closure report is not green: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["required_evidence_reports_missing"] == 1
+    assert missing_required_report in payload["missing_required_evidence_reports"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_158_p0_runbook_contract_check_fails_when_release_gate_token_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-release-gate-token-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_release_gate = workspace / "release-gate-missing-token.ps1"
+
+    release_gate_text = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    broken_release_gate.write_text(
+        release_gate_text.replace(
+            "Release-gate artifact preflight (clean stale release-gate evidence)",
+            "Release-gate artifact preflight (legacy behavior)",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--release-gate-file",
+        str(broken_release_gate.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_tokens = set(payload["checks"]["missing_required_release_gate_tokens"])
+    assert "Release-gate artifact preflight (clean stale release-gate evidence)" in missing_tokens
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_159_p0_runbook_contract_check_fails_when_required_ci_artifact_path_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-ci-artifact-path-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_ci = workspace / "ci-missing-closure-artifact.yml"
+
+    ci_text = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    broken_ci.write_text(
+        ci_text.replace(
+            "artifacts/p0-closure-report-release-gate.json",
+            "artifacts/p0-closure-report-release-gate-missing.json",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--ci-workflow-file",
+        str(broken_ci.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_paths = set(payload["checks"]["missing_required_ci_artifact_paths"])
+    assert "artifacts/p0-closure-report-release-gate.json" in missing_paths
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_160_p0_runbook_contract_check_fails_when_required_runbook_token_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-runbook-token-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_runbook = workspace / "runbook-missing-closure-token.md"
+
+    runbook_text = (project_root / "docs" / "production-runbook.md").read_text(encoding="utf-8")
+    broken_runbook.write_text(
+        runbook_text.replace(
+            "metrics.required_evidence_reports_non_green=0",
+            "metrics.required_evidence_reports_non_green=legacy",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--runbook-file",
+        str(broken_runbook.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_tokens = set(payload["checks"]["missing_required_runbook_tokens"])
+    assert "metrics.required_evidence_reports_non_green=0" in missing_tokens
+
     shutil.rmtree(workspace, ignore_errors=True)

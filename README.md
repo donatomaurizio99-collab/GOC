@@ -387,6 +387,7 @@ Observability endpoints:
 
 - `GET /system/metrics`
 - `GET /system/audit`
+- `GET /system/audit/integrity`
 - `GET /system/slo`
 - `GET /system/safe-mode`
 - `POST /system/safe-mode/enable`
@@ -410,11 +411,13 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + DB corruption quarantine drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + backup/restore drill + incident/rollback drill under burst load):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + canary guardrails check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback hard-trigger drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + disaster-recovery rehearsal pack + failure budget dashboard + safe-mode UX degradation check + A11y test harness check + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 release evidence bundle + P0 closure go/no-go report):
+
+The gate starts with a preflight cleanup that removes stale `artifacts\*-release-gate.json` files and prior release-gate evidence directories so each run produces a deterministic evidence set.
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictDbCorruptionQuarantineDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictBackupRestoreDrill -StrictIncidentRollbackDrill
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 Standalone backup/restore drill:
@@ -424,6 +427,55 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-backup-restore-drill.ps1
 ```
 
+Standalone backup/restore stress drill (round-based load + restore idempotence):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-backup-restore-stress-drill.ps1 -Rounds 3 -GoalsPerRound 120 -TasksPerGoal 2 -WorkflowRunsPerRound 24
+```
+
+Standalone snapshot/restore crash-consistency drill (fault matrix with hard-abort copy simulation):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-snapshot-restore-crash-consistency-drill.ps1 -SeedRows 96 -PayloadBytes 128
+```
+
+Standalone multi-db atomic-switch drill (pointer crash + candidate-integrity reject + rollback switch):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-multi-db-atomic-switch-drill.ps1 -SeedRows 96 -PayloadBytes 128
+```
+
+Standalone disaster-recovery rehearsal pack (consolidated restore/snapshot/switch/RTO-RPO evidence):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-disaster-recovery-rehearsal-pack.ps1 -Profile scheduled -MaxTotalDurationSeconds 2400
+```
+
+Standalone failure budget dashboard (aggregated release blocker signal):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-failure-budget-dashboard.ps1
+```
+
+Standalone safe-mode/degradation UX contract check (runtime rail + mutation lock + gate wiring):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-safe-mode-ux-degradation-check.ps1
+```
+
+Standalone A11y test harness check (keyboard + screen-reader smoke + contrast baseline):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-a11y-test-harness-check.ps1
+```
+
 Standalone migration rehearsal drill:
 
 ```powershell
@@ -431,11 +483,74 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-migration-rehearsal.ps1 -SmallRuns 500 -MediumRuns 2500 -LargeRuns 6000 -XLargeRuns 9000
 ```
 
-Standalone auto-rollback policy check (live service):
+Standalone upgrade/downgrade compatibility drill:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -PollIntervalSeconds 30 -MaxObservationSeconds 900
+.\scripts\run-upgrade-downgrade-compatibility-drill.ps1 -NMinus1Runs 800 -PayloadBytes 512
+```
+
+Standalone auto-rollback hard-trigger check (sustained critical OR burn-rate spike OR readiness regression):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-auto-rollback-policy.ps1 -BaseUrl "http://127.0.0.1:8000" -ManifestPath ".\artifacts\desktop-rings.json" -CriticalWindowSeconds 300 -ReadinessRegressionWindowSeconds 120 -MaxErrorBudgetBurnRatePercent 2.0 -ExpectedTriggerReason auto -PollIntervalSeconds 30 -MaxObservationSeconds 900
+```
+
+Standalone security config hardening check (production profile policy):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-security-config-hardening-check.ps1 -OperatorAuthRequired -OperatorAuthToken "replace-with-long-secret-token" -StartupCorruptionRecoveryEnabled
+```
+
+Standalone audit trail hardening check (hash-chain integrity + tamper detection + retention policy):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-audit-trail-hardening-check.ps1 -AuditRetentionDays 365 -MinAuditRetentionDays 90 -SeedEntries 8
+```
+
+Standalone security CI lane check (pip-audit + bandit + SBOM + fail policy):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-security-ci-lane-check.ps1 -MaxDependencyVulnerabilities 0 -MaxSastHigh 0 -MaxSastMedium 200
+```
+
+Standalone alert-routing/on-call runbook automation check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-alert-routing-oncall-check.ps1 -MockSloStatus critical -MockAlertCount 2 -RoutingPolicyFile "docs\oncall-alert-routing-policy.json"
+```
+
+Standalone incident drill automation check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-incident-drill-automation-check.ps1 -MockReport -MockDaysSinceTabletop 7 -MockDaysSinceTechnical 3 -PolicyFile "docs\incident-drill-automation-policy.json"
+```
+
+Standalone load profile framework check:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
+```
+
+Standalone canary guardrails check (staged promotion + automatic halt/freeze on threshold breach):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-canary-guardrails-check.ps1 -PolicyFile "docs\canary-guardrails-policy.json" -ExpectedDecision halt -MockSloStatuses "ok,ok,critical,critical" -MockErrorBudgetBurnRates "0.5,0.8,2.5,2.5"
+```
+
+Standalone RTO/RPO assertion suite:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-rto-rpo-assertion-suite.ps1 -PolicyFile "docs\rto-rpo-assertion-policy.json" -SeedRows 48 -TailWriteRows 12 -MaxRtoSeconds 20 -MaxRpoRowsLost 96
 ```
 
 Standalone release-freeze policy check (live service):
@@ -459,11 +574,60 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-recovery-hard-abort-drill.ps1
 ```
 
+Standalone recovery idempotence drill (restart cycles must not duplicate startup recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-recovery-idempotence-drill.ps1 -RecoveryCycles 3
+```
+
+Standalone power-loss durability drill:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-power-loss-durability-drill.ps1 -TransactionRows 240 -PayloadBytes 256
+```
+
+Standalone WAL checkpoint crash drill (hard-abort before checkpoint completion + recovery checkpoint):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-wal-checkpoint-crash-drill.ps1 -Rows 240 -PayloadBytes 1024 -CheckpointMode TRUNCATE
+```
+
+Standalone disk-pressure fault-injection drill (SQLITE_FULL, IOERR, readonly/permission-flip simulation):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-disk-pressure-fault-injection-drill.ps1 -FaultInjections 2
+```
+
+Standalone fsync/I/O stall drill (bounded write stall + I/O error degradation/recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-fsync-io-stall-drill.ps1 -FaultInjections 2 -StallSeconds 0.35 -MaxStallRequestSeconds 3.0
+```
+
+Standalone real SQLite FULL drill (actual `max_page_count` saturation + recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-sqlite-real-full-drill.ps1 -PayloadBytes 8192 -MaxWriteAttempts 240 -MaxPageGrowth 24 -RecoveryPageGrowth 160
+```
+
 Standalone DB corruption quarantine drill:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-db-corruption-quarantine-drill.ps1 -CorruptionBytes 256
+```
+
+Standalone storage corruption hardening drill (WAL/JOURNAL anomaly files + startup quarantine recovery):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-storage-corruption-hardening-drill.ps1 -CorruptionBytes 192 -Rows 80 -PayloadBytes 128
 ```
 
 Standalone workflow lock-resilience drill:
@@ -536,6 +700,48 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-incident-rollback-drill.ps1 -LoadRequests 30
 ```
 
+Standalone critical drill flake gate (repeat critical storage + Stage-D safe-mode/A11y checks):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-critical-drill-flake-gate.ps1 -Repeats 2 -MaxFailedIterations 0
+```
+
+Standalone release-gate runtime stability drill (duration + variance budget across critical storage + Stage-D UX/A11y samples):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-release-gate-runtime-stability-drill.ps1 -Samples 2 -RepeatsPerSample 1
+```
+
+Standalone P0 burn-in consecutive-green monitor (CI history hard gate):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
+```
+
+Standalone P0 runbook contract check (release-gate/CI/runbook + canary-baseline + closure-metric token consistency):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-p0-runbook-contract-check.ps1
+```
+
+Standalone P0 release evidence bundle (aggregate all `*-release-gate.json` evidence into one manifest and optionally enforce one label contract):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-p0-release-evidence-bundle.ps1
+```
+
+Standalone P0 closure go/no-go report (final readiness signal from bundled evidence):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-p0-closure-report.ps1
+```
+
 Current result during implementation:
 
 ```text
@@ -553,11 +759,19 @@ GitHub Actions now runs `pytest` automatically for:
 Workflow file:
 [ci.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/ci.yml)
 
+Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report).
+
 Desktop workflow file:
 [desktop-build.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/desktop-build.yml)
 
 Nightly stability canary workflow:
 [stability-canary.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/stability-canary.yml)
+
+Nightly burn-in monitor workflow:
+[p0-burnin-monitor.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/p0-burnin-monitor.yml)
+
+Nightly disaster-recovery rehearsal workflow:
+[disaster-recovery-rehearsal.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/disaster-recovery-rehearsal.yml)
 
 Recommended branch protection on `master`:
 
@@ -579,7 +793,7 @@ python .\scripts\desktop-smoke.py
 
 ## Nightly Stability Canary
 
-Run the full canary profile locally (includes release-freeze policy, DB corruption quarantine, watchdog drills, recovery chaos, invariant burst, and long soak budgets):
+Run the full canary profile locally (includes release-freeze policy, power-loss durability, DB corruption quarantine, upgrade/downgrade compatibility, watchdog drills, recovery chaos, invariant burst, Stage-D safe-mode UX/A11y checks, and long soak budgets). Missing baseline drill entries are treated as regressions.
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
@@ -734,8 +948,24 @@ If a value is rejected:
 - [recovery-hard-abort-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-drill.py)
 - [recovery-hard-abort-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-hard-abort-target.py)
 - [run-recovery-hard-abort-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-hard-abort-drill.ps1)
+- [recovery-idempotence-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/recovery-idempotence-drill.py)
+- [run-recovery-idempotence-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-recovery-idempotence-drill.ps1)
+- [power-loss-durability-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/power-loss-durability-drill.py)
+- [power-loss-durability-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/power-loss-durability-target.py)
+- [run-power-loss-durability-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-power-loss-durability-drill.ps1)
+- [wal-checkpoint-crash-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/wal-checkpoint-crash-drill.py)
+- [wal-checkpoint-crash-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/wal-checkpoint-crash-target.py)
+- [run-wal-checkpoint-crash-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-wal-checkpoint-crash-drill.ps1)
+- [disk-pressure-fault-injection-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/disk-pressure-fault-injection-drill.py)
+- [run-disk-pressure-fault-injection-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-disk-pressure-fault-injection-drill.ps1)
+- [fsync-io-stall-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/fsync-io-stall-drill.py)
+- [run-fsync-io-stall-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-fsync-io-stall-drill.ps1)
+- [sqlite-real-full-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/sqlite-real-full-drill.py)
+- [run-sqlite-real-full-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-sqlite-real-full-drill.ps1)
 - [db-corruption-quarantine-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/db-corruption-quarantine-drill.py)
 - [run-db-corruption-quarantine-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-db-corruption-quarantine-drill.ps1)
+- [storage-corruption-hardening-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/storage-corruption-hardening-drill.py)
+- [run-storage-corruption-hardening-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-storage-corruption-hardening-drill.ps1)
 - [workflow-lock-resilience-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-lock-resilience-drill.py)
 - [run-workflow-lock-resilience-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-workflow-lock-resilience-drill.ps1)
 - [workflow-soak-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/workflow-soak-drill.py)
@@ -756,9 +986,60 @@ If a value is rejected:
 - [stability-canary-baseline.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/stability-canary-baseline.json)
 - [migration-rehearsal.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/migration-rehearsal.py)
 - [run-migration-rehearsal.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-migration-rehearsal.ps1)
+- [upgrade-downgrade-compatibility-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/upgrade-downgrade-compatibility-drill.py)
+- [run-upgrade-downgrade-compatibility-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-upgrade-downgrade-compatibility-drill.ps1)
 - [backup-restore-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-drill.py)
 - [run-backup-restore-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-drill.ps1)
+- [backup-restore-stress-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/backup-restore-stress-drill.py)
+- [run-backup-restore-stress-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-backup-restore-stress-drill.ps1)
+- [snapshot-restore-crash-consistency-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/snapshot-restore-crash-consistency-drill.py)
+- [snapshot-restore-crash-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/snapshot-restore-crash-target.py)
+- [run-snapshot-restore-crash-consistency-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-snapshot-restore-crash-consistency-drill.ps1)
+- [multi-db-atomic-switch-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/multi-db-atomic-switch-drill.py)
+- [multi-db-atomic-switch-target.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/multi-db-atomic-switch-target.py)
+- [run-multi-db-atomic-switch-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-multi-db-atomic-switch-drill.ps1)
+- [disaster-recovery-rehearsal-pack.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/disaster-recovery-rehearsal-pack.py)
+- [run-disaster-recovery-rehearsal-pack.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-disaster-recovery-rehearsal-pack.ps1)
+- [failure-budget-dashboard.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/failure-budget-dashboard.py)
+- [run-failure-budget-dashboard.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-failure-budget-dashboard.ps1)
+- [safe-mode-ux-degradation-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/safe-mode-ux-degradation-check.py)
+- [run-safe-mode-ux-degradation-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-safe-mode-ux-degradation-check.ps1)
+- [a11y-test-harness-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/a11y-test-harness-check.py)
+- [run-a11y-test-harness-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-a11y-test-harness-check.ps1)
 - [incident-rollback-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-rollback-drill.py)
 - [run-incident-rollback-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-rollback-drill.ps1)
+- [critical-drill-flake-gate.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/critical-drill-flake-gate.py)
+- [run-critical-drill-flake-gate.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-critical-drill-flake-gate.ps1)
+- [release-gate-runtime-stability-drill.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/release-gate-runtime-stability-drill.py)
+- [run-release-gate-runtime-stability-drill.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-release-gate-runtime-stability-drill.ps1)
+- [p0-burnin-consecutive-green.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-burnin-consecutive-green.py)
+- [run-p0-burnin-consecutive-green.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-burnin-consecutive-green.ps1)
+- [p0-runbook-contract-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-runbook-contract-check.py)
+- [run-p0-runbook-contract-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-runbook-contract-check.ps1)
+- [p0-release-evidence-bundle.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-release-evidence-bundle.py)
+- [run-p0-release-evidence-bundle.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-release-evidence-bundle.ps1)
+- [p0-closure-report.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/p0-closure-report.py)
+- [run-p0-closure-report.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-p0-closure-report.ps1)
+- [security-config-hardening-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/security-config-hardening-check.py)
+- [run-security-config-hardening-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-security-config-hardening-check.ps1)
+- [audit-trail-hardening-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/audit-trail-hardening-check.py)
+- [run-audit-trail-hardening-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-audit-trail-hardening-check.ps1)
+- [security-ci-lane-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/security-ci-lane-check.py)
+- [run-security-ci-lane-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-security-ci-lane-check.ps1)
+- [alert-routing-oncall-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/alert-routing-oncall-check.py)
+- [run-alert-routing-oncall-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-alert-routing-oncall-check.ps1)
+- [oncall-alert-routing-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/oncall-alert-routing-policy.json)
+- [incident-drill-automation-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/incident-drill-automation-check.py)
+- [run-incident-drill-automation-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-incident-drill-automation-check.ps1)
+- [incident-drill-automation-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/incident-drill-automation-policy.json)
+- [load-profile-framework-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/load-profile-framework-check.py)
+- [run-load-profile-framework-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-load-profile-framework-check.ps1)
+- [load-profile-catalog.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/load-profile-catalog.json)
+- [canary-guardrails-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/canary-guardrails-check.py)
+- [run-canary-guardrails-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-canary-guardrails-check.ps1)
+- [canary-guardrails-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/canary-guardrails-policy.json)
+- [rto-rpo-assertion-suite.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/rto-rpo-assertion-suite.py)
+- [run-rto-rpo-assertion-suite.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-rto-rpo-assertion-suite.ps1)
+- [rto-rpo-assertion-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/rto-rpo-assertion-policy.json)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)

@@ -57,6 +57,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         method = request.method.upper()
         path = request.url.path
 
+        if (
+            bool(services.settings.operator_auth_required)
+            and method in {"POST", "PUT", "PATCH", "DELETE"}
+            and path.startswith("/system/")
+        ):
+            expected_token = str(services.settings.operator_auth_token or "").strip()
+            auth_header = str(request.headers.get("Authorization") or "")
+            operator_header = str(request.headers.get("X-Operator-Token") or "").strip()
+            provided_token = ""
+            if auth_header.lower().startswith("bearer "):
+                provided_token = auth_header[7:].strip()
+            elif operator_header:
+                provided_token = operator_header
+
+            if not provided_token or provided_token != expected_token:
+                services.observability.increment_metric("security.operator_auth.denied")
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": (
+                            "Operator authentication required for mutating /system endpoints."
+                        )
+                    },
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            services.observability.increment_metric("security.operator_auth.allowed")
+
         if services.runtime_guard.should_block_mutation(method=method, path=path):
             safe_mode = services.runtime_guard.safe_mode_snapshot()
             return JSONResponse(
@@ -194,25 +221,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 .replace("}", "")
                 or "root"
             )
-            services.observability.increment_metric("http.requests.total")
-            services.observability.increment_metric(f"http.requests.method.{method}")
-            services.observability.increment_metric(f"http.requests.status.{status_code}")
-            services.observability.increment_metric(f"http.requests.route.{route_metric}")
+            try:
+                services.observability.increment_metric("http.requests.total")
+                services.observability.increment_metric(f"http.requests.method.{method}")
+                services.observability.increment_metric(f"http.requests.status.{status_code}")
+                services.observability.increment_metric(f"http.requests.route.{route_metric}")
 
-            if method in {"POST", "PUT", "PATCH", "DELETE"} and not route.startswith("/static"):
-                services.observability.record_audit(
-                    action="http.mutation",
-                    actor="api",
-                    status="success" if status_code < 400 else "error",
-                    entity_type="route",
-                    entity_id=route,
-                    correlation_id=request.headers.get("x-correlation-id"),
-                    details={
-                        "method": method,
-                        "status_code": status_code,
-                        "duration_ms": duration_ms,
-                    },
+                if method in {"POST", "PUT", "PATCH", "DELETE"} and not route.startswith("/static"):
+                    services.observability.record_audit(
+                        action="http.mutation",
+                        actor="api",
+                        status="success" if status_code < 400 else "error",
+                        entity_type="route",
+                        entity_id=route,
+                        correlation_id=request.headers.get("x-correlation-id"),
+                        details={
+                            "method": method,
+                            "status_code": status_code,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+            except sqlite3.OperationalError as exc:
+                services.runtime_guard.record_database_error(
+                    message=str(exc),
+                    source="observability_middleware",
                 )
+            except Exception:
+                # Telemetry writes must never alter request outcome.
+                pass
 
     @app.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:

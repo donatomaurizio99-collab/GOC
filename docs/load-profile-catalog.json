@@ -1,0 +1,78 @@
+{
+  "catalog_version": "2026-04-16.stage-c.1",
+  "profiles": [
+    {
+      "name": "prod_like_ci_smoke",
+      "version": "1.0.0",
+      "description": "Fast production-like CI smoke profile with steady plus burst phases.",
+      "metadata": {
+        "traffic_shape": "steady_plus_burst",
+        "target_environment": "production_like_ci"
+      },
+      "stages": [
+        {
+          "name": "steady_warmup",
+          "cycles": 8,
+          "workflow_start_every_cycles": 0,
+          "drain_batch_size": 80,
+          "readiness_check_every_cycles": 4
+        },
+        {
+          "name": "mixed_burst",
+          "cycles": 16,
+          "workflow_start_every_cycles": 4,
+          "drain_batch_size": 120,
+          "readiness_check_every_cycles": 4
+        }
+      ],
+      "budgets": {
+        "max_p95_latency_ms": 400.0,
+        "max_p99_latency_ms": 900.0,
+        "max_max_latency_ms": 6000.0,
+        "max_http_429_rate_percent": 5.0,
+        "max_error_rate_percent": 1.0,
+        "min_total_requests": 120
+      }
+    },
+    {
+      "name": "prod_like_release_baseline",
+      "version": "1.0.0",
+      "description": "Longer production-like baseline profile for release rehearsal windows.",
+      "metadata": {
+        "traffic_shape": "steady_burst_recovery",
+        "target_environment": "production_like_release"
+      },
+      "stages": [
+        {
+          "name": "steady",
+          "cycles": 20,
+          "workflow_start_every_cycles": 0,
+          "drain_batch_size": 120,
+          "readiness_check_every_cycles": 5
+        },
+        {
+          "name": "burst",
+          "cycles": 30,
+          "workflow_start_every_cycles": 3,
+          "drain_batch_size": 180,
+          "readiness_check_every_cycles": 5
+        },
+        {
+          "name": "recovery",
+          "cycles": 10,
+          "workflow_start_every_cycles": 5,
+          "drain_batch_size": 150,
+          "readiness_check_every_cycles": 5
+        }
+      ],
+      "budgets": {
+        "max_p95_latency_ms": 450.0,
+        "max_p99_latency_ms": 1200.0,
+        "max_max_latency_ms": 8000.0,
+        "max_http_429_rate_percent": 3.0,
+        "max_error_rate_percent": 1.0,
+        "min_total_requests": 280
+      }
+    }
+  ]
+}

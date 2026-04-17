@@ -36,6 +36,14 @@ class AppServices:
 
 def build_services(settings: Settings | None = None) -> AppServices:
     app_settings = settings or Settings()
+    if app_settings.operator_auth_required:
+        token = str(app_settings.operator_auth_token or "").strip()
+        minimum = max(1, int(app_settings.operator_auth_token_min_length))
+        if len(token) < minimum:
+            raise ValueError(
+                "Operator auth is required but GOAL_OPS_OPERATOR_AUTH_TOKEN is missing or too short "
+                f"(minimum length: {minimum})."
+            )
     db = Database(
         app_settings.database_url,
         migration_backup_dir=app_settings.db_migration_backup_dir,
@@ -44,6 +52,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
     )
     db.initialize()
     observability = ObservabilityService(db)
+    observability.ensure_audit_integrity_backfill()
     runtime_guard = RuntimeGuard(
         lock_error_threshold=app_settings.safe_mode_lock_error_threshold,
         lock_error_window_seconds=app_settings.safe_mode_lock_error_window_seconds,
@@ -73,6 +82,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         events_retention_days=app_settings.events_retention_days,
         event_processing_retention_days=app_settings.event_processing_retention_days,
         failure_log_retention_days=app_settings.failure_log_retention_days,
+        audit_log_retention_days=app_settings.audit_log_retention_days,
         idempotency_retention_days=app_settings.idempotency_retention_days,
         observability=observability,
     )

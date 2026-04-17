@@ -1,0 +1,57 @@
+name: P0 Burn-In Monitor
+
+on:
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+    inputs:
+      required_consecutive:
+        description: "Required number of consecutive green CI runs"
+        required: false
+        default: "10"
+      allow_not_met:
+        description: "Do not fail workflow when threshold is not yet met"
+        required: false
+        default: "false"
+
+jobs:
+  burnin:
+    name: P0 Burn-In Consecutive Green Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run burn-in monitor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_CONSECUTIVE: ${{ github.event.inputs.required_consecutive || '10' }}
+          ALLOW_NOT_MET: ${{ github.event.inputs.allow_not_met || 'false' }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$ALLOW_NOT_MET" = "true" ]; then
+            EXTRA_ARGS="--allow-not-met"
+          fi
+          python ./scripts/p0-burnin-consecutive-green.py \
+            --label github-actions \
+            --repo "${{ github.repository }}" \
+            --branch master \
+            --workflow-name "CI" \
+            --required-jobs "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)" \
+            --required-consecutive "$REQUIRED_CONSECUTIVE" \
+            --per-page 50 \
+            --output-file ./artifacts/p0-burnin-consecutive-green-report.json \
+            $EXTRA_ARGS
+
+      - name: Upload burn-in report
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-burnin-consecutive-green-report
+          path: artifacts/p0-burnin-consecutive-green-report.json
+          if-no-files-found: error

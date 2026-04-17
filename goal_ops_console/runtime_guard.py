@@ -184,6 +184,8 @@ class RuntimeGuard:
                 "disk i/o error" in text
                 or "database or disk is full" in text
                 or "i/o error" in text
+                or "readonly database" in text
+                or "read-only file system" in text
             ):
                 self._io_errors.append(now_monotonic)
                 category = "io"

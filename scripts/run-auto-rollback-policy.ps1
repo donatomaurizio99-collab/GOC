@@ -4,13 +4,19 @@ param(
     [string]$ManifestPath = "artifacts\\desktop-rings.json",
     [string]$Ring = "stable",
     [int]$CriticalWindowSeconds = 300,
+    [int]$ReadinessRegressionWindowSeconds = 120,
     [int]$PollIntervalSeconds = 30,
     [int]$MaxObservationSeconds = 900,
+    [double]$MaxErrorBudgetBurnRatePercent = 2.0,
     [string]$BaseUrl = "",
     [string]$DatabaseUrl = "",
     [string]$MockSloStatuses = "",
+    [string]$MockErrorBudgetBurnRates = "",
+    [string]$MockReadinessValues = "",
     [string]$SeedPreviousVersion = "",
     [string]$SeedIncidentVersion = "",
+    [string]$ExpectedTriggerReason = "auto",
+    [string]$OutputFile = "artifacts\\auto-rollback-policy-report.json",
     [switch]$DryRun,
     [switch]$KeepArtifacts
 )
@@ -27,9 +33,15 @@ $args = @(
     "--manifest-path", $ManifestPath,
     "--ring", $Ring,
     "--critical-window-seconds", [string]$CriticalWindowSeconds,
+    "--readiness-regression-window-seconds", [string]$ReadinessRegressionWindowSeconds,
     "--poll-interval-seconds", [string]$PollIntervalSeconds,
-    "--max-observation-seconds", [string]$MaxObservationSeconds
+    "--max-observation-seconds", [string]$MaxObservationSeconds,
+    "--max-error-budget-burn-rate-percent", [string]$MaxErrorBudgetBurnRatePercent,
+    "--expected-trigger-reason", $ExpectedTriggerReason
 )
+if (-not [string]::IsNullOrWhiteSpace($OutputFile)) {
+    $args += @("--output-file", $OutputFile)
+}
 if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
     $args += @("--base-url", $BaseUrl)
 }
@@ -38,6 +50,12 @@ if (-not [string]::IsNullOrWhiteSpace($DatabaseUrl)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($MockSloStatuses)) {
     $args += @("--mock-slo-statuses", $MockSloStatuses)
+}
+if (-not [string]::IsNullOrWhiteSpace($MockErrorBudgetBurnRates)) {
+    $args += @("--mock-error-budget-burn-rates", $MockErrorBudgetBurnRates)
+}
+if (-not [string]::IsNullOrWhiteSpace($MockReadinessValues)) {
+    $args += @("--mock-readiness-values", $MockReadinessValues)
 }
 if (-not [string]::IsNullOrWhiteSpace($SeedPreviousVersion)) {
     $args += @("--seed-previous-version", $SeedPreviousVersion)
