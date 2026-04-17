@@ -16,6 +16,8 @@ param(
     [switch]$StrictIncidentDrillAutomationCheck,
     [switch]$SkipLoadProfileFrameworkCheck,
     [switch]$StrictLoadProfileFrameworkCheck,
+    [switch]$SkipRtoRpoAssertionCheck,
+    [switch]$StrictRtoRpoAssertionCheck,
     [switch]$SkipReleaseFreezePolicyDrill,
     [switch]$StrictReleaseFreezePolicyDrill,
     [switch]$SkipFileDatabaseProbe,
@@ -902,6 +904,36 @@ if (-not $SkipBackupRestoreStressDrill) {
             }
             Write-Warning (
                 "Backup/restore stress drill failed but StrictBackupRestoreStressDrill is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipRtoRpoAssertionCheck) {
+    Invoke-GateStep -Name "RTO/RPO assertion suite (restore-time and bounded data-loss budgets)" -Action {
+        $workspace = Join-Path $ProjectRoot ".tmp\rto-rpo-assertion-suite"
+        $reportPath = Join-Path $ProjectRoot "artifacts\rto-rpo-assertion-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\rto-rpo-assertion-suite.py",
+                "--workspace", $workspace,
+                "--label", "release-gate",
+                "--deployment-profile", "production",
+                "--policy-file", "docs/rto-rpo-assertion-policy.json",
+                "--runbook-file", "docs/production-runbook.md",
+                "--seed-rows", "48",
+                "--tail-write-rows", "12",
+                "--max-rto-seconds", "20",
+                "--max-rpo-rows-lost", "96",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictRtoRpoAssertionCheck) {
+                throw
+            }
+            Write-Warning (
+                "RTO/RPO assertion suite failed but StrictRtoRpoAssertionCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

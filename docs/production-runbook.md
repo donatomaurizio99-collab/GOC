@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 This gate covers:
@@ -23,6 +23,7 @@ This gate covers:
 - alert-routing/on-call check (severity route policy, escalation SLA budgets, and runbook-section references)
 - incident drill automation check (tabletop + technical drill cadence, evidence completeness, and follow-up budget)
 - load profile framework check (versioned production-like traffic profile with deterministic latency/error budgets)
+- RTO/RPO assertion suite (restore duration budgets plus bounded data-loss budget assertions)
 - release-freeze policy drill (sustained non-ok window or burn-rate spike freezes ring promotion path)
 - auto-rollback-policy drill (`critical` sustained window triggers stable ring rollback path)
 - desktop-update-safety drill (hash validation + rollback-to-stable fallback path)
@@ -110,6 +111,12 @@ Manual load profile framework invocation:
 
 ```powershell
 .\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
+```
+
+Manual RTO/RPO assertion suite invocation:
+
+```powershell
+.\scripts\run-rto-rpo-assertion-suite.ps1 -PolicyFile "docs\rto-rpo-assertion-policy.json" -SeedRows 48 -TailWriteRows 12 -MaxRtoSeconds 20 -MaxRpoRowsLost 96
 ```
 
 Manual release-freeze policy invocation (live endpoint, stable ring):
@@ -955,6 +962,39 @@ Actions:
 2. Add/retain explicit `name` + `version` for each profile and run checks with pinned values (`--profile-name`, `--profile-version`).
 3. For major profile updates, run both old and new versions once in rehearsal, compare deltas, then switch release gate default.
 4. Record selected profile/version in release notes for auditability and rollback analysis.
+
+### 3.33 RTO zero-loss restore assertion
+
+Symptoms:
+- restore path was not validated recently for strict recovery-time objective on full-state backup
+- operators need deterministic proof that zero-loss restore remains within release budget
+
+Actions:
+1. Execute RTO/RPO suite with default policy:
+   ```powershell
+   .\scripts\run-rto-rpo-assertion-suite.ps1 -PolicyFile "docs\rto-rpo-assertion-policy.json" -SeedRows 48 -TailWriteRows 12 -MaxRtoSeconds 20 -MaxRpoRowsLost 96
+   ```
+2. Validate `restore.zero_loss` criteria:
+   - `zero_loss_restore_matches_source = true`
+   - `zero_loss_rows_lost_zero = true`
+   - `zero_loss_rto_budget = true`
+3. Confirm runtime probe remains healthy (`readiness=true`, `slo=ok`, integrity endpoint ok) on restored DB.
+4. If RTO budget fails, hold release and optimize restore chain before re-running gate.
+
+### 3.34 RPO bounded-loss assertion
+
+Symptoms:
+- backup cutoff points might allow excessive data loss after incident rollback/restore
+- no current evidence that RPO remains within agreed bounded-loss budget
+
+Actions:
+1. Run the same suite and inspect `restore.bounded_loss` scenario output.
+2. Validate RPO constraints:
+   - `bounded_loss_restore_matches_backup_point = true`
+   - `bounded_loss_rpo_budget = true` (rows lost <= policy max)
+   - `bounded_loss_rto_budget = true`
+3. Track `bounded_rows_lost` trend over releases; investigate increases even if still within budget.
+4. If bounded-loss budget is exceeded, freeze promotion and open incident with report JSON attached.
 
 ## 4. Operational Defaults
 

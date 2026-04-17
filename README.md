@@ -411,11 +411,11 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 
 ## Run Release Gate
 
-Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 release evidence bundle + P0 closure go/no-go report):
+Reliability-focused pre-release gate (tests + desktop smoke + readiness + DB integrity + SLO alert check + security config hardening check + audit trail hardening check + security CI lane check + alert-routing/on-call runbook automation check + incident drill automation check + load profile framework check + RTO/RPO assertion suite check + release-freeze policy drill + auto-rollback-policy drill + desktop-update-safety drill + recovery hard-abort drill + recovery idempotence drill + power-loss durability drill + WAL checkpoint crash drill + disk-pressure fault-injection drill + fsync/I/O stall drill + real SQLite FULL saturation drill + DB corruption quarantine drill + storage corruption hardening drill + workflow lock-resilience drill + workflow soak drill + workflow worker restart drill + DB safe-mode watchdog drill + invariant monitor watchdog drill + event-consumer recovery chaos drill + invariant burst drill + long soak budget drill + migration state + migration rehearsal on S/M/L/XL DB copies + upgrade/downgrade compatibility drill + backup/restore drill + backup/restore stress drill + snapshot/restore crash-consistency drill + multi-db atomic-switch drill + incident/rollback drill under burst load + release-gate runtime stability drill + critical drill flake gate + P0 burn-in consecutive-green monitor + P0 runbook contract check + P0 release evidence bundle + P0 closure go/no-go report):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
 Standalone backup/restore drill:
@@ -507,6 +507,13 @@ Standalone load profile framework check:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-load-profile-framework-check.ps1 -ProfileFile "docs\load-profile-catalog.json" -ProfileName "prod_like_ci_smoke" -ProfileVersion "1.0.0"
+```
+
+Standalone RTO/RPO assertion suite:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-rto-rpo-assertion-suite.ps1 -PolicyFile "docs\rto-rpo-assertion-policy.json" -SeedRows 48 -TailWriteRows 12 -MaxRtoSeconds 20 -MaxRpoRowsLost 96
 ```
 
 Standalone release-freeze policy check (live service):
@@ -980,5 +987,8 @@ If a value is rejected:
 - [load-profile-framework-check.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/load-profile-framework-check.py)
 - [run-load-profile-framework-check.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-load-profile-framework-check.ps1)
 - [load-profile-catalog.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/load-profile-catalog.json)
+- [rto-rpo-assertion-suite.py](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/rto-rpo-assertion-suite.py)
+- [run-rto-rpo-assertion-suite.ps1](/C:/Users/raffa/OneDrive/Documents/New%20project/scripts/run-rto-rpo-assertion-suite.ps1)
+- [rto-rpo-assertion-policy.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/rto-rpo-assertion-policy.json)
 - [test_goal_ops.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_goal_ops.py)
 - [test_desktop_launcher.py](/C:/Users/raffa/OneDrive/Documents/New%20project/tests/test_desktop_launcher.py)

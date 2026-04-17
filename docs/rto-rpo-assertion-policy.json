@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "max_rto_seconds": 20.0,
+  "max_rpo_rows_lost": 96,
+  "scenarios": [
+    {
+      "id": "restore.zero_loss",
+      "runbook_section": "### 3.33 RTO zero-loss restore assertion"
+    },
+    {
+      "id": "restore.bounded_loss",
+      "runbook_section": "### 3.34 RPO bounded-loss assertion"
+    }
+  ]
+}

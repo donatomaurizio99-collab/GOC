@@ -4318,3 +4318,147 @@ def test_133_load_profile_framework_check_fails_when_min_requests_budget_is_unme
     )
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_134_rto_rpo_assertion_suite_reports_success_with_fixture_policy():
+    workspace = _local_test_dir("pytest-rto-rpo-assertion-suite-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "rto-rpo-policy.json"
+    output_file = workspace / "rto-rpo-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "pytest.1.0.0",
+                "max_rto_seconds": 30.0,
+                "max_rpo_rows_lost": 400,
+                "scenarios": [
+                    {
+                        "id": "restore.zero_loss",
+                        "runbook_section": "### 3.33 RTO zero-loss restore assertion",
+                    },
+                    {
+                        "id": "restore.bounded_loss",
+                        "runbook_section": "### 3.34 RPO bounded-loss assertion",
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "rto-rpo-assertion-suite.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str((workspace / "suite-workspace").resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--seed-rows",
+        "18",
+        "--tail-write-rows",
+        "6",
+        "--max-rto-seconds",
+        "30",
+        "--max-rpo-rows-lost",
+        "400",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["criteria_failed"] == 0
+    assert payload["metrics"]["max_restore_duration_ms"] >= 0
+    assert payload["metrics"]["bounded_rows_lost"] <= 400
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_135_rto_rpo_assertion_suite_fails_when_rpo_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-rto-rpo-assertion-suite-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "rto-rpo-policy.json"
+    output_file = workspace / "rto-rpo-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "pytest.1.0.0",
+                "max_rto_seconds": 30.0,
+                "max_rpo_rows_lost": 0,
+                "scenarios": [
+                    {
+                        "id": "restore.zero_loss",
+                        "runbook_section": "### 3.33 RTO zero-loss restore assertion",
+                    },
+                    {
+                        "id": "restore.bounded_loss",
+                        "runbook_section": "### 3.34 RPO bounded-loss assertion",
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "rto-rpo-assertion-suite.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--workspace",
+        str((workspace / "suite-workspace").resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--runbook-file",
+        str((project_root / "docs" / "production-runbook.md").resolve()),
+        "--seed-rows",
+        "18",
+        "--tail-write-rows",
+        "6",
+        "--max-rto-seconds",
+        "30",
+        "--max-rpo-rows-lost",
+        "0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[rto-rpo-assertion-suite] ERROR: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert any(
+        str(item.get("name") or "") == "bounded_loss_rpo_budget"
+        for item in payload.get("failed_criteria", [])
+        if isinstance(item, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
