@@ -46,6 +46,7 @@ DEFAULT_REQUIRED_CANARY_DRILLS = [
     "a11y_test_harness",
     "p0_report_schema_contract",
     "p0_runbook_contract",
+    "p0_release_evidence_bundle",
     "long_soak_budget",
 ]
 

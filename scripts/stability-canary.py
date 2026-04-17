@@ -69,10 +69,21 @@ def run_canary(
     p0_runbook_contract_report_file = (
         PROJECT_ROOT / ".tmp" / "stability-canary-p0-runbook-contract" / "p0-runbook-contract-check-report.json"
     )
+    p0_evidence_artifacts_dir = PROJECT_ROOT / ".tmp" / "stability-canary-p0-evidence"
+    p0_evidence_bundle_file = p0_evidence_artifacts_dir / "p0-release-evidence-bundle-report.json"
+    p0_evidence_bundle_dir = p0_evidence_artifacts_dir / "p0-release-evidence-files"
     p0_schema_required_files = ",".join(
         [
             str(safe_mode_report_file),
             str(a11y_report_file),
+        ]
+    )
+    p0_evidence_required_files = ",".join(
+        [
+            str(safe_mode_report_file),
+            str(a11y_report_file),
+            str(p0_schema_report_file),
+            str(p0_runbook_contract_report_file),
         ]
     )
 
@@ -224,6 +235,26 @@ def run_canary(
             str(PROJECT_ROOT),
             "--output-file",
             str(p0_runbook_contract_report_file),
+        ],
+        "p0_release_evidence_bundle": [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "p0-release-evidence-bundle.py"),
+            "--label",
+            "stability-canary",
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--artifacts-dir",
+            str(p0_evidence_artifacts_dir),
+            "--include-glob",
+            "*-report.json",
+            "--required-files",
+            p0_evidence_required_files,
+            "--required-label",
+            "stability-canary",
+            "--output-file",
+            str(p0_evidence_bundle_file),
+            "--bundle-dir",
+            str(p0_evidence_bundle_dir),
         ],
         "long_soak_budget": [
             sys.executable,
