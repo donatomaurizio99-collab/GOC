@@ -132,6 +132,60 @@ function Invoke-GateStep {
     Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
 }
 
+function Resolve-PathInsideProjectRoot {
+    param(
+        [string]$PathToResolve,
+        [string]$ProjectRootPath
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($PathToResolve)
+    $resolvedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRootPath)
+    $rootWithSeparator = if (
+        $resolvedProjectRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar) -or
+        $resolvedProjectRoot.EndsWith([System.IO.Path]::AltDirectorySeparatorChar)
+    ) {
+        $resolvedProjectRoot
+    } else {
+        $resolvedProjectRoot + [System.IO.Path]::DirectorySeparatorChar
+    }
+    if (
+        ($resolvedPath -ne $resolvedProjectRoot) -and
+        -not $resolvedPath.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+    ) {
+        throw "Resolved path escapes project root. Project root: $resolvedProjectRoot ; Path: $resolvedPath"
+    }
+    return $resolvedPath
+}
+
+function Clear-ReleaseGateArtifacts {
+    param(
+        [string]$ProjectRootPath
+    )
+
+    $resolvedArtifactsDir = Resolve-PathInsideProjectRoot -PathToResolve (Join-Path $ProjectRootPath "artifacts") -ProjectRootPath $ProjectRootPath
+    New-Item -ItemType Directory -Force -Path $resolvedArtifactsDir | Out-Null
+
+    $staleReportFiles = Get-ChildItem -Path $resolvedArtifactsDir -File -Filter "*-release-gate.json" -ErrorAction SilentlyContinue
+    foreach ($staleReport in $staleReportFiles) {
+        Remove-Item -LiteralPath $staleReport.FullName -Force
+    }
+
+    $staleEvidenceDirs = @(
+        (Join-Path $resolvedArtifactsDir "p0-release-evidence-files-release-gate"),
+        (Join-Path $resolvedArtifactsDir "p0-disaster-recovery-rehearsal-pack-evidence-release-gate")
+    )
+    foreach ($candidateDir in $staleEvidenceDirs) {
+        $resolvedDir = Resolve-PathInsideProjectRoot -PathToResolve $candidateDir -ProjectRootPath $ProjectRootPath
+        if (Test-Path -LiteralPath $resolvedDir) {
+            Remove-Item -LiteralPath $resolvedDir -Recurse -Force
+        }
+    }
+}
+
+Invoke-GateStep -Name "Release-gate artifact preflight (clean stale release-gate evidence)" -Action {
+    Clear-ReleaseGateArtifacts -ProjectRootPath $ProjectRoot
+}
+
 if (-not $SkipPytest) {
     Invoke-GateStep -Name "Pytest suite" -Action {
         Invoke-NativeCommand -Executable $PythonExe -Arguments @("-m", "pytest", "-q")
@@ -1282,6 +1336,7 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
             "--label", "release-gate",
             "--artifacts-dir", "artifacts",
             "--include-glob", "*-release-gate.json",
+            "--required-label", "release-gate",
             "--output-file", $bundleOutputPath,
             "--bundle-dir", $bundleDir
         )

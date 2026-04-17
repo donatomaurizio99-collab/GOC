@@ -38,6 +38,7 @@ def run_bundle(
     artifacts_dir: Path,
     include_glob: str,
     required_files: list[str],
+    required_label: str,
     output_file: Path,
     bundle_dir: Path,
     allow_empty: bool,
@@ -74,12 +75,19 @@ def run_bundle(
             payload = _read_json_file(file_path)
             success_value = payload.get("success")
             has_success_flag = isinstance(success_value, bool)
+            report_label = str(payload.get("label") or "")
+            label_matches_required = True
+            if required_label:
+                label_matches_required = report_label == required_label
             report_entry = {
                 "path": str(file_path),
-                "label": str(payload.get("label") or ""),
+                "label": report_label,
                 "success": bool(success_value) if has_success_flag else None,
                 "has_success_flag": bool(has_success_flag),
             }
+            if required_label:
+                report_entry["required_label"] = required_label
+                report_entry["label_matches_required"] = bool(label_matches_required)
             if has_success_flag and success_value is False:
                 report_entry["failure_excerpt"] = str(payload.get("error") or "")[:200]
             evaluated_reports.append(report_entry)
@@ -89,11 +97,17 @@ def run_bundle(
     parsed_success_reports = [item for item in evaluated_reports if item.get("success") is True]
     parsed_failed_reports = [item for item in evaluated_reports if item.get("success") is False]
     parsed_without_flag = [item for item in evaluated_reports if item.get("success") is None]
+    label_mismatch_reports = (
+        [item for item in evaluated_reports if item.get("label_matches_required") is False]
+        if required_label
+        else []
+    )
 
     success = (
         not required_missing
         and not invalid_reports
         and not parsed_failed_reports
+        and not label_mismatch_reports
         and (allow_empty or bool(evaluated_reports))
     )
     report = {
@@ -108,6 +122,7 @@ def run_bundle(
         "config": {
             "include_glob": include_glob,
             "required_files": required_files,
+            "required_label": required_label,
             "allow_empty": bool(allow_empty),
         },
         "metrics": {
@@ -117,10 +132,12 @@ def run_bundle(
             "failed_reports": len(parsed_failed_reports),
             "success_reports": len(parsed_success_reports),
             "reports_without_success_flag": len(parsed_without_flag),
+            "label_mismatch_reports": len(label_mismatch_reports),
         },
         "reports": evaluated_reports,
         "required_missing": required_missing,
         "invalid_reports": invalid_reports,
+        "label_mismatch_reports": label_mismatch_reports,
         "copied_files": copied_files,
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -143,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifacts-dir", default="artifacts")
     parser.add_argument("--include-glob", default="*-release-gate.json")
     parser.add_argument("--required-files", default="")
+    parser.add_argument("--required-label", default="")
     parser.add_argument("--output-file", default="artifacts/p0-release-evidence-bundle.json")
     parser.add_argument("--bundle-dir", default="artifacts/p0-release-evidence-files")
     parser.add_argument("--allow-empty", action="store_true")
@@ -162,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             artifacts_dir=artifacts_dir,
             include_glob=str(args.include_glob),
             required_files=required_files,
+            required_label=str(args.required_label),
             output_file=output_file,
             bundle_dir=bundle_dir,
             allow_empty=bool(args.allow_empty),

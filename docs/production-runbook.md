@@ -12,6 +12,8 @@ Run in repo root:
 .\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport
 ```
 
+The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
+
 This gate covers:
 - full `pytest` suite
 - desktop smoke boot path
@@ -61,7 +63,7 @@ This gate covers:
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate/CI/runbook strict-flag + script-reference consistency and canary baseline drill completeness)
-- P0 release evidence bundle (single artifact with required P0 report files and status summary)
+- P0 release evidence bundle (single artifact with required P0 report files, optional label contract enforcement, and status summary)
 - P0 closure report (single go/no-go signal from burn-in + contract + evidence checks)
 
 Manual migration rehearsal invocation (same thresholds as gate defaults):
@@ -331,6 +333,7 @@ Verify before release:
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
 - release evidence bundle report confirms all required `*-release-gate.json` reports are present and successful (`success=true`)
+- release evidence bundle report confirms label consistency when enforced (`metrics.label_mismatch_reports=0`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
 - failure budget dashboard report is present and green (`artifacts\failure-budget-dashboard-release-gate.json`, `success=true`)
 - Stage-D runtime evidence reports are present and green:

@@ -3,6 +3,7 @@ param(
     [string]$ArtifactsDir = "artifacts",
     [string]$IncludeGlob = "*-release-gate.json",
     [string]$RequiredFiles = "",
+    [string]$RequiredLabel = "",
     [string]$OutputFile = "artifacts\\p0-release-evidence-bundle.json",
     [string]$BundleDir = "artifacts\\p0-release-evidence-files",
     [switch]$AllowEmpty
@@ -23,6 +24,9 @@ $arguments = @(
 )
 if (-not [string]::IsNullOrWhiteSpace($RequiredFiles)) {
     $arguments += @("--required-files", $RequiredFiles)
+}
+if (-not [string]::IsNullOrWhiteSpace($RequiredLabel)) {
+    $arguments += @("--required-label", $RequiredLabel)
 }
 if ($AllowEmpty) {
     $arguments += "--allow-empty"

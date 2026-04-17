@@ -5369,5 +5369,89 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         assert artifact_path in ci_workflow
 
     assert '"--include-glob", "*-release-gate.json"' in release_gate
+    assert '"--required-label", "release-gate"' in release_gate
     assert 'default="*-release-gate.json"' in bundle_script
+    assert 'parser.add_argument("--required-label", default="")' in bundle_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
+    assert '[string]$RequiredLabel = ""' in bundle_wrapper
+
+
+def test_155_p0_release_evidence_bundle_fails_when_required_label_is_mismatched():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-required-label-mismatch").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    matching_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    mismatched_report = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    bundle_dir = artifacts_dir / "p0-release-evidence-files-release-gate"
+
+    matching_report.write_text(
+        json.dumps({"label": "release-gate", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    mismatched_report.write_text(
+        json.dumps({"label": "manual", "success": True}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-files",
+        ",".join([str(matching_report.resolve()), str(mismatched_report.resolve())]),
+        "--output-file",
+        str(output_file.resolve()),
+        "--bundle-dir",
+        str(bundle_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 release evidence bundle check failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["label_mismatch_reports"] == 1
+    assert any(
+        str(item.get("path") or "") == str(mismatched_report.resolve())
+        for item in payload.get("label_mismatch_reports", [])
+        if isinstance(item, dict)
+    )
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_156_release_gate_preflight_cleanup_contract_is_documented():
+    project_root = Path(__file__).resolve().parents[1]
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    runbook = (project_root / "docs" / "production-runbook.md").read_text(encoding="utf-8")
+
+    assert "function Resolve-PathInsideProjectRoot" in release_gate
+    assert "function Clear-ReleaseGateArtifacts" in release_gate
+    assert "Release-gate artifact preflight (clean stale release-gate evidence)" in release_gate
+    assert "Clear-ReleaseGateArtifacts -ProjectRootPath $ProjectRoot" in release_gate
+    assert '-Filter "*-release-gate.json"' in release_gate
+    assert "p0-release-evidence-files-release-gate" in release_gate
+    assert "p0-disaster-recovery-rehearsal-pack-evidence-release-gate" in release_gate
+    assert '"--required-label", "release-gate"' in release_gate
+    assert "preflight cleanup" in readme.lower()
+    assert "preflight cleanup" in runbook.lower()
+    assert "metrics.label_mismatch_reports=0" in runbook
