@@ -3330,6 +3330,8 @@ def test_112_p0_runbook_contract_check_reports_success():
     assert payload["checks"]["missing_strict_flags_in_runbook"] == []
     assert payload["checks"]["missing_required_runbook_scripts"] == []
     assert payload["checks"]["missing_script_files_for_runbook_references"] == []
+    assert payload["checks"]["missing_required_canary_drills"] == []
+    assert payload["checks"]["invalid_canary_baseline_durations"] == []
     assert output_file.exists()
 
     report_file_payload = json.loads(output_file.read_text(encoding="utf-8"))
@@ -5257,4 +5259,66 @@ def test_152_stability_canary_fails_when_stage_d_baseline_entries_are_missing():
     missing_drills = {str(entry.get("drill")) for entry in missing_entries}
     assert "safe_mode_ux_degradation" in missing_drills
     assert "a11y_test_harness" in missing_drills
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_153_p0_runbook_contract_check_fails_when_canary_baseline_is_missing_stage_d_entries():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-missing-canary-baseline")
+    project_root = Path(__file__).resolve().parents[1]
+    baseline_file = workspace / "stability-canary-baseline-missing-stage-d.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "max_duration_regression_percent": 25.0,
+                "drills": {
+                    "release_freeze_policy": {"baseline_duration_seconds": 1.0},
+                    "db_corruption_quarantine": {"baseline_duration_seconds": 1.0},
+                    "power_loss_durability": {"baseline_duration_seconds": 1.0},
+                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 1.0},
+                    "db_safe_mode_watchdog": {"baseline_duration_seconds": 1.0},
+                    "invariant_monitor_watchdog": {"baseline_duration_seconds": 1.0},
+                    "event_consumer_recovery_chaos": {"baseline_duration_seconds": 1.0},
+                    "invariant_burst": {"baseline_duration_seconds": 1.0},
+                    "long_soak_budget": {
+                        "baseline_duration_seconds": 1.0,
+                        "max_http_429_rate_percent": 1.0,
+                        "max_error_rate_percent": 1.0,
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root),
+        "--stability-canary-baseline-file",
+        str(baseline_file),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing = set(payload["checks"]["missing_required_canary_drills"])
+    assert "safe_mode_ux_degradation" in missing
+    assert "a11y_test_harness" in missing
+
     shutil.rmtree(workspace, ignore_errors=True)

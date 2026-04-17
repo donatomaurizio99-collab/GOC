@@ -60,7 +60,7 @@ This gate covers:
 - A11y test harness check (keyboard navigation baseline, screen-reader semantics smoke, and contrast ratios across visual presets)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
-- P0 runbook contract check (release-gate/CI/runbook strict-flag and script-reference consistency)
+- P0 runbook contract check (release-gate/CI/runbook strict-flag + script-reference consistency and canary baseline drill completeness)
 - P0 release evidence bundle (single artifact with required P0 report files and status summary)
 - P0 closure report (single go/no-go signal from burn-in + contract + evidence checks)
 
@@ -329,7 +329,7 @@ Verify before release:
   - `Pytest (Python 3.12)`
   - `Desktop Smoke (Windows)`
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
-- runbook contract report confirms zero missing flags/scripts (`success=true`)
+- runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
 - release evidence bundle report confirms all required P0 reports present and successful (`success=true`)
 - disaster-recovery rehearsal release-gate report is present and green (`artifacts\p0-disaster-recovery-rehearsal-pack-release-gate.json`, `success=true`)
 - failure budget dashboard report is present and green (`artifacts\failure-budget-dashboard-release-gate.json`, `success=true`)

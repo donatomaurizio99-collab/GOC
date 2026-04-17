@@ -719,7 +719,7 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
 ```
 
-Standalone P0 runbook contract check (release-gate/CI/runbook consistency):
+Standalone P0 runbook contract check (release-gate/CI/runbook + canary-baseline consistency):
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
