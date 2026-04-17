@@ -3352,6 +3352,8 @@ def test_112_p0_runbook_contract_check_reports_success():
     assert payload["checks"]["missing_required_canary_drills"] == []
     assert payload["checks"]["invalid_canary_baseline_durations"] == []
     assert payload["checks"]["missing_required_release_gate_tokens"] == []
+    assert payload["checks"]["missing_required_ci_artifact_paths"] == []
+    assert payload["checks"]["missing_required_runbook_tokens"] == []
     assert output_file.exists()
 
     report_file_payload = json.loads(output_file.read_text(encoding="utf-8"))
@@ -5361,6 +5363,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     bundle_wrapper = (project_root / "scripts" / "run-p0-release-evidence-bundle.ps1").read_text(encoding="utf-8")
     closure_script = (project_root / "scripts" / "p0-closure-report.py").read_text(encoding="utf-8")
     closure_wrapper = (project_root / "scripts" / "run-p0-closure-report.ps1").read_text(encoding="utf-8")
+    runbook_contract_script = (project_root / "scripts" / "p0-runbook-contract-check.py").read_text(encoding="utf-8")
+    runbook_contract_wrapper = (project_root / "scripts" / "run-p0-runbook-contract-check.ps1").read_text(encoding="utf-8")
 
     required_artifact_paths = [
         "artifacts/safe-mode-ux-degradation-release-gate.json",
@@ -5380,6 +5384,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert '[string]$RequiredLabel = ""' in bundle_wrapper
     assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
     assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
+    assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
+    assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
+    assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
+    assert "[string]$RequiredRunbookTokens =" in runbook_contract_wrapper
 
 
 def test_155_p0_release_evidence_bundle_fails_when_required_label_is_mismatched():
@@ -5582,5 +5590,97 @@ def test_158_p0_runbook_contract_check_fails_when_release_gate_token_is_missing(
     assert payload["success"] is False
     missing_tokens = set(payload["checks"]["missing_required_release_gate_tokens"])
     assert "Release-gate artifact preflight (clean stale release-gate evidence)" in missing_tokens
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_159_p0_runbook_contract_check_fails_when_required_ci_artifact_path_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-ci-artifact-path-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_ci = workspace / "ci-missing-closure-artifact.yml"
+
+    ci_text = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    broken_ci.write_text(
+        ci_text.replace(
+            "artifacts/p0-closure-report-release-gate.json",
+            "artifacts/p0-closure-report-release-gate-missing.json",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--ci-workflow-file",
+        str(broken_ci.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_paths = set(payload["checks"]["missing_required_ci_artifact_paths"])
+    assert "artifacts/p0-closure-report-release-gate.json" in missing_paths
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_160_p0_runbook_contract_check_fails_when_required_runbook_token_is_missing():
+    workspace = _local_test_dir("pytest-p0-runbook-contract-check-runbook-token-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    broken_runbook = workspace / "runbook-missing-closure-token.md"
+
+    runbook_text = (project_root / "docs" / "production-runbook.md").read_text(encoding="utf-8")
+    broken_runbook.write_text(
+        runbook_text.replace(
+            "metrics.required_evidence_reports_non_green=0",
+            "metrics.required_evidence_reports_non_green=legacy",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-runbook-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(project_root.resolve()),
+        "--runbook-file",
+        str(broken_runbook.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-runbook-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 runbook contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    missing_tokens = set(payload["checks"]["missing_required_runbook_tokens"])
+    assert "metrics.required_evidence_reports_non_green=0" in missing_tokens
 
     shutil.rmtree(workspace, ignore_errors=True)

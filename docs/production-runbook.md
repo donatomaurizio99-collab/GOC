@@ -62,7 +62,7 @@ This gate covers:
 - A11y test harness check (keyboard navigation baseline, screen-reader semantics smoke, and contrast ratios across visual presets)
 - release-gate runtime stability drill (critical-drill duration/variance budget sampling across storage + Stage-D UX/A11y contracts)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
-- P0 runbook contract check (release-gate/CI/runbook strict-flag + script-reference consistency and canary baseline drill completeness)
+- P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
 - P0 release evidence bundle (single artifact with required P0 report files, optional label contract enforcement, and status summary)
 - P0 closure report (single go/no-go signal from burn-in + contract + evidence checks)
 

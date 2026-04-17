@@ -52,6 +52,17 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "--required-evidence-reports",
 ]
 
+DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
+    "artifacts/p0-release-evidence-bundle-release-gate.json",
+    "artifacts/p0-closure-report-release-gate.json",
+]
+
+DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
+    "metrics.label_mismatch_reports=0",
+    "metrics.required_evidence_reports_missing=0",
+    "metrics.required_evidence_reports_non_green=0",
+]
+
 
 def _expect(condition: bool, message: str) -> None:
     if not condition:
@@ -109,6 +120,8 @@ def run_contract_check(
     required_strict_flags: list[str],
     required_canary_drills: list[str],
     required_release_gate_tokens: list[str],
+    required_ci_artifact_paths: list[str],
+    required_runbook_tokens: list[str],
 ) -> dict[str, Any]:
     started = time.perf_counter()
     runbook_text = _read_text(runbook_file)
@@ -122,6 +135,12 @@ def run_contract_check(
     missing_in_runbook = [flag for flag in combined_required_flags if f"-{flag}" not in runbook_text]
     missing_required_release_gate_tokens = [
         token for token in required_release_gate_tokens if token not in release_gate_text
+    ]
+    missing_required_ci_artifact_paths = [
+        path_token for path_token in required_ci_artifact_paths if path_token not in ci_workflow_text
+    ]
+    missing_required_runbook_tokens = [
+        token for token in required_runbook_tokens if token not in runbook_text
     ]
 
     runbook_script_refs = _extract_runbook_script_references(runbook_text)
@@ -167,6 +186,8 @@ def run_contract_check(
         and not missing_required_canary_drills
         and not invalid_canary_baseline_durations
         and not missing_required_release_gate_tokens
+        and not missing_required_ci_artifact_paths
+        and not missing_required_runbook_tokens
     )
     report = {
         "label": label,
@@ -193,6 +214,10 @@ def run_contract_check(
             "invalid_canary_baseline_durations": invalid_canary_baseline_durations,
             "required_release_gate_tokens": required_release_gate_tokens,
             "missing_required_release_gate_tokens": missing_required_release_gate_tokens,
+            "required_ci_artifact_paths": required_ci_artifact_paths,
+            "missing_required_ci_artifact_paths": missing_required_ci_artifact_paths,
+            "required_runbook_tokens": required_runbook_tokens,
+            "missing_required_runbook_tokens": missing_required_runbook_tokens,
         },
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -219,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--required-strict-flags", default="")
     parser.add_argument("--required-canary-drills", default=",".join(DEFAULT_REQUIRED_CANARY_DRILLS))
     parser.add_argument("--required-release-gate-tokens", default=",".join(DEFAULT_REQUIRED_RELEASE_GATE_TOKENS))
+    parser.add_argument("--required-ci-artifact-paths", default=",".join(DEFAULT_REQUIRED_CI_ARTIFACT_PATHS))
+    parser.add_argument("--required-runbook-tokens", default=",".join(DEFAULT_REQUIRED_RUNBOOK_TOKENS))
     parser.add_argument("--output-file")
     args = parser.parse_args(argv)
 
@@ -237,11 +264,19 @@ def main(argv: list[str] | None = None) -> int:
     required_strict_flags = _parse_csv_list(args.required_strict_flags)
     required_canary_drills = _parse_csv_list(args.required_canary_drills)
     required_release_gate_tokens = _parse_csv_list(args.required_release_gate_tokens)
+    required_ci_artifact_paths = _parse_csv_list(args.required_ci_artifact_paths)
+    required_runbook_tokens = _parse_csv_list(args.required_runbook_tokens)
     if not required_canary_drills:
         print("[p0-runbook-contract-check] ERROR: at least one required canary drill is required.", file=sys.stderr)
         return 2
     if not required_release_gate_tokens:
         print("[p0-runbook-contract-check] ERROR: at least one required release-gate token is required.", file=sys.stderr)
+        return 2
+    if not required_ci_artifact_paths:
+        print("[p0-runbook-contract-check] ERROR: at least one required CI artifact path is required.", file=sys.stderr)
+        return 2
+    if not required_runbook_tokens:
+        print("[p0-runbook-contract-check] ERROR: at least one required runbook token is required.", file=sys.stderr)
         return 2
 
     try:
@@ -256,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
             required_strict_flags=required_strict_flags,
             required_canary_drills=required_canary_drills,
             required_release_gate_tokens=required_release_gate_tokens,
+            required_ci_artifact_paths=required_ci_artifact_paths,
+            required_runbook_tokens=required_runbook_tokens,
         )
     except Exception as exc:
         print(f"[p0-runbook-contract-check] ERROR: {exc}", file=sys.stderr)
