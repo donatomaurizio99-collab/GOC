@@ -28,6 +28,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-upgrade-downgrade-compatibility-drill.ps1",
     "run-backup-restore-stress-drill.ps1",
     "run-release-gate-runtime-stability-drill.ps1",
+    "run-release-gate-performance-budget-check.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -58,18 +59,24 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "Release-gate artifact preflight (clean stale release-gate evidence)",
     '--required-label", "release-gate"',
     "--required-evidence-reports",
+    "--step-timings-file",
+    "release-gate-performance-budget-policy.json",
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/p0-report-schema-contract-release-gate.json",
     "artifacts/p0-release-evidence-bundle-release-gate.json",
     "artifacts/p0-closure-report-release-gate.json",
+    "artifacts/release-gate-step-timings-release-gate.json",
+    "artifacts/release-gate-performance-budget-release-gate.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.label_mismatch_reports=0",
     "metrics.required_evidence_reports_missing=0",
     "metrics.required_evidence_reports_non_green=0",
+    "metrics.steps_over_budget=0",
+    "metrics.regression_budget_exceeded=0",
 ]
 
 

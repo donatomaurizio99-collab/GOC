@@ -88,6 +88,8 @@ param(
     [switch]$StrictReleaseGateRuntimeStabilityDrill,
     [switch]$SkipCriticalDrillFlakeGate,
     [switch]$StrictCriticalDrillFlakeGate,
+    [switch]$SkipReleaseGatePerformanceBudgetCheck,
+    [switch]$StrictReleaseGatePerformanceBudgetCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -105,6 +107,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 $script:P0EvidenceReportPaths = @()
+$script:GateStepTimingRecords = @()
 
 function Invoke-NativeCommand {
     param(
@@ -129,9 +132,27 @@ function Invoke-GateStep {
 
     $startedAt = Get-Date
     Write-Host "==> $Name" -ForegroundColor Cyan
-    & $Action
-    $duration = [int]((Get-Date) - $startedAt).TotalSeconds
-    Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
+    $stepCompletedAtUtc = $null
+    $stepSucceeded = $false
+    try {
+        & $Action
+        $stepSucceeded = $true
+    } finally {
+        $stepCompletedAtUtc = (Get-Date).ToUniversalTime()
+        $duration = [int][Math]::Round(($stepCompletedAtUtc - $startedAt.ToUniversalTime()).TotalSeconds, 0)
+        if ($duration -lt 0) {
+            $duration = 0
+        }
+        $script:GateStepTimingRecords += [ordered]@{
+            name = $Name
+            duration_seconds = $duration
+            success = [bool]$stepSucceeded
+            completed_at_utc = $stepCompletedAtUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        }
+        if ($stepSucceeded) {
+            Write-Host "<== $Name passed (${duration}s)" -ForegroundColor Green
+        }
+    }
 }
 
 function Resolve-PathInsideProjectRoot {
@@ -182,6 +203,45 @@ function Clear-ReleaseGateArtifacts {
             Remove-Item -LiteralPath $resolvedDir -Recurse -Force
         }
     }
+}
+
+function Write-ReleaseGateStepTimingsReport {
+    param(
+        [string]$OutputFile,
+        [string]$Label = "release-gate"
+    )
+
+    $outputPath = Resolve-PathInsideProjectRoot -PathToResolve $OutputFile -ProjectRootPath $ProjectRoot
+    $outputDir = Split-Path -Parent $outputPath
+    if ($outputDir) {
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+    }
+
+    $totalDurationSeconds = 0
+    $successfulSteps = 0
+    foreach ($entry in $script:GateStepTimingRecords) {
+        if ($entry -and $entry.duration_seconds -is [ValueType]) {
+            $totalDurationSeconds += [int]$entry.duration_seconds
+        }
+        if ($entry -and $entry.success) {
+            $successfulSteps += 1
+        }
+    }
+
+    $payload = [ordered]@{
+        label = $Label
+        success = $true
+        metrics = [ordered]@{
+            steps_recorded = [int]$script:GateStepTimingRecords.Count
+            successful_steps = [int]$successfulSteps
+            total_duration_seconds = [int]$totalDurationSeconds
+        }
+        steps = @($script:GateStepTimingRecords)
+        generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    }
+
+    $json = $payload | ConvertTo-Json -Depth 8
+    Set-Content -Path $outputPath -Value $json -Encoding UTF8
 }
 
 Invoke-GateStep -Name "Release-gate artifact preflight (clean stale release-gate evidence)" -Action {
@@ -1424,5 +1484,30 @@ if (-not $SkipP0ClosureReport) {
     }
 }
 
-Write-Host "Release gate passed." -ForegroundColor Green
+if (-not $SkipReleaseGatePerformanceBudgetCheck) {
+    Invoke-GateStep -Name "Release-gate performance budget check (step runtime budgets + trend report)" -Action {
+        $stepTimingsPath = Join-Path $ProjectRoot "artifacts\release-gate-step-timings-release-gate.json"
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-performance-budget-release-gate.json"
+        Write-ReleaseGateStepTimingsReport -OutputFile $stepTimingsPath -Label "release-gate"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-performance-budget-check.py",
+                "--label", "release-gate",
+                "--policy-file", ".\docs\release-gate-performance-budget-policy.json",
+                "--step-timings-file", $stepTimingsPath,
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePerformanceBudgetCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate performance budget check failed but StrictReleaseGatePerformanceBudgetCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
 
+Write-Host "Release gate passed." -ForegroundColor Green

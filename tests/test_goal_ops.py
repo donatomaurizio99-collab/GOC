@@ -5447,6 +5447,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-runtime-stability-release-gate.json",
         "artifacts/critical-drill-flake-gate-release-gate.json",
         "artifacts/p0-report-schema-contract-release-gate.json",
+        "artifacts/release-gate-step-timings-release-gate.json",
+        "artifacts/release-gate-performance-budget-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5459,6 +5461,11 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "$requiredReportPaths = @($script:P0EvidenceReportPaths)" in release_gate
     assert 'if ($script:P0EvidenceReportPaths.Count -gt 0)' in release_gate
     assert '"--required-evidence-reports"' in release_gate
+    assert "Release-gate performance budget check (step runtime budgets + trend report)" in release_gate
+    assert "--step-timings-file" in release_gate
+    assert "release-gate-performance-budget-policy.json" in release_gate
+    assert "artifacts\\release-gate-step-timings-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-performance-budget-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5472,7 +5479,11 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
     assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
     assert "run-p0-report-schema-contract-check.ps1" in runbook_contract_script
+    assert "run-release-gate-performance-budget-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-performance-budget-release-gate.json" in runbook_contract_script
+    assert "metrics.steps_over_budget=0" in runbook_contract_script
+    assert "metrics.regression_budget_exceeded=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -6143,6 +6154,172 @@ def test_165_canary_determinism_flake_check_fails_when_probe_is_flaky_and_unquar
     assert payload["success"] is False
     assert payload["metrics"]["blocking_flaky_probe_count"] >= 1
     assert "safe_mode_ux_degradation" in payload["checks"]["blocking_flaky_probe_ids"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_166_release_gate_performance_budget_check_reports_success_with_fixture_timings():
+    workspace = _local_test_dir("pytest-release-gate-performance-budget-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "release-gate-performance-policy.json"
+    timings_file = workspace / "release-gate-step-timings.json"
+    output_file = workspace / "release-gate-performance-budget-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "max_total_duration_seconds": 600.0,
+                "max_step_regression_percent": 80.0,
+                "trend_top_n": 4,
+                "steps": [
+                    {
+                        "name": "Pytest suite",
+                        "baseline_duration_seconds": 120.0,
+                        "max_duration_seconds": 300.0,
+                    },
+                    {
+                        "name": "Desktop smoke",
+                        "baseline_duration_seconds": 15.0,
+                        "max_duration_seconds": 60.0,
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    timings_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "steps": [
+                    {"name": "Pytest suite", "duration_seconds": 145, "success": True},
+                    {"name": "Desktop smoke", "duration_seconds": 22, "success": True},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-performance-budget-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--step-timings-file",
+        str(timings_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["steps_over_budget"] == 0
+    assert payload["metrics"]["regression_budget_exceeded"] == 0
+    assert payload["metrics"]["missing_required_steps"] == 0
+    assert payload["metrics"]["total_duration_over_budget"] is False
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_167_release_gate_performance_budget_check_fails_when_step_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-release-gate-performance-budget-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    policy_file = workspace / "release-gate-performance-policy.json"
+    timings_file = workspace / "release-gate-step-timings.json"
+    output_file = workspace / "release-gate-performance-budget-report.json"
+
+    policy_file.write_text(
+        json.dumps(
+            {
+                "max_total_duration_seconds": 120.0,
+                "max_step_regression_percent": 25.0,
+                "steps": [
+                    {
+                        "name": "Pytest suite",
+                        "baseline_duration_seconds": 30.0,
+                        "max_duration_seconds": 50.0,
+                    },
+                    {
+                        "name": "Desktop smoke",
+                        "baseline_duration_seconds": 10.0,
+                        "max_duration_seconds": 20.0,
+                    },
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    timings_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "steps": [
+                    {"name": "Pytest suite", "duration_seconds": 95, "success": True},
+                    {"name": "Desktop smoke", "duration_seconds": 12, "success": True},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-performance-budget-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--step-timings-file",
+        str(timings_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-performance-budget-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate performance budget check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["steps_over_budget"] >= 1
+    assert payload["metrics"]["regression_budget_exceeded"] >= 1
+    assert payload["metrics"]["total_duration_over_budget"] is False
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
