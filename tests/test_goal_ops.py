@@ -5880,3 +5880,77 @@ def test_162_p0_report_schema_contract_check_fails_when_required_keys_are_missin
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_163_p0_report_schema_contract_check_ignores_out_of_scope_reports_when_required_files_are_set():
+    workspace = _local_test_dir("pytest-p0-report-schema-contract-check-out-of-scope").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    required_report = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    out_of_scope_report = artifacts_dir / "legacy-alert-routing-release-gate.json"
+    output_file = artifacts_dir / "p0-report-schema-contract-release-gate.json"
+
+    required_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "paths": {"output_file": str(required_report.resolve())},
+                "metrics": {"checks_passed": 1},
+                "decision": {"release_blocked": False},
+                "generated_at_utc": "2026-04-17T12:00:00Z",
+                "duration_ms": 9,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    # Intentionally incomplete legacy report schema. This should be ignored
+    # because it is not listed in --required-files.
+    out_of_scope_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-report-schema-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--required-label",
+        "release-gate",
+        "--required-files",
+        str(required_report.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["schema_failed_reports"] == 0
+    assert payload["metrics"]["reports_out_of_scope"] == 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

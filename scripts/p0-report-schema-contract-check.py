@@ -131,14 +131,32 @@ def run_check(
     for path in required_paths:
         discovered_map.setdefault(str(path), path)
 
+    # In strict gate mode we pass explicit required files. In that case, validate only
+    # required files so unrelated legacy report schemas do not create false blockers.
+    required_path_set = {str(item) for item in required_paths}
+    if required_paths:
+        paths_to_evaluate = sorted(
+            [path for path in required_paths if path.exists()],
+            key=lambda item: str(item).lower(),
+        )
+    else:
+        paths_to_evaluate = sorted(
+            [path for path in discovered_map.values() if path.exists()],
+            key=lambda item: str(item).lower(),
+        )
+
+    out_of_scope_paths = [
+        str(path)
+        for path in discovered_paths
+        if required_paths and str(path) not in required_path_set
+    ]
+
     evaluated_reports: list[dict[str, Any]] = []
     invalid_reports: list[dict[str, Any]] = []
     schema_failed_reports: list[dict[str, Any]] = []
     label_mismatch_reports: list[dict[str, Any]] = []
 
-    for file_path in sorted(discovered_map.values(), key=lambda item: str(item).lower()):
-        if not file_path.exists():
-            continue
+    for file_path in paths_to_evaluate:
         try:
             payload = _read_json_object(file_path)
         except Exception as exc:
@@ -204,6 +222,7 @@ def run_check(
         "metrics": {
             "reports_discovered": len(discovered_paths),
             "reports_evaluated": len(evaluated_reports),
+            "reports_out_of_scope": len(out_of_scope_paths),
             "missing_required_files": len(missing_required_files),
             "invalid_reports": len(invalid_reports),
             "schema_failed_reports": len(schema_failed_reports),
@@ -214,6 +233,7 @@ def run_check(
             "recommended_action": "block_release" if not success else "proceed",
         },
         "reports": evaluated_reports,
+        "out_of_scope_reports": out_of_scope_paths,
         "missing_required_files": missing_required_files,
         "invalid_reports": invalid_reports,
         "schema_failed_reports": schema_failed_reports,
