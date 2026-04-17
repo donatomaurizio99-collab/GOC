@@ -5457,6 +5457,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-stability-final-readiness-release-gate.json",
         "artifacts/release-gate-staging-soak-readiness-release-gate.json",
         "artifacts/release-gate-rc-canary-rollout-release-gate.json",
+        "artifacts/release-gate-evidence-lineage-release-gate.json",
+        "artifacts/release-gate-production-readiness-certification-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5477,6 +5479,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "Release-gate stability final readiness check (Stage L-P consolidated go/no-go)" in release_gate
     assert "Release-gate staging soak readiness check (Stage Q incident/restore gate)" in release_gate
     assert "Release-gate RC canary rollout check (Stage R rollout policy gate)" in release_gate
+    assert "Release-gate evidence lineage check (Stage S timestamp + manifest coherence gate)" in release_gate
+    assert "Release-gate production readiness certification (Stage T final go/no-go certificate)" in release_gate
+    assert "release-gate-evidence-lineage-check.py" in release_gate
+    assert "release-gate-production-readiness-certification.py" in release_gate
     assert "--step-timings-file" in release_gate
     assert "release-gate-performance-budget-policy.json" in release_gate
     assert "release-gate-evidence-freshness-policy.json" in release_gate
@@ -5492,6 +5498,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-stability-final-readiness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-staging-soak-readiness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-rc-canary-rollout-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-evidence-lineage-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-production-readiness-certification-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5515,6 +5523,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-performance-policy-calibrate.ps1" in runbook_contract_script
     assert "run-release-gate-staging-soak-readiness-check.ps1" in runbook_contract_script
     assert "run-release-gate-rc-canary-rollout-check.ps1" in runbook_contract_script
+    assert "run-release-gate-evidence-lineage-check.ps1" in runbook_contract_script
+    assert "run-release-gate-production-readiness-certification-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-history-release-gate.json" in runbook_contract_script
@@ -5522,6 +5532,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts/release-gate-stability-final-readiness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-staging-soak-readiness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-rc-canary-rollout-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-evidence-lineage-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-production-readiness-certification-release-gate.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
@@ -5533,6 +5545,11 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "metrics.restore_proof_failed=0" in runbook_contract_script
     assert "metrics.rollout_required_reports_non_green=0" in runbook_contract_script
     assert "metrics.rollout_policy_invalid=0" in runbook_contract_script
+    assert "metrics.lineage_reports_non_green=0" in runbook_contract_script
+    assert "metrics.invalid_timestamp_reports=0" in runbook_contract_script
+    assert "metrics.manifest_missing_entries=0" in runbook_contract_script
+    assert "metrics.reports_with_release_block_signal=0" in runbook_contract_script
+    assert "metrics.burnin_threshold_failed=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -7167,6 +7184,174 @@ def test_178_p0_burnin_consecutive_green_can_ignore_run_conclusion_when_required
     assert payload["success"] is True
     assert payload["metrics"]["consecutive_green"] == 1
     assert payload["config"]["ignore_run_conclusion"] is True
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_179_release_gate_evidence_lineage_check_reports_success_with_coherent_reports_and_manifest():
+    workspace = _local_test_dir("pytest-release-gate-evidence-lineage-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    report_paths = [
+        artifacts_dir / "release-gate-stability-final-readiness-release-gate.json",
+        artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json",
+        artifacts_dir / "release-gate-rc-canary-rollout-release-gate.json",
+        artifacts_dir / "p0-closure-report-release-gate.json",
+    ]
+    manifest_file = artifacts_dir / "release-gate-evidence-manifest-release-gate.json"
+    output_file = artifacts_dir / "release-gate-evidence-lineage-release-gate.json"
+
+    for index, report_path in enumerate(report_paths):
+        report_path.write_text(
+            json.dumps(
+                {
+                    "label": "release-gate",
+                    "success": True,
+                    "generated_at_utc": f"2026-04-17T12:00:0{index}Z",
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "files": [{"path": str(path.resolve()), "sha256": "x"} for path in report_paths],
+                "generated_at_utc": "2026-04-17T12:00:30Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-evidence-lineage-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-reports",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--manifest-file",
+        str(manifest_file.resolve()),
+        "--required-label",
+        "release-gate",
+        "--max-report-timestamp-skew-seconds",
+        "900",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["lineage_reports_non_green"] == 0
+    assert payload["metrics"]["invalid_timestamp_reports"] == 0
+    assert payload["metrics"]["manifest_missing_entries"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_180_release_gate_production_readiness_certification_fails_when_burnin_threshold_is_not_met():
+    workspace = _local_test_dir("pytest-release-gate-production-readiness-certification-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    report_paths = [
+        artifacts_dir / "release-gate-stability-final-readiness-release-gate.json",
+        artifacts_dir / "release-gate-staging-soak-readiness-release-gate.json",
+        artifacts_dir / "release-gate-rc-canary-rollout-release-gate.json",
+        artifacts_dir / "release-gate-evidence-lineage-release-gate.json",
+        artifacts_dir / "p0-closure-report-release-gate.json",
+    ]
+    burnin_file = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    output_file = artifacts_dir / "release-gate-production-readiness-certification-release-gate.json"
+
+    for report_path in report_paths:
+        report_path.write_text(
+            json.dumps(
+                {
+                    "label": "release-gate",
+                    "success": True,
+                    "decision": {"release_blocked": False},
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    burnin_file.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": False,
+                "metrics": {
+                    "consecutive_green": 7,
+                    "required_consecutive": 10,
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-production-readiness-certification.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--required-reports",
+        ",".join(
+            [
+                str(path.resolve()) for path in report_paths
+            ]
+            + [str(burnin_file.resolve())]
+        ),
+        "--required-label",
+        "release-gate",
+        "--burnin-report-file",
+        str(burnin_file.resolve()),
+        "--required-consecutive",
+        "10",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-production-readiness-certification] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate production readiness certification failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["burnin_threshold_failed"] == 1
+    assert payload["metrics"]["criteria_failed"] >= 1
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
