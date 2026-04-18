@@ -2,6 +2,7 @@ param(
     [string]$PythonExe = "python",
     [string]$ArtifactsDir = "artifacts",
     [string]$IncludeGlob = "*-release-gate.json",
+    [string]$RegistryFile = "docs\\release-gate-registry.json",
     [string]$RequiredFiles = "",
     [string]$RequiredLabel = "",
     [string]$OutputFile = "artifacts\\p0-release-evidence-bundle.json",
@@ -19,6 +20,7 @@ $arguments = @(
     "--label", "manual",
     "--artifacts-dir", $ArtifactsDir,
     "--include-glob", $IncludeGlob,
+    "--registry-file", $RegistryFile,
     "--output-file", $OutputFile,
     "--bundle-dir", $BundleDir
 )

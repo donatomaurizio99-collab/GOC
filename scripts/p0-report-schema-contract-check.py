@@ -14,11 +14,18 @@ DEFAULT_REQUIRED_TOP_LEVEL_KEYS = [
 ]
 
 DEFAULT_REQUIRED_DECISION_KEYS: list[str] = []
+DEFAULT_REQUIRED_LABEL = ""
+DEFAULT_REGISTRY_FILE = "docs/release-gate-registry.json"
 
 
 def _expect(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+def _read_text(path: Path) -> str:
+    _expect(path.exists(), f"Required file not found: {path}")
+    return path.read_text(encoding="utf-8")
 
 
 def _parse_csv_list(text: str) -> list[str]:
@@ -33,9 +40,82 @@ def _resolve_path(project_root: Path, value: str) -> Path:
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(_read_text(path))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse JSON file {path}: {exc}") from exc
     _expect(isinstance(payload, dict), f"Expected JSON object in report file: {path}")
     return payload
+
+
+def _normalize_registry_string_list(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    context: str,
+    allow_empty: bool = False,
+) -> list[str]:
+    raw = payload.get(key)
+    _expect(isinstance(raw, list), f"Registry key '{key}' must be a list in {context}.")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in raw:
+        _expect(isinstance(item, str), f"Registry key '{key}' must contain only strings in {context}.")
+        token = item.strip()
+        _expect(token, f"Registry key '{key}' contains an empty token in {context}.")
+        if token in seen:
+            duplicates.append(token)
+            continue
+        seen.add(token)
+        normalized.append(token)
+
+    _expect(not duplicates, f"Registry key '{key}' contains duplicate tokens in {context}: {duplicates}")
+    if not allow_empty:
+        _expect(normalized, f"Registry key '{key}' must contain at least one token in {context}.")
+    return normalized
+
+
+def _load_registry_defaults(registry_file: Path) -> dict[str, Any]:
+    payload = _read_json_object(registry_file)
+    contract = payload.get("p0_report_schema_contract")
+    _expect(isinstance(contract, dict), "Registry key 'p0_report_schema_contract' must be an object.")
+
+    required_top_level_keys = _normalize_registry_string_list(
+        contract,
+        "required_top_level_keys",
+        context="p0_report_schema_contract",
+    )
+    required_decision_keys = _normalize_registry_string_list(
+        contract,
+        "required_decision_keys",
+        context="p0_report_schema_contract",
+        allow_empty=True,
+    )
+    required_label_raw = contract.get("required_label")
+    _expect(
+        isinstance(required_label_raw, str),
+        "Registry key 'required_label' must be a string in p0_report_schema_contract.",
+    )
+    required_label = required_label_raw.strip()
+    _expect(required_label, "Registry key 'required_label' must not be empty in p0_report_schema_contract.")
+
+    required_files: list[str] = []
+    if "required_files" in contract:
+        required_files = _normalize_registry_string_list(
+            contract,
+            "required_files",
+            context="p0_report_schema_contract",
+            allow_empty=True,
+        )
+
+    return {
+        "required_top_level_keys": required_top_level_keys,
+        "required_decision_keys": required_decision_keys,
+        "required_label": required_label,
+        "required_files": required_files,
+    }
 
 
 def _validate_report_schema(
@@ -251,10 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-root")
     parser.add_argument("--artifacts-dir", default="artifacts")
     parser.add_argument("--include-glob", default="*-release-gate.json")
+    parser.add_argument("--registry-file", default=DEFAULT_REGISTRY_FILE)
     parser.add_argument("--required-files", default="")
     parser.add_argument("--required-label", default="")
-    parser.add_argument("--required-top-level-keys", default=",".join(DEFAULT_REQUIRED_TOP_LEVEL_KEYS))
-    parser.add_argument("--required-decision-keys", default=",".join(DEFAULT_REQUIRED_DECISION_KEYS))
+    parser.add_argument("--required-top-level-keys", default="")
+    parser.add_argument("--required-decision-keys", default="")
     parser.add_argument("--output-file", default="artifacts/p0-report-schema-contract-release-gate.json")
     parser.add_argument("--allow-empty", action="store_true")
     args = parser.parse_args(argv)
@@ -262,11 +343,43 @@ def main(argv: list[str] | None = None) -> int:
     inferred_project_root = Path(__file__).resolve().parents[1]
     project_root = _resolve_path(inferred_project_root, args.project_root) if args.project_root else inferred_project_root
     artifacts_dir = _resolve_path(project_root, args.artifacts_dir)
+    registry_file = _resolve_path(project_root, args.registry_file)
     output_file = _resolve_path(project_root, args.output_file)
 
     required_files = _parse_csv_list(args.required_files)
     required_top_level_keys = _parse_csv_list(args.required_top_level_keys)
     required_decision_keys = _parse_csv_list(args.required_decision_keys)
+    required_label = str(args.required_label).strip()
+
+    registry_defaults: dict[str, Any] = {}
+    if registry_file.exists():
+        try:
+            registry_defaults = _load_registry_defaults(registry_file)
+        except Exception as exc:
+            print(
+                f"[p0-report-schema-contract-check] ERROR: Invalid registry defaults in {registry_file}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
+    if not required_files and registry_defaults.get("required_files"):
+        required_files = list(registry_defaults["required_files"])
+    if not required_top_level_keys:
+        required_top_level_keys = (
+            list(registry_defaults["required_top_level_keys"])
+            if registry_defaults.get("required_top_level_keys")
+            else list(DEFAULT_REQUIRED_TOP_LEVEL_KEYS)
+        )
+    if not required_decision_keys and str(args.required_decision_keys).strip() == "":
+        required_decision_keys = (
+            list(registry_defaults["required_decision_keys"])
+            if registry_defaults.get("required_decision_keys") is not None
+            else list(DEFAULT_REQUIRED_DECISION_KEYS)
+        )
+    if not required_label:
+        required_label = str(
+            registry_defaults.get("required_label", DEFAULT_REQUIRED_LABEL)
+        ).strip()
 
     if not required_top_level_keys:
         print("[p0-report-schema-contract-check] ERROR: --required-top-level-keys must not be empty.", file=sys.stderr)
@@ -278,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
             artifacts_dir=artifacts_dir,
             include_glob=str(args.include_glob),
             required_files=required_files,
-            required_label=str(args.required_label),
+            required_label=required_label,
             required_top_level_keys=required_top_level_keys,
             required_decision_keys=required_decision_keys,
             output_file=output_file,

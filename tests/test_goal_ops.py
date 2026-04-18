@@ -5494,6 +5494,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "python .\\scripts\\release-gate-registry-sync.py" in ci_workflow
     assert "release_gate_ci" in registry
     assert "p0_runbook_contract" in registry
+    assert "p0_report_schema_contract" in registry
+    assert "p0_release_evidence_bundle" in registry
     assert "StrictReleaseGatePostReleaseContinuityCheck" in registry["release_gate_ci"]["strict_flags"]
     assert "StrictReleaseGateProductionSustainabilityCertificationCheck" in registry["release_gate_ci"]["strict_flags"]
     assert (
@@ -5508,11 +5510,14 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "required_release_gate_tokens" in registry["p0_runbook_contract"]
     assert "required_ci_artifact_paths" in registry["p0_runbook_contract"]
     assert "required_runbook_tokens" in registry["p0_runbook_contract"]
+    assert registry["p0_report_schema_contract"]["required_top_level_keys"] == ["label", "success"]
+    assert registry["p0_report_schema_contract"]["required_label"] == "release-gate"
+    assert registry["p0_release_evidence_bundle"]["required_label"] == "release-gate"
 
-    assert '"--required-top-level-keys", "label,success"' in release_gate
+    assert '"--registry-file", "docs/release-gate-registry.json"' in release_gate
+    assert '"--required-top-level-keys", "label,success"' not in release_gate
     assert '"--required-decision-keys", "release_blocked"' not in release_gate
     assert '"--include-glob", "*-release-gate.json"' in release_gate
-    assert '"--required-label", "release-gate"' in release_gate
     assert "$script:P0EvidenceReportPaths = @()" in release_gate
     assert "$requiredReportPaths = @($script:P0EvidenceReportPaths)" in release_gate
     assert 'if ($script:P0EvidenceReportPaths.Count -gt 0)' in release_gate
@@ -5608,15 +5613,21 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-post-release-continuity-release-gate.json" in release_gate
     assert "artifacts\\release-gate-production-sustainability-certification-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
+    assert 'parser.add_argument("--registry-file", default=DEFAULT_REGISTRY_FILE)' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in schema_wrapper
-    assert '[string]$RequiredTopLevelKeys = "label,success"' in schema_wrapper
+    assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in schema_wrapper
+    assert '[string]$RequiredTopLevelKeys = ""' in schema_wrapper
     assert '[string]$RequiredDecisionKeys = ""' in schema_wrapper
+    assert '"--registry-file", $RegistryFile' in schema_wrapper
     assert 'default="*-release-gate.json"' in bundle_script
+    assert 'parser.add_argument("--registry-file", default=DEFAULT_REGISTRY_FILE)' in bundle_script
     assert 'parser.add_argument("--required-label", default="")' in bundle_script
     assert '[string]$IncludeGlob = "*-release-gate.json"' in bundle_wrapper
+    assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in bundle_wrapper
     assert '[string]$RequiredLabel = ""' in bundle_wrapper
+    assert '"--registry-file", $RegistryFile' in bundle_wrapper
     assert 'parser.add_argument("--required-evidence-reports", default="")' in closure_script
     assert '[string]$RequiredEvidenceReports = ""' in closure_wrapper
     assert "run-p0-report-schema-contract-check.ps1" in runbook_contract_script
@@ -9615,3 +9626,172 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["changed"] is False
     assert payload["strict_flags_total"] >= 1
     assert payload["artifact_paths_total"] >= 1
+    assert payload["p0_schema_required_top_level_keys_total"] >= 1
+    assert payload["p0_schema_required_decision_keys_total"] >= 0
+    assert payload["p0_bundle_required_files_total"] >= 0
+
+
+def test_202_p0_report_schema_contract_uses_registry_required_label_default():
+    workspace = _local_test_dir("pytest-p0-report-schema-contract-registry-default-label").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    report_file = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    output_file = artifacts_dir / "p0-report-schema-contract-release-gate.json"
+    registry_file = workspace / "docs" / "release-gate-registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "manual",
+                "success": True,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    registry_file.write_text(
+        json.dumps(
+            {
+                "p0_report_schema_contract": {
+                    "required_top_level_keys": ["label", "success"],
+                    "required_decision_keys": [],
+                    "required_label": "release-gate",
+                    "required_files": [],
+                },
+                "p0_release_evidence_bundle": {
+                    "required_label": "release-gate",
+                    "required_files": [],
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-report-schema-contract-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--registry-file",
+        str(registry_file.resolve()),
+        "--required-files",
+        str(report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-report-schema-contract-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 report schema contract check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["label_mismatch_reports"] == 1
+    assert payload["metrics"]["schema_failed_reports"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_203_p0_release_evidence_bundle_uses_registry_required_label_default():
+    workspace = _local_test_dir("pytest-p0-release-evidence-bundle-registry-default-label").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    report_file = artifacts_dir / "safe-mode-ux-degradation-release-gate.json"
+    output_file = artifacts_dir / "p0-release-evidence-bundle-release-gate.json"
+    bundle_dir = artifacts_dir / "p0-release-evidence-files-release-gate"
+    registry_file = workspace / "docs" / "release-gate-registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "manual",
+                "success": True,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    registry_file.write_text(
+        json.dumps(
+            {
+                "p0_report_schema_contract": {
+                    "required_top_level_keys": ["label", "success"],
+                    "required_decision_keys": [],
+                    "required_label": "release-gate",
+                    "required_files": [],
+                },
+                "p0_release_evidence_bundle": {
+                    "required_label": "release-gate",
+                    "required_files": [],
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-release-evidence-bundle.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--artifacts-dir",
+        str(artifacts_dir.resolve()),
+        "--include-glob",
+        "*-release-gate.json",
+        "--registry-file",
+        str(registry_file.resolve()),
+        "--required-files",
+        str(report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+        "--bundle-dir",
+        str(bundle_dir.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[p0-release-evidence-bundle] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "P0 release evidence bundle check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["label_mismatch_reports"] == 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)

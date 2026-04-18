@@ -2,7 +2,8 @@ param(
     [string]$PythonExe = "python",
     [string]$ArtifactsDir = "artifacts",
     [string]$IncludeGlob = "*-release-gate.json",
-    [string]$RequiredTopLevelKeys = "label,success",
+    [string]$RegistryFile = "docs\\release-gate-registry.json",
+    [string]$RequiredTopLevelKeys = "",
     [string]$RequiredDecisionKeys = "",
     [string]$RequiredFiles = "",
     [string]$RequiredLabel = "",
@@ -20,10 +21,15 @@ $arguments = @(
     "--label", "manual",
     "--artifacts-dir", $ArtifactsDir,
     "--include-glob", $IncludeGlob,
-    "--required-top-level-keys", $RequiredTopLevelKeys,
-    "--required-decision-keys", $RequiredDecisionKeys,
+    "--registry-file", $RegistryFile,
     "--output-file", $OutputFile
 )
+if (-not [string]::IsNullOrWhiteSpace($RequiredTopLevelKeys)) {
+    $arguments += @("--required-top-level-keys", $RequiredTopLevelKeys)
+}
+if (-not [string]::IsNullOrWhiteSpace($RequiredDecisionKeys)) {
+    $arguments += @("--required-decision-keys", $RequiredDecisionKeys)
+}
 if (-not [string]::IsNullOrWhiteSpace($RequiredFiles)) {
     $arguments += @("--required-files", $RequiredFiles)
 }

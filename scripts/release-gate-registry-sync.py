@@ -42,6 +42,7 @@ def _normalize_string_list(
     *,
     context: str,
     value_pattern: str | None = None,
+    allow_empty: bool = False,
 ) -> list[str]:
     raw = payload.get(key)
     _expect(isinstance(raw, list), f"Registry key '{key}' must be a list in {context}.")
@@ -66,7 +67,8 @@ def _normalize_string_list(
         normalized.append(token)
 
     _expect(not duplicates, f"Registry key '{key}' contains duplicate tokens in {context}: {duplicates}")
-    _expect(normalized, f"Registry key '{key}' must contain at least one token in {context}.")
+    if not allow_empty:
+        _expect(normalized, f"Registry key '{key}' must contain at least one token in {context}.")
     return normalized
 
 
@@ -94,10 +96,69 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
         for key in P0_CONTRACT_LIST_KEYS
     }
 
+    p0_schema = payload.get("p0_report_schema_contract")
+    _expect(isinstance(p0_schema, dict), "Registry key 'p0_report_schema_contract' must be an object.")
+    p0_schema_top_level = _normalize_string_list(
+        p0_schema,
+        "required_top_level_keys",
+        context="p0_report_schema_contract",
+    )
+    p0_schema_decision = _normalize_string_list(
+        p0_schema,
+        "required_decision_keys",
+        context="p0_report_schema_contract",
+        allow_empty=True,
+    )
+    p0_schema_label_raw = p0_schema.get("required_label")
+    _expect(
+        isinstance(p0_schema_label_raw, str),
+        "Registry key 'required_label' must be a string in p0_report_schema_contract.",
+    )
+    p0_schema_label = p0_schema_label_raw.strip()
+    _expect(
+        p0_schema_label,
+        "Registry key 'required_label' must not be empty in p0_report_schema_contract.",
+    )
+    p0_schema_required_files = _normalize_string_list(
+        p0_schema,
+        "required_files",
+        context="p0_report_schema_contract",
+        allow_empty=True,
+    )
+
+    p0_bundle = payload.get("p0_release_evidence_bundle")
+    _expect(isinstance(p0_bundle, dict), "Registry key 'p0_release_evidence_bundle' must be an object.")
+    p0_bundle_label_raw = p0_bundle.get("required_label")
+    _expect(
+        isinstance(p0_bundle_label_raw, str),
+        "Registry key 'required_label' must be a string in p0_release_evidence_bundle.",
+    )
+    p0_bundle_label = p0_bundle_label_raw.strip()
+    _expect(
+        p0_bundle_label,
+        "Registry key 'required_label' must not be empty in p0_release_evidence_bundle.",
+    )
+    p0_bundle_required_files = _normalize_string_list(
+        p0_bundle,
+        "required_files",
+        context="p0_release_evidence_bundle",
+        allow_empty=True,
+    )
+
     return {
         "strict_flags": strict_flags,
         "release_evidence_artifact_paths": artifact_paths,
         "p0_contract": p0_lists,
+        "p0_report_schema_contract": {
+            "required_top_level_keys": p0_schema_top_level,
+            "required_decision_keys": p0_schema_decision,
+            "required_label": p0_schema_label,
+            "required_files": p0_schema_required_files,
+        },
+        "p0_release_evidence_bundle": {
+            "required_label": p0_bundle_label,
+            "required_files": p0_bundle_required_files,
+        },
     }
 
 
@@ -177,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Synchronize and validate CI release-gate strict flags/artifact path block from "
-            "docs/release-gate-registry.json."
+            "docs/release-gate-registry.json and validate registry contract sections."
         )
     )
     parser.add_argument("--project-root")
@@ -220,6 +281,15 @@ def main(argv: list[str] | None = None) -> int:
                     "ci_workflow_file": str(ci_workflow_file),
                     "strict_flags_total": len(registry["strict_flags"]),
                     "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
+                    "p0_schema_required_top_level_keys_total": len(
+                        registry["p0_report_schema_contract"]["required_top_level_keys"]
+                    ),
+                    "p0_schema_required_decision_keys_total": len(
+                        registry["p0_report_schema_contract"]["required_decision_keys"]
+                    ),
+                    "p0_bundle_required_files_total": len(
+                        registry["p0_release_evidence_bundle"]["required_files"]
+                    ),
                 },
                 ensure_ascii=True,
                 sort_keys=True,
@@ -245,6 +315,15 @@ def main(argv: list[str] | None = None) -> int:
                 "ci_workflow_file": str(ci_workflow_file),
                 "strict_flags_total": len(registry["strict_flags"]),
                 "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
+                "p0_schema_required_top_level_keys_total": len(
+                    registry["p0_report_schema_contract"]["required_top_level_keys"]
+                ),
+                "p0_schema_required_decision_keys_total": len(
+                    registry["p0_report_schema_contract"]["required_decision_keys"]
+                ),
+                "p0_bundle_required_files_total": len(
+                    registry["p0_release_evidence_bundle"]["required_files"]
+                ),
             },
             ensure_ascii=True,
             sort_keys=True,

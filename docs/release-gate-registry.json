@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Release-gate AK/AL registry single source of truth for CI strict flags and P0 runbook contract expectations.",
+  "description": "Release-gate AK/AL/AM registry single source of truth for CI strict flags, P0 runbook contracts, and P0 schema/bundle defaults.",
   "release_gate_ci": {
     "strict_flags": [
       "StrictA11yTestHarnessCheck",
@@ -376,5 +376,18 @@
       "metrics.production_sustainability_burnin_threshold_failed=0",
       "metrics.production_sustainability_closure_signal_failed=0"
     ]
+  },
+  "p0_report_schema_contract": {
+    "required_top_level_keys": [
+      "label",
+      "success"
+    ],
+    "required_decision_keys": [],
+    "required_label": "release-gate",
+    "required_files": []
+  },
+  "p0_release_evidence_bundle": {
+    "required_label": "release-gate",
+    "required_files": []
   }
 }
