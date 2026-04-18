@@ -5,6 +5,7 @@ param(
     [int]$LookbackHours = 30,
     [int]$PerPage = 50,
     [string]$FixturesFile = "",
+    [string]$ContractWorkflowFiles = "",
     [string]$OutputFile = "artifacts\\master-guard-workflow-health-check.json",
     [switch]$AllowDegraded
 )
@@ -25,6 +26,9 @@ $args = @(
 )
 if ($FixturesFile) {
     $args += @("--fixtures-file", $FixturesFile)
+}
+if ($ContractWorkflowFiles) {
+    $args += @("--contract-workflow-files", $ContractWorkflowFiles)
 }
 if ($AllowDegraded) {
     $args += "--allow-degraded"

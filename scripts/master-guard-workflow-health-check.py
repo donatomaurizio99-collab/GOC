@@ -12,10 +12,12 @@ from typing import Any
 
 DEFAULT_GUARD_WORKFLOW_SPECS = [
     {
+        "workflow_file": "master-required-checks-24h.yml",
         "workflow_name": "Master Required Checks 24h",
         "required_artifacts": ["master-required-checks-24h-report"],
     },
     {
+        "workflow_file": "master-branch-protection-drift-guard.yml",
         "workflow_name": "Master Branch Protection Drift Guard",
         "required_artifacts": [
             "master-branch-protection-drift-guard",
@@ -23,6 +25,7 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
         ],
     },
     {
+        "workflow_file": "master-release-gate-runtime-early-warning.yml",
         "workflow_name": "Master Release Gate Runtime Early Warning",
         "required_artifacts": [
             "release-gate-runtime-early-warning",
@@ -30,7 +33,22 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
             "release-gate-runtime-alert-age-slo-issue-upsert",
         ],
     },
+    {
+        "workflow_file": "master-guard-workflow-health.yml",
+        "workflow_name": "Master Guard Workflow Health",
+        "required_artifacts": [
+            "master-guard-workflow-health-check",
+            "master-guard-workflow-health-issue-upsert",
+        ],
+    },
 ]
+
+GUARD_WORKFLOW_DISCOVERY_TOKENS = (
+    "guard",
+    "warning",
+    "required-checks",
+    "workflow-health",
+)
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -55,6 +73,113 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     _expect(isinstance(payload, dict), f"Expected JSON object in file: {path}")
     return payload
+
+
+def _parse_contract_workflow_files(text: str) -> list[str]:
+    items = [str(item).strip() for item in str(text or "").split(",") if str(item).strip()]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def _discover_relevant_master_guard_workflow_files(*, project_root: Path) -> list[str]:
+    workflows_dir = project_root / ".github" / "workflows"
+    if not workflows_dir.exists():
+        return []
+    discovered: list[str] = []
+    for path in sorted(workflows_dir.glob("master-*.yml")):
+        filename = path.name
+        lower = filename.lower()
+        if any(token in lower for token in GUARD_WORKFLOW_DISCOVERY_TOKENS):
+            discovered.append(filename)
+    return discovered
+
+
+def _parse_workflow_name_from_file(path: Path) -> str:
+    if not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("name:"):
+            continue
+        return stripped.split("name:", 1)[1].strip()
+    return ""
+
+
+def _evaluate_workflow_coverage_contract(
+    *,
+    project_root: Path,
+    contract_workflow_files: list[str] | None,
+) -> dict[str, Any]:
+    coverage_files = (
+        list(contract_workflow_files)
+        if contract_workflow_files is not None
+        else _discover_relevant_master_guard_workflow_files(project_root=project_root)
+    )
+    specs_by_file: dict[str, dict[str, Any]] = {}
+    duplicate_spec_files: list[str] = []
+    for spec in DEFAULT_GUARD_WORKFLOW_SPECS:
+        workflow_file = str(spec.get("workflow_file") or "").strip()
+        if not workflow_file:
+            continue
+        if workflow_file in specs_by_file:
+            duplicate_spec_files.append(workflow_file)
+            continue
+        specs_by_file[workflow_file] = spec
+
+    spec_files = sorted(specs_by_file.keys())
+    coverage_set = set(coverage_files)
+    spec_set = set(spec_files)
+
+    uncovered_guard_workflow_files = sorted(coverage_set - spec_set)
+    stale_spec_guard_workflow_files = sorted(spec_set - coverage_set)
+
+    workflows_dir = project_root / ".github" / "workflows"
+    missing_coverage_files_on_disk = sorted(
+        file_name for file_name in coverage_files if not (workflows_dir / file_name).exists()
+    )
+    missing_spec_files_on_disk = sorted(
+        file_name for file_name in spec_files if not (workflows_dir / file_name).exists()
+    )
+
+    workflow_name_mismatches: list[dict[str, str]] = []
+    for workflow_file, spec in specs_by_file.items():
+        expected_workflow_name = str(spec.get("workflow_name") or "")
+        if not expected_workflow_name:
+            continue
+        parsed_name = _parse_workflow_name_from_file(workflows_dir / workflow_file)
+        if parsed_name and parsed_name != expected_workflow_name:
+            workflow_name_mismatches.append(
+                {
+                    "workflow_file": workflow_file,
+                    "expected_workflow_name": expected_workflow_name,
+                    "observed_workflow_name": parsed_name,
+                }
+            )
+
+    coverage_contract_ok = bool(
+        len(uncovered_guard_workflow_files) == 0
+        and len(duplicate_spec_files) == 0
+        and len(missing_coverage_files_on_disk) == 0
+        and len(missing_spec_files_on_disk) == 0
+        and len(workflow_name_mismatches) == 0
+    )
+    return {
+        "coverage_files": coverage_files,
+        "spec_files": spec_files,
+        "uncovered_guard_workflow_files": uncovered_guard_workflow_files,
+        "stale_spec_guard_workflow_files": stale_spec_guard_workflow_files,
+        "duplicate_spec_files": sorted(duplicate_spec_files),
+        "missing_coverage_files_on_disk": missing_coverage_files_on_disk,
+        "missing_spec_files_on_disk": missing_spec_files_on_disk,
+        "workflow_name_mismatches": workflow_name_mismatches,
+        "coverage_contract_ok": coverage_contract_ok,
+    }
 
 
 def _parse_utc_timestamp(value: str) -> datetime | None:
@@ -260,6 +385,7 @@ def run_guard_workflow_health_check(
     lookback_hours: int,
     per_page: int,
     fixtures_file: Path | None,
+    contract_workflow_files: list[str] | None,
     now_utc: datetime,
     allow_degraded: bool,
     output_file: Path,
@@ -270,6 +396,11 @@ def run_guard_workflow_health_check(
     started = time.perf_counter()
     cutoff_utc = now_utc - timedelta(hours=lookback_hours)
     fixtures_payload = _load_json_file(fixtures_file) if fixtures_file is not None else None
+    project_root = Path(__file__).resolve().parents[1]
+    coverage_contract = _evaluate_workflow_coverage_contract(
+        project_root=project_root,
+        contract_workflow_files=contract_workflow_files,
+    )
 
     def load_runs_for_workflow(workflow_name: str) -> list[dict[str, Any]]:
         if fixtures_payload is not None:
@@ -323,6 +454,15 @@ def run_guard_workflow_health_check(
 
     criteria = [
         {
+            "name": "guard_workflow_coverage_contract",
+            "passed": bool(coverage_contract.get("coverage_contract_ok") or allow_degraded),
+            "details": (
+                f"uncovered_total={len(coverage_contract.get('uncovered_guard_workflow_files') or [])}, "
+                f"name_mismatch_total={len(coverage_contract.get('workflow_name_mismatches') or [])}, "
+                f"allow_degraded={allow_degraded}"
+            ),
+        },
+        {
             "name": "guard_workflows_evaluated",
             "passed": bool(len(evaluations) > 0),
             "details": f"guard_workflows_total={len(evaluations)}",
@@ -351,6 +491,10 @@ def run_guard_workflow_health_check(
             "now_utc": _format_utc(now_utc),
             "cutoff_utc": _format_utc(cutoff_utc),
             "fixtures_file": str(fixtures_file) if fixtures_file is not None else None,
+            "coverage_contract_files_source": (
+                "override" if contract_workflow_files is not None else "discovered"
+            ),
+            "coverage_contract_files": coverage_contract.get("coverage_files") or [],
             "guard_workflow_names": [str(item["workflow_name"]) for item in DEFAULT_GUARD_WORKFLOW_SPECS],
             "output_file": str(output_file),
         },
@@ -364,18 +508,37 @@ def run_guard_workflow_health_check(
             "missing_required_artifacts_total": int(missing_required_artifacts_total),
             "runs_outside_window_ignored_total": int(aggregate_runs_outside_window_ignored_total),
             "runs_with_invalid_updated_at_total": int(aggregate_runs_with_invalid_updated_at_total),
+            "coverage_contract_guard_workflow_files_total": int(len(coverage_contract.get("coverage_files") or [])),
+            "coverage_contract_uncovered_files_total": int(
+                len(coverage_contract.get("uncovered_guard_workflow_files") or [])
+            ),
+            "coverage_contract_stale_spec_files_total": int(
+                len(coverage_contract.get("stale_spec_guard_workflow_files") or [])
+            ),
+            "coverage_contract_duplicate_spec_files_total": int(
+                len(coverage_contract.get("duplicate_spec_files") or [])
+            ),
+            "coverage_contract_missing_files_on_disk_total": int(
+                len(coverage_contract.get("missing_coverage_files_on_disk") or [])
+                + len(coverage_contract.get("missing_spec_files_on_disk") or [])
+            ),
+            "coverage_contract_name_mismatches_total": int(
+                len(coverage_contract.get("workflow_name_mismatches") or [])
+            ),
             "criteria_failed": int(len(failed_criteria)),
         },
         "criteria": criteria,
         "failed_criteria": failed_criteria,
+        "coverage_contract": coverage_contract,
         "evaluations": evaluations,
         "degraded_workflows": degraded_workflows,
         "degraded_workflow_names": degraded_workflow_names,
         "decision": {
             "guard_workflow_health_degraded": bool(len(degraded_workflows) > 0),
+            "guard_workflow_coverage_contract_ok": bool(coverage_contract.get("coverage_contract_ok")),
             "recommended_action": (
                 "guard_workflow_health_green"
-                if len(degraded_workflows) == 0
+                if len(degraded_workflows) == 0 and bool(coverage_contract.get("coverage_contract_ok"))
                 else "guard_workflow_health_degraded"
             ),
         },
@@ -404,6 +567,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lookback-hours", type=int, default=30)
     parser.add_argument("--per-page", type=int, default=50)
     parser.add_argument("--fixtures-file")
+    parser.add_argument(
+        "--contract-workflow-files",
+        help=(
+            "Optional comma-separated override for relevant guard workflow files. "
+            "Defaults to auto-discovery over master-* guard/warning/required-checks/workflow-health files."
+        ),
+    )
     parser.add_argument("--now-utc")
     parser.add_argument("--allow-degraded", action="store_true")
     parser.add_argument("--output-file", default="artifacts/master-guard-workflow-health-check.json")
@@ -417,6 +587,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     fixtures_file = Path(str(args.fixtures_file)).expanduser() if args.fixtures_file else None
+    contract_workflow_files = (
+        _parse_contract_workflow_files(str(args.contract_workflow_files))
+        if args.contract_workflow_files
+        else None
+    )
     output_file = Path(str(args.output_file)).expanduser()
     try:
         report = run_guard_workflow_health_check(
@@ -426,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
             lookback_hours=int(args.lookback_hours),
             per_page=int(args.per_page),
             fixtures_file=fixtures_file,
+            contract_workflow_files=contract_workflow_files,
             now_utc=_resolve_now_utc(args.now_utc),
             allow_degraded=bool(args.allow_degraded),
             output_file=output_file,
