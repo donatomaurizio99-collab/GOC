@@ -175,6 +175,64 @@ def _coerce_issue_list(payload: Any) -> list[dict[str, Any]]:
     return issues
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    coerced: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            coerced.append(text)
+    return coerced
+
+
+def _resolve_guard_workflow_run_url(*, repo: str, latest_run: dict[str, Any]) -> str:
+    direct_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
+    if direct_url:
+        return direct_url
+
+    run_id = int(latest_run.get("run_id") or 0)
+    if run_id <= 0:
+        return ""
+    return f"https://github.com/{repo}/actions/runs/{run_id}"
+
+
+def _format_guard_workflow_degraded_detail_lines(
+    *,
+    repo: str,
+    degraded_workflows: list[dict[str, Any]],
+) -> list[str]:
+    detail_lines: list[str] = []
+    for workflow in degraded_workflows:
+        workflow_name = str(workflow.get("workflow_name") or "").strip() or "unknown_workflow"
+        degraded_reasons = _coerce_string_list(workflow.get("degraded_reasons"))
+        missing_required_artifacts = _coerce_string_list(workflow.get("missing_required_artifacts"))
+        latest_run = workflow.get("latest_run") if isinstance(workflow.get("latest_run"), dict) else {}
+        run_id = int(latest_run.get("run_id") or 0)
+        run_url = _resolve_guard_workflow_run_url(repo=repo, latest_run=latest_run)
+
+        reasons_text = ", ".join(degraded_reasons) if degraded_reasons else "none"
+        missing_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
+        if run_id > 0 and run_url:
+            latest_run_text = f"#{run_id} ({run_url})"
+        elif run_id > 0:
+            latest_run_text = f"#{run_id}"
+        elif run_url:
+            latest_run_text = run_url
+        else:
+            latest_run_text = "none"
+
+        detail_lines.append(
+            (
+                f"- Degraded detail: {workflow_name} | "
+                f"reasons={reasons_text} | "
+                f"missing_required_artifacts={missing_text} | "
+                f"latest_run={latest_run_text}"
+            )
+        )
+    return detail_lines
+
+
 def _load_issues(*, repo: str, state: str, issues_file: Path | None, dry_run: bool) -> list[dict[str, Any]]:
     resolved_state = str(state or "open").strip().lower()
     _expect(resolved_state in {"open", "all"}, f"Unsupported issue state: {state}")
@@ -224,8 +282,15 @@ def _signal_alert_state(
         degraded_workflows = (
             report.get("degraded_workflow_names") if isinstance(report.get("degraded_workflow_names"), list) else []
         )
+        degraded_workflow_details = (
+            report.get("degraded_workflows") if isinstance(report.get("degraded_workflows"), list) else []
+        )
         missing_required_artifacts_total = int(metrics.get("missing_required_artifacts_total") or 0)
         alert_triggered = bool(decision.get("guard_workflow_health_degraded"))
+        degraded_detail_lines = _format_guard_workflow_degraded_detail_lines(
+            repo=repo,
+            degraded_workflows=[item for item in degraded_workflow_details if isinstance(item, dict)],
+        )
         summary = [
             (
                 f"- Degraded guard workflows: {', '.join(str(item) for item in degraded_workflows)}"
@@ -238,6 +303,7 @@ def _signal_alert_state(
                 f"(total={metrics.get('guard_workflows_total', 0)})"
             ),
             f"- Missing required artifacts total: {missing_required_artifacts_total}",
+            *degraded_detail_lines,
             f"- Recommended action: {decision.get('recommended_action') or 'guard_workflow_health_green'}",
         ]
         return alert_triggered, summary, branch, {}

@@ -12342,6 +12342,7 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert "[master-guard-workflow-health.yml]" in readme
     assert "guard-workflow health watchdog" in readme
     assert "coverage contract" in readme
+    assert "per-degraded-workflow diagnostics" in readme
     assert "run-master-guard-workflow-health-check.ps1" in readme
 
 
@@ -12364,6 +12365,22 @@ def test_242_ci_alert_issue_upsert_creates_issue_for_guard_workflow_health():
                     "missing_required_artifacts_total": 2,
                 },
                 "degraded_workflow_names": ["Master Branch Protection Drift Guard"],
+                "degraded_workflows": [
+                    {
+                        "workflow_name": "Master Branch Protection Drift Guard",
+                        "degraded_reasons": [
+                            "latest_run_not_success",
+                            "required_artifacts_missing",
+                        ],
+                        "missing_required_artifacts": [
+                            "master-branch-protection-drift-issue-upsert",
+                            "master-branch-protection-drift-guard",
+                        ],
+                        "latest_run": {
+                            "run_id": 9302,
+                        },
+                    }
+                ],
                 "decision": {
                     "guard_workflow_health_degraded": True,
                     "recommended_action": "guard_workflow_health_degraded",
@@ -12416,6 +12433,14 @@ def test_242_ci_alert_issue_upsert_creates_issue_for_guard_workflow_health():
     assert len(issue_oplog["actions"]) == 1
     assert issue_oplog["actions"][0]["action"] == "create_issue"
     assert issue_oplog["actions"][0]["labels"] == ["ci-drift", "guard-workflow-health"]
+    created_body = str(issue_oplog["actions"][0]["body"])
+    assert "Degraded detail: Master Branch Protection Drift Guard" in created_body
+    assert "reasons=latest_run_not_success, required_artifacts_missing" in created_body
+    assert (
+        "missing_required_artifacts="
+        "master-branch-protection-drift-issue-upsert, master-branch-protection-drift-guard"
+    ) in created_body
+    assert "latest_run=#9302 (https://github.com/donatomaurizio99-collab/GOC/actions/runs/9302)" in created_body
 
     shutil.rmtree(workspace, ignore_errors=True)
 
