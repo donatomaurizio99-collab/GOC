@@ -10599,3 +10599,34 @@ def test_219_ci_workflow_dedupes_pr_checks_by_avoiding_codex_push_trigger():
 
     assert _event_branches("push") == ["master"]
     assert _event_branches("pull_request") == ["master"]
+
+
+def test_220_release_gate_performance_budget_policy_hardens_burnin_runtime_baseline():
+    project_root = Path(__file__).resolve().parents[1]
+    policy = json.loads(
+        (project_root / "docs" / "release-gate-performance-budget-policy.json").read_text(encoding="utf-8")
+    )
+    burnin_step = next(
+        item
+        for item in policy["steps"]
+        if item.get("name") == "P0 burn-in consecutive-green monitor (CI history hard gate)"
+    )
+    assert float(burnin_step["baseline_duration_seconds"]) >= 180.0
+    assert float(burnin_step["max_duration_seconds"]) >= 600.0
+
+
+def test_221_release_gate_refreshes_manifest_before_stage_s_lineage_check():
+    project_root = Path(__file__).resolve().parents[1]
+    release_gate = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+
+    refresh_marker = "Release-gate evidence hash manifest refresh (Stage S lineage coherence)"
+    lineage_marker = "Release-gate evidence lineage check (Stage S timestamp + manifest coherence gate)"
+    refresh_index = release_gate.find(refresh_marker)
+    lineage_index = release_gate.find(lineage_marker)
+    assert refresh_index >= 0
+    assert lineage_index >= 0
+    assert refresh_index < lineage_index
+    assert release_gate.count(".\\scripts\\release-gate-evidence-hash-manifest-check.py") >= 2
+    assert "artifacts\\release-gate-stability-final-readiness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-staging-soak-readiness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-rc-canary-rollout-release-gate.json" in release_gate
