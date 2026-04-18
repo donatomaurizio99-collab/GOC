@@ -5542,7 +5542,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
 
     assert "Verify release-gate registry sync" in ci_workflow
     assert (
-        'python .\\scripts\\release-gate-registry-sync.py --output-file '
+        '.\\scripts\\run-release-gate-registry-sync.ps1 -OutputFile '
         '"artifacts/release-gate-registry-sync-ci.json"'
     ) in ci_workflow
     assert "release_gate_ci" in registry
@@ -5819,6 +5819,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-registry-sync.py" in registry_sync_script
     assert "release_evidence_artifact_paths" in registry_sync_script
     assert 'parser.add_argument("--lock-file", default="docs/release-gate-registry.lock.json")' in registry_sync_script
+    assert 'parser.add_argument("--registry-sync-wrapper-file", default="scripts/run-release-gate-registry-sync.ps1")' in registry_sync_script
     assert 'parser.add_argument("--output-file")' in registry_sync_script
     assert "_update_registry_sync_command_line" in registry_sync_script
     assert "build_registry_lock_payload" in registry_sync_script
@@ -9707,6 +9708,7 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["release_gate_registry_argument_occurrences"] >= 2
     assert payload["schema_wrapper_registry_argument_occurrences"] >= 1
     assert payload["bundle_wrapper_registry_argument_occurrences"] >= 1
+    assert payload["registry_sync_wrapper_output_file_argument_occurrences"] >= 1
 
 
 def test_202_p0_report_schema_contract_uses_registry_required_label_default():

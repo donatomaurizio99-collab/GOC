@@ -926,7 +926,7 @@ python .\scripts\release-gate-registry-sync.py
 ```
 CI report command (writes an auditable sync report artifact):
 ```powershell
-python .\scripts\release-gate-registry-sync.py --output-file artifacts/release-gate-registry-sync-ci.json
+.\scripts\run-release-gate-registry-sync.ps1 -OutputFile artifacts\release-gate-registry-sync-ci.json
 ```
 Write/sync command:
 ```powershell
