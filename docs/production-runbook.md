@@ -522,6 +522,7 @@ Manual release-gate registry sync check + JSON report artifact:
 (Also verifies registry wiring in `scripts\release-gate.ps1`, `run-p0-report-schema-contract-check.ps1`, and `run-p0-release-evidence-bundle.ps1`.)
 (Also enforces registry cross-contract consistency for P0 required labels and CI artifact coverage.)
 (Also enforces strict-flag parity between registry `release_gate_ci.strict_flags` and release-gate `[switch]$Strict*` declarations.)
+(Also enforces that each declared release-gate strict switch has runtime usage beyond its declaration.)
 
 Manual release-gate registry + lockfile write/sync invocation:
 

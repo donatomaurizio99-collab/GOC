@@ -5824,6 +5824,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "_update_registry_sync_command_line" in registry_sync_script
     assert "_extract_release_gate_strict_switches" in registry_sync_script
     assert "strict switches missing from registry strict_flags" in registry_sync_script
+    assert "declared strict switches without runtime usage in release-gate" in registry_sync_script
     assert "build_registry_lock_payload" in registry_sync_script
     assert "registry lock file" in registry_sync_script
     assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in runbook_contract_wrapper
@@ -9715,6 +9716,7 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["registry_strict_flags_declared_total"] >= 1
     assert payload["strict_flags_missing_in_release_gate_total"] == 0
     assert payload["strict_switches_missing_in_registry_total"] == 0
+    assert payload["declared_strict_switches_without_runtime_usage_total"] == 0
 
 
 def test_202_p0_report_schema_contract_uses_registry_required_label_default():
@@ -10145,5 +10147,40 @@ def test_211_release_gate_registry_sync_fails_when_release_gate_strict_switch_is
     )
     assert completed.returncode != 0
     assert "release-gate strict switches missing from registry strict_flags" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_212_release_gate_registry_sync_fails_when_release_gate_strict_switch_has_no_runtime_usage():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-strict-switch-no-runtime-usage").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    release_gate_file = workspace / "release-gate.ps1"
+    release_gate_text = (project_root / "scripts" / "release-gate.ps1").read_text(encoding="utf-8")
+
+    needle = "$StrictWorkflowWorkerRestartDrill"
+    declaration_index = release_gate_text.find(needle)
+    assert declaration_index >= 0
+    release_gate_without_runtime_usage = (
+        release_gate_text[: declaration_index + len(needle)]
+        + release_gate_text[declaration_index + len(needle) :].replace(needle, "$WorkflowWorkerRestartDrill")
+    )
+    release_gate_file.write_text(release_gate_without_runtime_usage, encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--release-gate-file",
+        str(release_gate_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "declared strict switches without runtime usage in release-gate" in completed.stderr
 
     shutil.rmtree(workspace, ignore_errors=True)
