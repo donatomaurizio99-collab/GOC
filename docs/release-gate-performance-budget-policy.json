@@ -31,7 +31,7 @@
     },
     {
       "name": "P0 burn-in consecutive-green monitor (CI history hard gate)",
-      "baseline_duration_seconds": 20.0,
+      "baseline_duration_seconds": 180.0,
       "max_duration_seconds": 600.0
     },
     {

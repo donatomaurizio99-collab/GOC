@@ -1756,6 +1756,37 @@ if (-not $SkipReleaseGateRcCanaryRolloutCheck) {
     }
 }
 
+if (-not $SkipReleaseGateEvidenceHashManifestCheck) {
+    Invoke-GateStep -Name "Release-gate evidence hash manifest refresh (Stage S lineage coherence)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-hash-manifest-release-gate.json"
+        $manifestPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-manifest-release-gate.json"
+        $requiredFiles = @(
+            (Join-Path $ProjectRoot "artifacts\release-gate-stability-final-readiness-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-staging-soak-readiness-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\release-gate-rc-canary-rollout-release-gate.json"),
+            (Join-Path $ProjectRoot "artifacts\p0-closure-report-release-gate.json")
+        )
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-evidence-hash-manifest-check.py",
+                "--label", "release-gate",
+                "--required-files", ($requiredFiles -join ","),
+                "--required-label", "release-gate",
+                "--output-file", $reportPath,
+                "--manifest-file", $manifestPath
+            )
+        } catch {
+            if ($StrictReleaseGateEvidenceHashManifestCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate evidence hash manifest refresh failed but StrictReleaseGateEvidenceHashManifestCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
 if (-not $SkipReleaseGateEvidenceLineageCheck) {
     Invoke-GateStep -Name "Release-gate evidence lineage check (Stage S timestamp + manifest coherence gate)" -Action {
         $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-lineage-release-gate.json"
