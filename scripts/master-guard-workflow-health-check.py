@@ -78,7 +78,7 @@ def _run_gh_api(path: str) -> dict[str, Any]:
 
 def _load_json_file(path: Path) -> dict[str, Any]:
     _expect(path.exists(), f"JSON file not found: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     _expect(isinstance(payload, dict), f"Expected JSON object in file: {path}")
     return payload
 
@@ -111,7 +111,7 @@ def _discover_relevant_master_guard_workflow_files(*, project_root: Path) -> lis
 def _parse_workflow_name_from_file(path: Path) -> str:
     if not path.exists():
         return ""
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
         if not stripped.startswith("name:"):
             continue

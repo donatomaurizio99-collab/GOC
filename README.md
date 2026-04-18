@@ -949,10 +949,12 @@ Nightly guard-workflow health watchdog now verifies that the guard workflows the
 It also enforces a coverage contract so all relevant `master-*` guard/warning/required-checks workflow files are declared in the watchdog with expected artifact contracts.
 Guard-health issue summaries now include per-degraded-workflow diagnostics (reason(s), missing required artifacts, and latest run ID/URL) so on-call can triage directly from the issue.
 Guard-health issue body/comments now include a dedicated `Immediate Actions` section with direct first-response steps and a local repro command.
+Nightly guard workflows now execute `run-master-guard-chain-selftest.ps1` to validate guard-report -> issue-upsert chain consistency and publish dedicated selftest artifacts.
 Weekly [master-watchdog-rehearsal-drill.yml](.github/workflows/master-watchdog-rehearsal-drill.yml) runs an injected-failure drill for the watchdog chain and verifies guard-health alert upsert behavior in dry-run mode.
 Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watchdog-rehearsal-slo-guard.yml) verifies the rehearsal drill SLO (>=1 successful run in 8 days) and raises a deduped `ci-drift` issue with explicit `stale`/`failed` reason plus latest run reference.
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
 Nightly drift/warning workflows now upsert deduplicated GitHub issues (labels: `ci-drift` + signal label), enforce the invariant of at most one open issue per signal, reset recovery streak on active alerts, and auto-close recovered issues after 2 healthy nightly runs (configurable threshold). Active-alert comments are cooldown-throttled for unchanged failure states (default every 3 runs), while issue bodies continue to refresh each run. The runtime alert-age SLO escalation issue now carries a mandatory parent runtime-warning reference in its issue body and closes immediately when parent-coupled escalation criteria are no longer met.
+Weekly [master-reliability-digest.yml](.github/workflows/master-reliability-digest.yml) publishes a trend digest (Release Gate runtime, guard degradations, active-comment suppression totals) as artifact + workflow summary for proactive reliability tracking.
 
 Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report), Stage-L/M evidence artifacts (`release-gate-evidence-freshness-release-gate.json`, `release-gate-evidence-hash-manifest-release-gate.json`, `release-gate-evidence-manifest-release-gate.json`), Stage-N/O timing-history artifacts (`release-gate-step-timing-schema-release-gate.json`, `release-gate-performance-history-release-gate.json`), Stage-K/P artifacts (`release-gate-step-timings-release-gate.json`, `release-gate-performance-budget-release-gate.json`, `release-gate-stability-final-readiness-release-gate.json`), Stage-Q/R readiness artifacts (`release-gate-staging-soak-readiness-release-gate.json`, `release-gate-rc-canary-rollout-release-gate.json`), Stage-S/T readiness artifacts (`release-gate-evidence-lineage-release-gate.json`, `release-gate-production-readiness-certification-release-gate.json`), Stage-U/AB expanded readiness artifacts (`release-gate-slo-burn-rate-v2-release-gate.json`, `release-gate-deploy-rehearsal-release-gate.json`, `release-gate-chaos-matrix-continuous-release-gate.json`, `release-gate-supply-chain-artifact-trust-release-gate.json`, `release-gate-operations-handoff-readiness-release-gate.json`, `release-gate-evidence-attestation-release-gate.json`, `release-gate-release-train-readiness-release-gate.json`, `release-gate-production-final-attestation-release-gate.json`), Stage-AC/AJ cutover-to-sustainability artifacts (`release-gate-production-cutover-readiness-release-gate.json`, `release-gate-hypercare-activation-release-gate.json`, `release-gate-rollback-trigger-integrity-release-gate.json`, `release-gate-post-cutover-finalization-release-gate.json`, `release-gate-post-release-watch-release-gate.json`, `release-gate-steady-state-certification-release-gate.json`, `release-gate-post-release-continuity-release-gate.json`, `release-gate-production-sustainability-certification-release-gate.json`), and registry attestation artifacts (`release-gate-registry-sync-ci.json`, `release-gate-registry-attestation-gate-ci.json`).
 
@@ -979,6 +981,9 @@ Nightly guard-workflow health watchdog:
 
 Nightly release-gate runtime early warning workflow:
 [master-release-gate-runtime-early-warning.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-release-gate-runtime-early-warning.yml)
+
+Weekly master reliability digest workflow:
+[master-reliability-digest.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-reliability-digest.yml)
 
 Nightly disaster-recovery rehearsal workflow:
 [disaster-recovery-rehearsal.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/disaster-recovery-rehearsal.yml)
@@ -1010,11 +1015,25 @@ Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-master-guard-workflow-health-check.ps1 -LookbackHours 30 -PerPage 50
 ```
 
+Local guard-chain selftest command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-guard-chain-selftest.ps1 -SignalId master-guard-workflow-health -GuardReportFile artifacts\master-guard-workflow-health-check.json -IssueUpsertReportFile artifacts\master-guard-workflow-health-issue-upsert.json
+```
+
 Local release-gate runtime early warning command:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-release-gate-runtime-early-warning.ps1 -ThresholdSeconds 540 -SustainedRuns 3
+```
+
+Local master reliability digest command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-reliability-digest.ps1 -ReleaseGateWarningSeconds 540 -WarningSustainedRuns 3
 ```
 
 Local alert-to-action issue upsert command (dry run example):

@@ -84,6 +84,16 @@ jobs:
             -ActiveCommentCooldown "$env:ACTIVE_COMMENT_COOLDOWN" `
             -OutputFile "artifacts\master-watchdog-rehearsal-slo-guard-issue-upsert.json"
 
+      - name: Run watchdog rehearsal SLO guard chain selftest
+        if: always()
+        shell: pwsh
+        run: |
+          .\scripts\run-master-guard-chain-selftest.ps1 `
+            -SignalId "master-watchdog-rehearsal-drill-slo" `
+            -GuardReportFile "artifacts\master-watchdog-rehearsal-slo-guard.json" `
+            -IssueUpsertReportFile "artifacts\master-watchdog-rehearsal-slo-guard-issue-upsert.json" `
+            -OutputFile "artifacts\master-watchdog-rehearsal-slo-guard-selftest.json"
+
       - name: Upload watchdog rehearsal SLO guard report
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,4 +108,12 @@ jobs:
         with:
           name: master-watchdog-rehearsal-slo-guard-issue-upsert
           path: artifacts/master-watchdog-rehearsal-slo-guard-issue-upsert.json
+          if-no-files-found: error
+
+      - name: Upload watchdog rehearsal SLO guard chain selftest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-watchdog-rehearsal-slo-guard-selftest
+          path: artifacts/master-watchdog-rehearsal-slo-guard-selftest.json
           if-no-files-found: error

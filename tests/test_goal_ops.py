@@ -12460,6 +12460,7 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     wrapper = (project_root / "scripts" / "run-master-guard-workflow-health-check.ps1").read_text(
         encoding="utf-8"
     )
+    selftest_wrapper = (project_root / "scripts" / "run-master-guard-chain-selftest.ps1").read_text(encoding="utf-8")
     readme = (project_root / "README.md").read_text(encoding="utf-8")
 
     assert "name: Master Guard Workflow Health" in workflow
@@ -12467,7 +12468,10 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert ".\\scripts\\run-master-guard-workflow-health-check.ps1" in workflow
     assert "master-guard-workflow-health-check.json" in workflow
     assert "master-guard-workflow-health-issue-upsert.json" in workflow
+    assert "master-guard-workflow-health-selftest.json" in workflow
     assert "master-guard-workflow-health" in workflow
+    assert "active_comment_cooldown" in workflow
+    assert ".\\scripts\\run-master-guard-chain-selftest.ps1" in workflow
 
     assert "--lookback-hours" in wrapper
     assert "--per-page" in wrapper
@@ -12475,12 +12479,17 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert "--fixtures-file" in wrapper
     assert "--contract-workflow-files" in wrapper
     assert "master-guard-workflow-health-check.py" in wrapper
+    assert "master-guard-chain-selftest.py" in selftest_wrapper
+    assert "--signal-id" in selftest_wrapper
+    assert "--guard-report-file" in selftest_wrapper
+    assert "--issue-upsert-report-file" in selftest_wrapper
 
     assert "[master-guard-workflow-health.yml]" in readme
     assert "guard-workflow health watchdog" in readme
     assert "coverage contract" in readme
     assert "per-degraded-workflow diagnostics" in readme
     assert "master-watchdog-rehearsal-slo-guard.yml" in readme
+    assert "run-master-guard-chain-selftest.ps1" in readme
     assert "run-master-guard-workflow-health-check.ps1" in readme
 
 
@@ -12888,6 +12897,8 @@ def test_246_master_watchdog_rehearsal_slo_guard_workflow_wrapper_and_docs_wirin
     assert ".\\scripts\\run-master-watchdog-rehearsal-slo-guard.ps1" in workflow
     assert "master-watchdog-rehearsal-slo-guard.json" in workflow
     assert "master-watchdog-rehearsal-slo-guard-issue-upsert.json" in workflow
+    assert "master-watchdog-rehearsal-slo-guard-selftest.json" in workflow
+    assert ".\\scripts\\run-master-guard-chain-selftest.ps1" in workflow
     assert "master-watchdog-rehearsal-drill-slo" in workflow
 
     assert "master-watchdog-rehearsal-slo-guard.py" in wrapper
@@ -12898,6 +12909,7 @@ def test_246_master_watchdog_rehearsal_slo_guard_workflow_wrapper_and_docs_wirin
     assert "AllowBreach" in wrapper
 
     assert "master-watchdog-rehearsal-slo-guard.yml" in readme
+    assert "master-reliability-digest.yml" in readme
     assert "stale`/`failed` reason" in readme
 
 
@@ -13017,5 +13029,387 @@ def test_248_master_watchdog_rehearsal_slo_guard_detects_failed_breach():
     assert payload["decision"]["watchdog_rehearsal_slo_breached"] is True
     assert payload["decision"]["breach_reason"] == "failed"
     assert payload["latest_run"]["run_id"] == 771002
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_248b_master_watchdog_rehearsal_slo_guard_accepts_bom_runs_fixture():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-slo-guard-bom").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs-bom.json"
+
+    payload_text = json.dumps(
+        {
+            "workflow_runs": [
+                {
+                    "id": 771003,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "updated_at": "2026-04-18T11:00:00Z",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771003",
+                }
+            ]
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+    runs_file.write_bytes(("\ufeff" + payload_text).encode("utf-8"))
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-slo-guard.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-slo-guard-bom",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Watchdog Rehearsal Drill",
+        "--max-age-hours",
+        "192",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--now-utc",
+        "2026-04-18T12:00:00Z",
+        "--output-file",
+        str((workspace / "master-watchdog-rehearsal-slo-guard.json").resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    parsed = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert parsed["success"] is True
+    assert parsed["decision"]["watchdog_rehearsal_slo_breached"] is False
+    assert parsed["latest_run"]["run_id"] == 771003
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_249_master_guard_chain_selftest_verifies_signal_chain():
+    workspace = _local_test_dir("pytest-master-guard-chain-selftest").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    guard_report_file = workspace / "master-guard-workflow-health-check.json"
+    issue_upsert_report_file = workspace / "master-guard-workflow-health-issue-upsert.json"
+    output_file = workspace / "master-guard-workflow-health-selftest.json"
+
+    guard_report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-guard-health",
+                "decision": {
+                    "guard_workflow_health_degraded": True,
+                    "recommended_action": "guard_workflow_health_degraded",
+                },
+                "generated_at_utc": "2026-04-18T04:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issue_upsert_report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-guard-health-upsert",
+                "success": True,
+                "config": {
+                    "signal_id": "master-guard-workflow-health",
+                    "report_file": str(guard_report_file.resolve()),
+                },
+                "metrics": {
+                    "immediate_action_lines_total": 3,
+                    "active_comment_suppressed_total": 1,
+                },
+                "decision": {
+                    "alert_triggered": True,
+                    "issue_action": "commented",
+                },
+                "actions": [
+                    {
+                        "action": "comment_issue",
+                        "issue_number": 123,
+                    }
+                ],
+                "generated_at_utc": "2026-04-18T04:05:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-chain-selftest.py"),
+        "--label",
+        "pytest-master-guard-chain-selftest",
+        "--signal-id",
+        "master-guard-workflow-health",
+        "--guard-report-file",
+        str(guard_report_file.resolve()),
+        "--issue-upsert-report-file",
+        str(issue_upsert_report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["signal_chain_consistent"] is True
+    assert payload["decision"]["expected_alert_triggered"] is True
+    assert payload["decision"]["issue_alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "commented"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_250_master_reliability_digest_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-reliability-digest.yml").read_text(encoding="utf-8")
+    wrapper = (project_root / "scripts" / "run-master-reliability-digest.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Reliability Digest" in workflow
+    assert 'cron: "20 6 * * 1"' in workflow
+    assert ".\\scripts\\run-master-reliability-digest.ps1" in workflow
+    assert "master-reliability-digest.json" in workflow
+    assert "master-reliability-digest.md" in workflow
+    assert "master-reliability-digest" in workflow
+
+    assert "master-reliability-digest.py" in wrapper
+    assert "--release-gate-warning-seconds" in wrapper
+    assert "--warning-sustained-runs" in wrapper
+    assert "--guard-upsert-reports-dir" in wrapper
+    assert "MarkdownOutputFile" in wrapper
+
+    assert "master-reliability-digest.yml" in readme
+    assert "run-master-reliability-digest.ps1" in readme
+    assert "trend digest" in readme
+
+
+def test_251_master_reliability_digest_computes_trends_from_fixtures():
+    workspace = _local_test_dir("pytest-master-reliability-digest").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    ci_runs_file = workspace / "ci-runs.json"
+    ci_jobs_dir = workspace / "ci-jobs"
+    guard_runs_file = workspace / "guard-runs.json"
+    guard_upsert_dir = workspace / "guard-upsert"
+    output_file = workspace / "master-reliability-digest.json"
+    markdown_output_file = workspace / "master-reliability-digest.md"
+
+    ci_jobs_dir.mkdir(parents=True, exist_ok=True)
+    guard_upsert_dir.mkdir(parents=True, exist_ok=True)
+
+    ci_runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 8801,
+                        "updated_at": "2026-04-18T04:00:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8801",
+                    },
+                    {
+                        "id": 8802,
+                        "updated_at": "2026-04-18T03:00:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8802",
+                    },
+                    {
+                        "id": 8803,
+                        "updated_at": "2026-04-18T02:00:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8803",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (ci_jobs_dir / "8801.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "started_at": "2026-04-18T04:00:00Z",
+                        "completed_at": "2026-04-18T04:10:20Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (ci_jobs_dir / "8802.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "started_at": "2026-04-18T03:00:00Z",
+                        "completed_at": "2026-04-18T03:10:05Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (ci_jobs_dir / "8803.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "started_at": "2026-04-18T02:00:00Z",
+                        "completed_at": "2026-04-18T02:08:20Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    guard_runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 9901,
+                        "updated_at": "2026-04-18T03:40:00Z",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9901",
+                    },
+                    {
+                        "id": 9902,
+                        "updated_at": "2026-04-18T02:40:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9902",
+                    },
+                    {
+                        "id": 9903,
+                        "updated_at": "2026-04-18T01:40:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9903",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "9901.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 2},
+                "decision": {"issue_action": "comment_suppressed_cooldown", "alert_triggered": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "9902.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 1},
+                "decision": {"issue_action": "commented", "alert_triggered": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "9903.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 0},
+                "decision": {"issue_action": "none", "alert_triggered": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-reliability-digest.py"),
+        "--label",
+        "pytest-master-reliability-digest",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--ci-runs-file",
+        str(ci_runs_file.resolve()),
+        "--ci-jobs-dir",
+        str(ci_jobs_dir.resolve()),
+        "--guard-runs-file",
+        str(guard_runs_file.resolve()),
+        "--guard-upsert-reports-dir",
+        str(guard_upsert_dir.resolve()),
+        "--trend-runs",
+        "3",
+        "--guard-trend-runs",
+        "3",
+        "--release-gate-warning-seconds",
+        "540",
+        "--warning-sustained-runs",
+        "2",
+        "--output-file",
+        str(output_file.resolve()),
+        "--markdown-output-file",
+        str(markdown_output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["release_gate_warning_triggered"] is True
+    assert payload["metrics"]["release_gate_consecutive_over_threshold"] == 2
+    assert payload["metrics"]["guard_non_success_total"] == 1
+    assert payload["metrics"]["active_comment_suppressed_total_sum"] == 3
+    assert payload["metrics"]["upsert_artifacts_missing_total"] == 0
+    assert output_file.exists()
+    assert markdown_output_file.exists()
+
+    markdown = markdown_output_file.read_text(encoding="utf-8")
+    assert "# Master Reliability Digest" in markdown
+    assert "Release Gate Runtime Trend" in markdown
+    assert "Guard Workflow Degradations" in markdown
+    assert "active_comment_suppressed_total" in markdown
 
     shutil.rmtree(workspace, ignore_errors=True)

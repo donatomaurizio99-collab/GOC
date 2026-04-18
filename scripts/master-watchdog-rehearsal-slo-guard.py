@@ -29,7 +29,7 @@ def _run_gh_api(path: str) -> dict[str, Any]:
 
 def _load_json_file(path: Path) -> dict[str, Any]:
     _expect(path.exists(), f"JSON file not found: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     _expect(isinstance(payload, dict), f"Expected JSON object in file: {path}")
     return payload
 

@@ -1,0 +1,101 @@
+name: Master Reliability Digest
+
+on:
+  schedule:
+    - cron: "20 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      ci_per_page:
+        description: "Completed master CI runs fetched for runtime trend"
+        required: false
+        default: "30"
+      guard_per_page:
+        description: "Completed guard-health runs fetched for degradation trend"
+        required: false
+        default: "30"
+      trend_runs:
+        description: "Most recent CI runs included in runtime trend"
+        required: false
+        default: "10"
+      guard_trend_runs:
+        description: "Most recent guard-health runs included in degradation trend"
+        required: false
+        default: "10"
+      release_gate_warning_seconds:
+        description: "Release Gate runtime warning threshold (seconds)"
+        required: false
+        default: "540"
+      warning_sustained_runs:
+        description: "Consecutive over-threshold runs to flag runtime warning"
+        required: false
+        default: "3"
+      fail_on_warning:
+        description: "Fail digest workflow when warning-level findings are present"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reliability-digest:
+    name: Reliability Digest
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build master reliability digest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          CI_PER_PAGE: ${{ github.event.inputs.ci_per_page || '30' }}
+          GUARD_PER_PAGE: ${{ github.event.inputs.guard_per_page || '30' }}
+          TREND_RUNS: ${{ github.event.inputs.trend_runs || '10' }}
+          GUARD_TREND_RUNS: ${{ github.event.inputs.guard_trend_runs || '10' }}
+          RELEASE_GATE_WARNING_SECONDS: ${{ github.event.inputs.release_gate_warning_seconds || '540' }}
+          WARNING_SUSTAINED_RUNS: ${{ github.event.inputs.warning_sustained_runs || '3' }}
+          FAIL_ON_WARNING: ${{ github.event.inputs.fail_on_warning || 'false' }}
+        run: |
+          $arguments = @(
+            "-Repo", "$env:REPO_FULL",
+            "-CiPerPage", "$env:CI_PER_PAGE",
+            "-GuardPerPage", "$env:GUARD_PER_PAGE",
+            "-TrendRuns", "$env:TREND_RUNS",
+            "-GuardTrendRuns", "$env:GUARD_TREND_RUNS",
+            "-ReleaseGateWarningSeconds", "$env:RELEASE_GATE_WARNING_SECONDS",
+            "-WarningSustainedRuns", "$env:WARNING_SUSTAINED_RUNS",
+            "-OutputFile", "artifacts\master-reliability-digest.json",
+            "-MarkdownOutputFile", "artifacts\master-reliability-digest.md"
+          )
+          if ($env:FAIL_ON_WARNING -eq "true") {
+            $arguments += "-FailOnWarning"
+          }
+          .\scripts\run-master-reliability-digest.ps1 @arguments
+
+      - name: Publish digest summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "artifacts\master-reliability-digest.md") {
+            Get-Content "artifacts\master-reliability-digest.md" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload reliability digest artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-reliability-digest
+          path: |
+            artifacts/master-reliability-digest.json
+            artifacts/master-reliability-digest.md
+          if-no-files-found: error

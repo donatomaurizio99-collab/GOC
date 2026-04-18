@@ -21,6 +21,10 @@ on:
         description: "Healthy nightly runs required before auto-closing an open guard-health issue"
         required: false
         default: "2"
+      active_comment_cooldown:
+        description: "Comment cooldown for unchanged active alerts (comment every N runs)"
+        required: false
+        default: "3"
 
 permissions:
   contents: read
@@ -67,6 +71,7 @@ jobs:
           REPO_FULL: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
+          ACTIVE_COMMENT_COOLDOWN: ${{ github.event.inputs.active_comment_cooldown || '3' }}
         run: |
           .\scripts\run-ci-alert-issue-upsert.ps1 `
             -SignalId "master-guard-workflow-health" `
@@ -74,7 +79,18 @@ jobs:
             -ReportFile "artifacts\master-guard-workflow-health-check.json" `
             -RunUrl "$env:RUN_URL" `
             -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -ActiveCommentCooldown "$env:ACTIVE_COMMENT_COOLDOWN" `
             -OutputFile "artifacts\master-guard-workflow-health-issue-upsert.json"
+
+      - name: Run guard-chain selftest
+        if: always()
+        shell: pwsh
+        run: |
+          .\scripts\run-master-guard-chain-selftest.ps1 `
+            -SignalId "master-guard-workflow-health" `
+            -GuardReportFile "artifacts\master-guard-workflow-health-check.json" `
+            -IssueUpsertReportFile "artifacts\master-guard-workflow-health-issue-upsert.json" `
+            -OutputFile "artifacts\master-guard-workflow-health-selftest.json"
 
       - name: Upload guard-workflow health report
         if: always()
@@ -90,4 +106,12 @@ jobs:
         with:
           name: master-guard-workflow-health-issue-upsert
           path: artifacts/master-guard-workflow-health-issue-upsert.json
+          if-no-files-found: error
+
+      - name: Upload guard-workflow health chain selftest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-selftest
+          path: artifacts/master-guard-workflow-health-selftest.json
           if-no-files-found: error
