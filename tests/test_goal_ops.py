@@ -11176,7 +11176,7 @@ def test_229_ci_alert_issue_upsert_creates_issue_for_branch_protection_drift():
     workspace = _local_test_dir("pytest-ci-alert-issue-upsert-create").resolve()
     project_root = Path(__file__).resolve().parents[1]
     report_file = workspace / "master-branch-protection-drift-guard.json"
-    open_issues_file = workspace / "open-issues.json"
+    issues_file = workspace / "issues.json"
     issue_oplog_file = workspace / "issue-oplog.json"
     output_file = workspace / "ci-alert-issue-upsert.json"
 
@@ -11200,7 +11200,7 @@ def test_229_ci_alert_issue_upsert_creates_issue_for_branch_protection_drift():
         ),
         encoding="utf-8",
     )
-    open_issues_file.write_text("[]", encoding="utf-8")
+    issues_file.write_text("[]", encoding="utf-8")
 
     command = [
         sys.executable,
@@ -11213,8 +11213,8 @@ def test_229_ci_alert_issue_upsert_creates_issue_for_branch_protection_drift():
         "donatomaurizio99-collab/GOC",
         "--report-file",
         str(report_file.resolve()),
-        "--open-issues-file",
-        str(open_issues_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
         "--issue-oplog-file",
         str(issue_oplog_file.resolve()),
         "--run-url",
@@ -11252,7 +11252,7 @@ def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
     workspace = _local_test_dir("pytest-ci-alert-issue-upsert-dedupe").resolve()
     project_root = Path(__file__).resolve().parents[1]
     report_file = workspace / "release-gate-runtime-early-warning.json"
-    open_issues_file = workspace / "open-issues.json"
+    issues_file = workspace / "issues.json"
     issue_oplog_file = workspace / "issue-oplog.json"
     output_file = workspace / "ci-alert-issue-upsert.json"
 
@@ -11283,7 +11283,7 @@ def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
         ),
         encoding="utf-8",
     )
-    open_issues_file.write_text(
+    issues_file.write_text(
         json.dumps(
             [
                 {
@@ -11314,8 +11314,8 @@ def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
         "donatomaurizio99-collab/GOC",
         "--report-file",
         str(report_file.resolve()),
-        "--open-issues-file",
-        str(open_issues_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
         "--issue-oplog-file",
         str(issue_oplog_file.resolve()),
         "--run-url",
@@ -11342,9 +11342,10 @@ def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
     assert output_file.exists()
 
     issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
-    assert len(issue_oplog["actions"]) == 1
-    assert issue_oplog["actions"][0]["action"] == "add_comment"
-    assert issue_oplog["actions"][0]["issue_number"] == 42
+    assert len(issue_oplog["actions"]) == 2
+    assert issue_oplog["actions"][0]["action"] == "update_issue_body"
+    assert issue_oplog["actions"][1]["action"] == "add_comment"
+    assert issue_oplog["actions"][1]["issue_number"] == 42
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -11363,6 +11364,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "ci-alert-issue-upsert.py" in wrapper
     assert "--signal-id" in wrapper
     assert "--report-file" in wrapper
+    assert "--recovery-threshold" in wrapper
     assert "--dry-run" in wrapper
     assert "master-branch-protection-drift" in wrapper
     assert "release-gate-runtime-early-warning" in wrapper
@@ -11370,10 +11372,202 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "issues: write" in branch_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
     assert "master-branch-protection-drift-issue-upsert.json" in branch_workflow
+    assert "recovery_threshold" in branch_workflow
 
     assert "issues: write" in runtime_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in runtime_workflow
     assert "release-gate-runtime-early-warning-issue-upsert.json" in runtime_workflow
+    assert "recovery_threshold" in runtime_workflow
 
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
+    assert "auto-close recovered issues after 2 healthy nightly runs" in readme
+
+
+def test_232_ci_alert_issue_upsert_auto_closes_after_recovery_threshold():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-recovery-close").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-runtime-recovery",
+                "config": {
+                    "branch": "master",
+                    "threshold_seconds": 540,
+                    "sustained_runs": 3,
+                },
+                "metrics": {
+                    "consecutive_runs_over_threshold": 0,
+                },
+                "decision": {
+                    "warning_triggered": False,
+                    "recommended_action": "runtime_within_warning_budget",
+                },
+                "generated_at_utc": "2026-04-19T20:20:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 73,
+                    "state": "open",
+                    "title": "[Release Gate Runtime] sustained runtime warning on master",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/73",
+                    "body": (
+                        "managed issue\\n"
+                        "<!-- ci-alert-key:release-gate-runtime-early-warning:"
+                        "donatomaurizio99-collab/GOC:master -->\\n"
+                        "<!-- ci-alert-recovery-streak:1 -->"
+                    ),
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-recovery-close",
+        "--signal-id",
+        "release-gate-runtime-early-warning",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--recovery-threshold",
+        "2",
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is False
+    assert payload["decision"]["issue_action"] == "closed"
+    assert payload["decision"]["issue_closed"] is True
+    assert payload["decision"]["recovery_streak"] == 2
+    assert payload["issue"]["number"] == 73
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    action_names = [item["action"] for item in issue_oplog["actions"]]
+    assert action_names == ["update_issue_body", "add_comment", "close_issue"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_233_ci_alert_issue_upsert_reopens_closed_issue_on_realert():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-reopen").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-branch-protection-drift-guard.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-drift-realert",
+                "config": {"branch": "master"},
+                "decision": {
+                    "branch_protection_drift_detected": True,
+                    "recommended_action": "branch_protection_drift_detected",
+                },
+                "drift": {
+                    "missing_required_checks": ["Desktop Smoke (Windows)"],
+                    "unexpected_required_checks": [],
+                },
+                "generated_at_utc": "2026-04-20T20:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 84,
+                    "state": "closed",
+                    "title": "[CI Drift] master branch protection required checks drift",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/84",
+                    "body": (
+                        "managed issue\\n"
+                        "<!-- ci-alert-key:master-branch-protection-drift:"
+                        "donatomaurizio99-collab/GOC:master -->\\n"
+                        "<!-- ci-alert-recovery-streak:2 -->"
+                    ),
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-reopen",
+        "--signal-id",
+        "master-branch-protection-drift",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "reopened"
+    assert payload["decision"]["issue_deduped"] is True
+    assert payload["decision"]["recovery_streak"] == 0
+    assert payload["issue"]["number"] == 84
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    action_names = [item["action"] for item in issue_oplog["actions"]]
+    assert action_names == ["reopen_issue", "add_comment"]
+
+    shutil.rmtree(workspace, ignore_errors=True)

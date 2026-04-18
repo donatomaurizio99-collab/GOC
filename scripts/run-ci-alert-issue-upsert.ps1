@@ -7,8 +7,9 @@
     [string]$PythonExe = "python",
     [string]$Repo = "donatomaurizio99-collab/GOC",
     [string]$RunUrl = "",
-    [string]$OpenIssuesFile = "",
+    [string]$IssuesFile = "",
     [string]$IssueOplogFile = "",
+    [int]$RecoveryThreshold = 2,
     [string]$OutputFile = "artifacts\\ci-alert-issue-upsert.json",
     [switch]$DryRun
 )
@@ -24,13 +25,14 @@ $args = @(
     "--signal-id", $SignalId,
     "--repo", $Repo,
     "--report-file", $ReportFile,
+    "--recovery-threshold", [string]$RecoveryThreshold,
     "--output-file", $OutputFile
 )
 if ($RunUrl) {
     $args += @("--run-url", $RunUrl)
 }
-if ($OpenIssuesFile) {
-    $args += @("--open-issues-file", $OpenIssuesFile)
+if ($IssuesFile) {
+    $args += @("--issues-file", $IssuesFile)
 }
 if ($IssueOplogFile) {
     $args += @("--issue-oplog-file", $IssueOplogFile)
