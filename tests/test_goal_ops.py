@@ -11472,6 +11472,12 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     rehearsal_slo_workflow = (
         project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml"
     ).read_text(encoding="utf-8")
+    digest_workflow = (
+        project_root / ".github" / "workflows" / "master-reliability-digest.yml"
+    ).read_text(encoding="utf-8")
+    digest_guard_workflow = (
+        project_root / ".github" / "workflows" / "master-reliability-digest-guard.yml"
+    ).read_text(encoding="utf-8")
     wrapper = (project_root / "scripts" / "run-ci-alert-issue-upsert.ps1").read_text(encoding="utf-8")
     readme = (project_root / "README.md").read_text(encoding="utf-8")
 
@@ -11487,6 +11493,8 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "release-gate-runtime-early-warning" in wrapper
     assert "release-gate-runtime-alert-age-slo" in wrapper
     assert "master-watchdog-rehearsal-drill-slo" in wrapper
+    assert "master-reliability-digest-warning" in wrapper
+    assert "master-reliability-digest-guard" in wrapper
 
     assert "issues: write" in branch_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
@@ -11511,6 +11519,18 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "master-watchdog-rehearsal-slo-guard-issue-upsert.json" in rehearsal_slo_workflow
     assert "active_comment_cooldown" in rehearsal_slo_workflow
 
+    assert "issues: write" in digest_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in digest_workflow
+    assert "master-reliability-digest-warning" in digest_workflow
+    assert "master-reliability-digest-warning-issue-upsert.json" in digest_workflow
+    assert "active_comment_cooldown" in digest_workflow
+
+    assert "issues: write" in digest_guard_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in digest_guard_workflow
+    assert "master-reliability-digest-guard" in digest_guard_workflow
+    assert "master-reliability-digest-guard-issue-upsert.json" in digest_guard_workflow
+    assert "active_comment_cooldown" in digest_guard_workflow
+
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
     assert "[master-guard-workflow-health.yml]" in readme
@@ -11525,6 +11545,8 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "release-gate-runtime-alert-age-slo" in readme
     assert "mandatory parent runtime-warning reference" in readme
     assert "closes immediately when parent-coupled escalation criteria are no longer met" in readme
+    assert "master-reliability-digest-warning" in readme
+    assert "master-reliability-digest-guard.yml" in readme
 
 
 def test_232_ci_alert_issue_upsert_auto_closes_after_recovery_threshold():
@@ -12374,6 +12396,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             "updated_at": "2026-04-18T03:50:00Z",
                         }
                     ],
+                    "Master Reliability Digest Guard": [
+                        {
+                            "id": 9106,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:55:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9101": {
@@ -12403,6 +12433,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                         "artifacts": [
                             {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
                             {"name": "master-watchdog-rehearsal-slo-guard-issue-upsert", "expired": False},
+                            {"name": "master-watchdog-rehearsal-slo-guard-selftest", "expired": False},
+                        ]
+                    },
+                    "9106": {
+                        "artifacts": [
+                            {"name": "master-reliability-digest-guard", "expired": False},
+                            {"name": "master-reliability-digest-guard-issue-upsert", "expired": False},
+                            {"name": "master-reliability-digest-guard-selftest", "expired": False},
                         ]
                     },
                 },
@@ -12439,7 +12477,7 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
     payload_text = completed.stderr.split(marker, 1)[1].strip()
     payload = json.loads(payload_text)
     assert payload["success"] is False
-    assert payload["metrics"]["guard_workflows_total"] == 5
+    assert payload["metrics"]["guard_workflows_total"] == 6
     assert payload["metrics"]["guard_workflows_degraded_total"] == 2
     assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
     assert payload["metrics"]["guard_workflows_non_success_total"] == 1
@@ -12489,6 +12527,7 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert "coverage contract" in readme
     assert "per-degraded-workflow diagnostics" in readme
     assert "master-watchdog-rehearsal-slo-guard.yml" in readme
+    assert "master-reliability-digest-guard.yml" in readme
     assert "run-master-guard-chain-selftest.ps1" in readme
     assert "run-master-guard-workflow-health-check.ps1" in readme
 
@@ -12726,6 +12765,14 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             "updated_at": "2026-04-18T03:50:00Z",
                         }
                     ],
+                    "Master Reliability Digest Guard": [
+                        {
+                            "id": 9306,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:55:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9301": {
@@ -12756,6 +12803,14 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                         "artifacts": [
                             {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
                             {"name": "master-watchdog-rehearsal-slo-guard-issue-upsert", "expired": False},
+                            {"name": "master-watchdog-rehearsal-slo-guard-selftest", "expired": False},
+                        ]
+                    },
+                    "9306": {
+                        "artifacts": [
+                            {"name": "master-reliability-digest-guard", "expired": False},
+                            {"name": "master-reliability-digest-guard-issue-upsert", "expired": False},
+                            {"name": "master-reliability-digest-guard-selftest", "expired": False},
                         ]
                     },
                 },
@@ -12781,7 +12836,7 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
         (
             "master-required-checks-24h.yml,master-branch-protection-drift-guard.yml,"
             "master-release-gate-runtime-early-warning.yml,master-guard-workflow-health.yml,"
-            "master-watchdog-rehearsal-slo-guard.yml,"
+            "master-watchdog-rehearsal-slo-guard.yml,master-reliability-digest-guard.yml,"
             "master-extra-guard-contract-probe.yml"
         ),
     ]
@@ -13186,6 +13241,10 @@ def test_250_master_reliability_digest_workflow_wrapper_and_docs_wiring():
     assert ".\\scripts\\run-master-reliability-digest.ps1" in workflow
     assert "master-reliability-digest.json" in workflow
     assert "master-reliability-digest.md" in workflow
+    assert "master-reliability-digest-warning-issue-upsert.json" in workflow
+    assert "master-reliability-digest-warning" in workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in workflow
+    assert "active_comment_cooldown" in workflow
     assert "master-reliability-digest" in workflow
 
     assert "master-reliability-digest.py" in wrapper
@@ -13403,6 +13462,11 @@ def test_251_master_reliability_digest_computes_trends_from_fixtures():
     assert payload["metrics"]["guard_non_success_total"] == 1
     assert payload["metrics"]["active_comment_suppressed_total_sum"] == 3
     assert payload["metrics"]["upsert_artifacts_missing_total"] == 0
+    assert payload["metrics"]["mttr_samples_total"] == 0
+    assert payload["metrics"]["mttr_trend"] == "insufficient_data"
+    assert payload["decision"]["top_cause"] == "compound_runtime_and_guard_degradation"
+    assert payload["decision"]["warning_level"] == "warning"
+    assert payload["decision"]["mttr_trend"] == "insufficient_data"
     assert output_file.exists()
     assert markdown_output_file.exists()
 
@@ -13411,5 +13475,270 @@ def test_251_master_reliability_digest_computes_trends_from_fixtures():
     assert "Release Gate Runtime Trend" in markdown
     assert "Guard Workflow Degradations" in markdown
     assert "active_comment_suppressed_total" in markdown
+    assert "Alert MTTR Trend" in markdown
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_252_ci_alert_issue_upsert_creates_issue_for_reliability_digest_warning():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-reliability-digest-warning").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-reliability-digest.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-master-reliability-digest",
+                "config": {"branch": "master"},
+                "metrics": {
+                    "active_comment_suppressed_total_sum": 4,
+                    "mttr_trend": "degrading",
+                },
+                "decision": {
+                    "warning_level": "warning",
+                    "release_gate_warning_triggered": True,
+                    "guard_health_degraded": False,
+                    "top_cause": "release_gate_runtime_sustained_over_threshold",
+                    "top_cause_detail": "Release Gate runtime stayed above threshold for sustained runs.",
+                    "mttr_trend": "degrading",
+                    "recommended_action": "investigate_master_reliability_regression",
+                },
+                "release_gate_samples": [
+                    {
+                        "run_id": 8811001,
+                        "run_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8811001",
+                        "release_gate_duration_seconds": 612.0,
+                    }
+                ],
+                "guard_non_success_runs": [],
+                "generated_at_utc": "2026-04-18T06:20:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-reliability-digest-warning-create",
+        "--signal-id",
+        "master-reliability-digest-warning",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert "reliability-digest" in payload["issue"]["labels"]
+    assert "ci-alert-key:master-reliability-digest-warning:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "create_issue"
+    created_body = str(issue_oplog["actions"][0]["body"])
+    assert "Top cause: release_gate_runtime_sustained_over_threshold" in created_body
+    assert "Latest release-gate trend sample: #8811001 (https://github.com/donatomaurizio99-collab/GOC/actions/runs/8811001) runtime=612.000s" in created_body
+    assert "## Immediate Actions" in created_body
+    assert ".\\scripts\\run-master-reliability-digest.ps1" in created_body
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_253_master_reliability_digest_guard_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-reliability-digest-guard.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-reliability-digest-guard.ps1").read_text(encoding="utf-8")
+    selftest_wrapper = (project_root / "scripts" / "run-master-guard-chain-selftest.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Reliability Digest Guard" in workflow
+    assert 'cron: "30 5 * * *"' in workflow
+    assert ".\\scripts\\run-master-reliability-digest-guard.ps1" in workflow
+    assert "master-reliability-digest-guard.json" in workflow
+    assert "master-reliability-digest-guard-issue-upsert.json" in workflow
+    assert "master-reliability-digest-guard-selftest.json" in workflow
+    assert "master-reliability-digest-guard" in workflow
+    assert ".\\scripts\\run-master-guard-chain-selftest.ps1" in workflow
+
+    assert "master-reliability-digest-guard.py" in wrapper
+    assert "--required-artifact" in wrapper
+    assert "--max-age-hours" in wrapper
+    assert "--per-page" in wrapper
+    assert "--allow-breach" in wrapper
+    assert "RequiredArtifact" in wrapper
+    assert "master-reliability-digest-guard" in selftest_wrapper
+
+    assert "master-reliability-digest-guard.yml" in readme
+    assert "run-master-reliability-digest-guard.ps1" in readme
+    assert "master-reliability-digest-warning" in readme
+
+
+def test_254_master_reliability_digest_guard_detects_missing_artifact_breach():
+    workspace = _local_test_dir("pytest-master-reliability-digest-guard-missing-artifact").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 771101,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "updated_at": "2026-04-18T04:00:00Z",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771101",
+                    }
+                ],
+                "run_artifacts": {
+                    "771101": {
+                        "artifacts": [
+                            {"name": "master-reliability-digest-warning-issue-upsert", "expired": False},
+                        ]
+                    }
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-reliability-digest-guard.py"),
+        "--label",
+        "pytest-master-reliability-digest-guard-missing-artifact",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Reliability Digest",
+        "--required-artifact",
+        "master-reliability-digest",
+        "--max-age-hours",
+        "192",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--now-utc",
+        "2026-04-18T06:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master reliability digest guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["reliability_digest_guard_breached"] is True
+    assert payload["decision"]["breach_reason"] == "artifact_missing"
+    assert payload["latest_run"]["run_id"] == 771101
+    assert payload["latest_run"]["required_artifact_present"] is False
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_255_master_guard_chain_selftest_supports_reliability_digest_guard_signal():
+    workspace = _local_test_dir("pytest-master-guard-chain-selftest-reliability-digest-guard").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    guard_report_file = workspace / "master-reliability-digest-guard.json"
+    issue_upsert_report_file = workspace / "master-reliability-digest-guard-issue-upsert.json"
+    output_file = workspace / "master-reliability-digest-guard-selftest.json"
+
+    guard_report_file.write_text(
+        json.dumps(
+            {
+                "decision": {
+                    "reliability_digest_guard_breached": True,
+                },
+                "generated_at_utc": "2026-04-18T05:35:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issue_upsert_report_file.write_text(
+        json.dumps(
+            {
+                "config": {
+                    "signal_id": "master-reliability-digest-guard",
+                    "report_file": str(guard_report_file.resolve()),
+                },
+                "metrics": {
+                    "immediate_action_lines_total": 2,
+                },
+                "decision": {
+                    "alert_triggered": True,
+                    "issue_action": "created",
+                },
+                "actions": [
+                    {"action": "create_issue"},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-chain-selftest.py"),
+        "--label",
+        "pytest-master-guard-chain-selftest-reliability-digest-guard",
+        "--signal-id",
+        "master-reliability-digest-guard",
+        "--guard-report-file",
+        str(guard_report_file.resolve()),
+        "--issue-upsert-report-file",
+        str(issue_upsert_report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["expected_alert_triggered"] is True
+    assert payload["decision"]["issue_alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

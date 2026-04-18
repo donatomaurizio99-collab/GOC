@@ -1,6 +1,6 @@
 param(
     [string]$Label = "master-guard-chain-selftest",
-    [ValidateSet("master-guard-workflow-health", "master-watchdog-rehearsal-drill-slo")]
+    [ValidateSet("master-guard-workflow-health", "master-watchdog-rehearsal-drill-slo", "master-reliability-digest-guard")]
     [string]$SignalId = "master-guard-workflow-health",
     [string]$GuardReportFile = "artifacts\\master-guard-workflow-health-check.json",
     [string]$IssueUpsertReportFile = "artifacts\\master-guard-workflow-health-issue-upsert.json",

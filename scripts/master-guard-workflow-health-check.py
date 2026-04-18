@@ -47,6 +47,16 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
         "required_artifacts": [
             "master-watchdog-rehearsal-slo-guard",
             "master-watchdog-rehearsal-slo-guard-issue-upsert",
+            "master-watchdog-rehearsal-slo-guard-selftest",
+        ],
+    },
+    {
+        "workflow_file": "master-reliability-digest-guard.yml",
+        "workflow_name": "Master Reliability Digest Guard",
+        "required_artifacts": [
+            "master-reliability-digest-guard",
+            "master-reliability-digest-guard-issue-upsert",
+            "master-reliability-digest-guard-selftest",
         ],
     },
 ]

@@ -254,6 +254,87 @@ def _build_guard_samples(*, repo: str, runs: list[dict[str, Any]], trend_runs: i
     ]
 
 
+def _resolve_issue_upsert_sample_timestamp(sample: dict[str, Any]) -> datetime | None:
+    generated = _parse_utc_timestamp(str(sample.get("generated_at_utc") or ""))
+    if generated is not None:
+        return generated
+    run_updated = _parse_utc_timestamp(str(sample.get("run_updated_at") or ""))
+    if run_updated is not None:
+        return run_updated
+    return None
+
+
+def _compute_mttr_summary(
+    *,
+    issue_upsert_samples: list[dict[str, Any]],
+    evaluation_now: datetime,
+) -> dict[str, Any]:
+    sorted_samples = sorted(
+        [item for item in issue_upsert_samples if isinstance(item, dict)],
+        key=lambda item: _resolve_issue_upsert_sample_timestamp(item) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+    mttr_hours_samples: list[float] = []
+    incident_opened_at: datetime | None = None
+    incident_opened_run_id: int | None = None
+    for sample in sorted_samples:
+        sample_time = _resolve_issue_upsert_sample_timestamp(sample)
+        if sample_time is None:
+            continue
+        issue_action = str(sample.get("issue_action") or "none")
+        alert_triggered = bool(sample.get("alert_triggered"))
+
+        if alert_triggered and issue_action in {"created", "reopened"}:
+            incident_opened_at = sample_time
+            incident_opened_run_id = int(sample.get("run_id") or 0)
+            continue
+
+        if (
+            (not alert_triggered)
+            and issue_action == "closed"
+            and incident_opened_at is not None
+            and sample_time >= incident_opened_at
+        ):
+            mttr_hours = (sample_time - incident_opened_at).total_seconds() / 3600.0
+            mttr_hours_samples.append(float(max(0.0, mttr_hours)))
+            incident_opened_at = None
+            incident_opened_run_id = None
+
+    mttr_trend = "insufficient_data"
+    mttr_avg_hours = None
+    mttr_last_hours = None
+    if mttr_hours_samples:
+        mttr_avg_hours = round(sum(mttr_hours_samples) / len(mttr_hours_samples), 3)
+        mttr_last_hours = round(float(mttr_hours_samples[-1]), 3)
+    if len(mttr_hours_samples) >= 2:
+        previous_avg = sum(mttr_hours_samples[:-1]) / max(1, len(mttr_hours_samples) - 1)
+        latest = float(mttr_hours_samples[-1])
+        if latest <= previous_avg * 0.9:
+            mttr_trend = "improving"
+        elif latest >= previous_avg * 1.1:
+            mttr_trend = "degrading"
+        else:
+            mttr_trend = "stable"
+    elif len(mttr_hours_samples) == 1:
+        mttr_trend = "stable"
+
+    open_incident_age_hours = (
+        round(float((evaluation_now - incident_opened_at).total_seconds()) / 3600.0, 3)
+        if incident_opened_at is not None and evaluation_now >= incident_opened_at
+        else None
+    )
+    return {
+        "mttr_hours_samples": [round(float(item), 3) for item in mttr_hours_samples],
+        "mttr_samples_total": int(len(mttr_hours_samples)),
+        "mttr_avg_hours": mttr_avg_hours,
+        "mttr_last_hours": mttr_last_hours,
+        "mttr_trend": mttr_trend,
+        "open_incident_age_hours": open_incident_age_hours,
+        "open_incident_started_at_utc": _format_utc(incident_opened_at),
+        "open_incident_started_run_id": int(incident_opened_run_id or 0),
+    }
+
+
 def _build_reliability_markdown(
     *,
     generated_at_utc: str,
@@ -267,6 +348,11 @@ def _build_reliability_markdown(
     issue_upsert_samples: list[dict[str, Any]],
     upsert_artifacts_missing_total: int,
     active_comment_suppressed_total_sum: int,
+    mttr_samples_total: int,
+    mttr_avg_hours: float | None,
+    mttr_last_hours: float | None,
+    mttr_trend: str,
+    mttr_open_incident_age_hours: float | None,
 ) -> str:
     latest_release_sample = release_gate_samples[0] if release_gate_samples else {}
     latest_guard_degraded = guard_non_success_runs[0] if guard_non_success_runs else {}
@@ -326,6 +412,25 @@ def _build_reliability_markdown(
             f"active_comment_suppressed_total={latest_upsert_suppressed}"
             if latest_upsert_run_id > 0
             else "- Latest upsert sample: none"
+        ),
+        "",
+        "## Alert MTTR Trend",
+        f"- MTTR samples: {mttr_samples_total}",
+        (
+            f"- MTTR average: `{mttr_avg_hours}h`"
+            if mttr_avg_hours is not None
+            else "- MTTR average: unknown"
+        ),
+        (
+            f"- Latest MTTR sample: `{mttr_last_hours}h`"
+            if mttr_last_hours is not None
+            else "- Latest MTTR sample: unknown"
+        ),
+        f"- MTTR trend: `{mttr_trend}`",
+        (
+            f"- Open incident age: `{mttr_open_incident_age_hours}h`"
+            if mttr_open_incident_age_hours is not None
+            else "- Open incident age: none"
         ),
     ]
     return "\n".join(lines).strip() + "\n"
@@ -450,11 +555,18 @@ def run_master_reliability_digest(
         issue_upsert_samples.append(
             {
                 "run_id": run_id,
+                "run_updated_at": str(guard_run.get("updated_at") or ""),
+                "generated_at_utc": str(issue_upsert_payload.get("generated_at_utc") or ""),
                 "active_comment_suppressed_total": active_comment_suppressed_total,
                 "issue_action": str(issue_decision.get("issue_action") or "none"),
                 "alert_triggered": bool(issue_decision.get("alert_triggered")),
             }
         )
+
+    mttr_summary = _compute_mttr_summary(
+        issue_upsert_samples=issue_upsert_samples,
+        evaluation_now=datetime.now(timezone.utc),
+    )
 
     avg_release_gate_seconds = (
         round(
@@ -498,6 +610,25 @@ def run_master_reliability_digest(
     failed_criteria = [item for item in criteria if not bool(item.get("passed"))]
     success = len(failed_criteria) == 0
 
+    latest_release_sample = release_gate_duration_samples[0] if release_gate_duration_samples else {}
+    latest_guard_non_success = guard_non_success_runs[0] if guard_non_success_runs else {}
+    if release_gate_warning_triggered and len(guard_non_success_runs) > 0:
+        top_cause = "compound_runtime_and_guard_degradation"
+        top_cause_detail = (
+            "Sustained Release Gate slowdown and degraded guard workflow(s) observed simultaneously."
+        )
+    elif release_gate_warning_triggered:
+        top_cause = "release_gate_runtime_sustained_over_threshold"
+        top_cause_detail = (
+            "Release Gate runtime stayed above threshold for sustained runs."
+        )
+    elif len(guard_non_success_runs) > 0:
+        top_cause = "guard_workflow_degraded"
+        top_cause_detail = "Guard workflow reported non-success conclusion."
+    else:
+        top_cause = "none"
+        top_cause_detail = "No warning-level signal in digest window."
+
     generated_at_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     markdown = _build_reliability_markdown(
         generated_at_utc=generated_at_utc,
@@ -511,6 +642,23 @@ def run_master_reliability_digest(
         issue_upsert_samples=issue_upsert_samples,
         upsert_artifacts_missing_total=upsert_artifacts_missing_total,
         active_comment_suppressed_total_sum=active_comment_suppressed_total_sum,
+        mttr_samples_total=int(mttr_summary["mttr_samples_total"]),
+        mttr_avg_hours=(
+            float(mttr_summary["mttr_avg_hours"])
+            if mttr_summary.get("mttr_avg_hours") is not None
+            else None
+        ),
+        mttr_last_hours=(
+            float(mttr_summary["mttr_last_hours"])
+            if mttr_summary.get("mttr_last_hours") is not None
+            else None
+        ),
+        mttr_trend=str(mttr_summary.get("mttr_trend") or "insufficient_data"),
+        mttr_open_incident_age_hours=(
+            float(mttr_summary["open_incident_age_hours"])
+            if mttr_summary.get("open_incident_age_hours") is not None
+            else None
+        ),
     )
 
     report = {
@@ -550,6 +698,23 @@ def run_master_reliability_digest(
             "issue_upsert_samples_total": int(len(issue_upsert_samples)),
             "upsert_artifacts_missing_total": int(upsert_artifacts_missing_total),
             "active_comment_suppressed_total_sum": int(active_comment_suppressed_total_sum),
+            "mttr_samples_total": int(mttr_summary["mttr_samples_total"]),
+            "mttr_avg_hours": (
+                float(mttr_summary["mttr_avg_hours"])
+                if mttr_summary.get("mttr_avg_hours") is not None
+                else None
+            ),
+            "mttr_last_hours": (
+                float(mttr_summary["mttr_last_hours"])
+                if mttr_summary.get("mttr_last_hours") is not None
+                else None
+            ),
+            "mttr_trend": str(mttr_summary.get("mttr_trend") or "insufficient_data"),
+            "mttr_open_incident_age_hours": (
+                float(mttr_summary["open_incident_age_hours"])
+                if mttr_summary.get("open_incident_age_hours") is not None
+                else None
+            ),
             "criteria_failed": int(len(failed_criteria)),
         },
         "criteria": criteria,
@@ -557,6 +722,11 @@ def run_master_reliability_digest(
         "decision": {
             "release_gate_warning_triggered": bool(release_gate_warning_triggered),
             "guard_health_degraded": bool(len(guard_non_success_runs) > 0),
+            "top_cause": top_cause,
+            "top_cause_detail": top_cause_detail,
+            "mttr_trend": str(mttr_summary.get("mttr_trend") or "insufficient_data"),
+            "latest_release_sample_run_url": str(latest_release_sample.get("run_url") or ""),
+            "latest_degraded_guard_run_url": str(latest_guard_non_success.get("run_url") or ""),
             "warning_level": (
                 "warning"
                 if release_gate_warning_triggered or len(guard_non_success_runs) > 0
@@ -572,6 +742,7 @@ def run_master_reliability_digest(
         "guard_runs": guard_samples,
         "guard_non_success_runs": guard_non_success_runs,
         "issue_upsert_samples": issue_upsert_samples,
+        "mttr": mttr_summary,
         "markdown_summary": markdown,
         "generated_at_utc": generated_at_utc,
         "duration_ms": int((time.perf_counter() - started) * 1000),

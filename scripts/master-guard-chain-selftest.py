@@ -11,6 +11,7 @@ from typing import Any
 SIGNAL_ALERT_DECISION_KEY = {
     "master-guard-workflow-health": "guard_workflow_health_degraded",
     "master-watchdog-rehearsal-drill-slo": "watchdog_rehearsal_slo_breached",
+    "master-reliability-digest-guard": "reliability_digest_guard_breached",
 }
 
 ACTIVE_ALERT_ACTIONS = {"created", "reopened", "commented", "comment_suppressed_cooldown"}
@@ -116,7 +117,7 @@ def run_guard_chain_selftest(
         {
             "name": "guard_health_immediate_actions_present_when_alerted",
             "passed": bool(
-                signal_id != "master-guard-workflow-health"
+                signal_id not in {"master-guard-workflow-health", "master-reliability-digest-guard"}
                 or (not expected_alert_triggered)
                 or immediate_action_lines_total > 0
             ),
