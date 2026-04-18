@@ -1,6 +1,7 @@
 param(
     [string]$PythonExe = "python",
     [string]$RegistryFile = "docs\\release-gate-registry.json",
+    [string]$LockFile = "docs\\release-gate-registry.lock.json",
     [string]$CiWorkflowFile = ".github\\workflows\\ci.yml",
     [switch]$Write
 )
@@ -13,6 +14,7 @@ Set-Location $ProjectRoot
 $arguments = @(
     ".\\scripts\\release-gate-registry-sync.py",
     "--registry-file", $RegistryFile,
+    "--lock-file", $LockFile,
     "--ci-workflow-file", $CiWorkflowFile
 )
 if ($Write) {

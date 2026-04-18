@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import re
 import sys
@@ -35,6 +36,18 @@ def _read_json_object(path: Path) -> dict[str, Any]:
         raise RuntimeError(f"Failed to parse JSON file {path}: {exc}") from exc
     _expect(isinstance(payload, dict), f"JSON file must contain an object: {path}")
     return payload
+
+
+def _canonical_json(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _render_json_file(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
 
 
 def _normalize_string_list(
@@ -166,6 +179,10 @@ def _validate_cross_contracts(
 
 def load_registry(registry_file: Path) -> dict[str, Any]:
     payload = _read_json_object(registry_file)
+    registry_version_raw = payload.get("version")
+    _expect(isinstance(registry_version_raw, str), "Registry key 'version' must be a string.")
+    registry_version = registry_version_raw.strip()
+    _expect(registry_version, "Registry key 'version' must not be empty.")
 
     release_gate_ci = payload.get("release_gate_ci")
     _expect(isinstance(release_gate_ci, dict), "Registry key 'release_gate_ci' must be an object.")
@@ -238,6 +255,7 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
     )
 
     registry = {
+        "registry_version": registry_version,
         "strict_flags": strict_flags,
         "release_evidence_artifact_paths": artifact_paths,
         "p0_contract": p0_lists,
@@ -259,6 +277,55 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
         p0_release_evidence_bundle=registry["p0_release_evidence_bundle"],
     )
     return registry
+
+
+def build_registry_lock_payload(registry: dict[str, Any]) -> dict[str, Any]:
+    registry_core = {
+        "registry_version": registry["registry_version"],
+        "release_gate_ci": {
+            "strict_flags": registry["strict_flags"],
+            "release_evidence_artifact_paths": registry["release_evidence_artifact_paths"],
+        },
+        "p0_runbook_contract": registry["p0_contract"],
+        "p0_report_schema_contract": registry["p0_report_schema_contract"],
+        "p0_release_evidence_bundle": registry["p0_release_evidence_bundle"],
+    }
+
+    strict_flags_canonical = _canonical_json(registry["strict_flags"])
+    artifact_paths_canonical = _canonical_json(registry["release_evidence_artifact_paths"])
+    p0_contract_canonical = _canonical_json(registry["p0_contract"])
+    p0_schema_contract_canonical = _canonical_json(registry["p0_report_schema_contract"])
+    p0_bundle_contract_canonical = _canonical_json(registry["p0_release_evidence_bundle"])
+    registry_core_canonical = _canonical_json(registry_core)
+
+    return {
+        "version": "1.0.0",
+        "registry_version": registry["registry_version"],
+        "hashes": {
+            "registry_core_sha256": _sha256_text(registry_core_canonical),
+            "strict_flags_sha256": _sha256_text(strict_flags_canonical),
+            "release_evidence_artifact_paths_sha256": _sha256_text(artifact_paths_canonical),
+            "p0_runbook_contract_sha256": _sha256_text(p0_contract_canonical),
+            "p0_report_schema_contract_sha256": _sha256_text(p0_schema_contract_canonical),
+            "p0_release_evidence_bundle_sha256": _sha256_text(p0_bundle_contract_canonical),
+        },
+        "counts": {
+            "strict_flags_total": len(registry["strict_flags"]),
+            "release_evidence_artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
+            "p0_runbook_required_scripts_total": len(registry["p0_contract"]["required_runbook_scripts"]),
+            "p0_runbook_required_ci_artifact_paths_total": len(
+                registry["p0_contract"]["required_ci_artifact_paths"]
+            ),
+            "p0_schema_required_top_level_keys_total": len(
+                registry["p0_report_schema_contract"]["required_top_level_keys"]
+            ),
+            "p0_schema_required_decision_keys_total": len(
+                registry["p0_report_schema_contract"]["required_decision_keys"]
+            ),
+            "p0_schema_required_files_total": len(registry["p0_report_schema_contract"]["required_files"]),
+            "p0_bundle_required_files_total": len(registry["p0_release_evidence_bundle"]["required_files"]),
+        },
+    }
 
 
 def _leading_whitespace(text: str) -> str:
@@ -396,6 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project-root")
     parser.add_argument("--registry-file", default="docs/release-gate-registry.json")
+    parser.add_argument("--lock-file", default="docs/release-gate-registry.lock.json")
     parser.add_argument("--ci-workflow-file", default=".github/workflows/ci.yml")
     parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
     parser.add_argument("--schema-wrapper-file", default="scripts/run-p0-report-schema-contract-check.ps1")
@@ -410,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         else inferred_project_root
     )
     registry_file = (project_root / str(args.registry_file)).resolve()
+    lock_file = (project_root / str(args.lock_file)).resolve()
     ci_workflow_file = (project_root / str(args.ci_workflow_file)).resolve()
     release_gate_file = (project_root / str(args.release_gate_file)).resolve()
     schema_wrapper_file = (project_root / str(args.schema_wrapper_file)).resolve()
@@ -417,6 +486,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         registry = load_registry(registry_file)
+        generated_lock_payload = build_registry_lock_payload(registry)
+        generated_lock_text = _render_json_file(generated_lock_payload)
+        existing_lock_text = _read_text(lock_file) if lock_file.exists() else ""
+        lock_changed = existing_lock_text != generated_lock_text
         original_ci = _read_text(ci_workflow_file)
         release_gate_text = _read_text(release_gate_file)
         schema_wrapper_text = _read_text(schema_wrapper_file)
@@ -438,13 +511,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.write:
         if changed:
             ci_workflow_file.write_text(synchronized_ci, encoding="utf-8")
+        if lock_changed:
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_text(generated_lock_text, encoding="utf-8")
         print(
             json.dumps(
                 {
                     "success": True,
                     "mode": "write",
                     "changed": bool(changed),
+                    "lock_changed": bool(lock_changed),
                     "registry_file": str(registry_file),
+                    "lock_file": str(lock_file),
                     "ci_workflow_file": str(ci_workflow_file),
                     "release_gate_file": str(release_gate_file),
                     "schema_wrapper_file": str(schema_wrapper_file),
@@ -485,10 +563,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if changed:
+    if changed or lock_changed:
+        drift_reasons: list[str] = []
+        if changed:
+            drift_reasons.append("CI workflow")
+        if lock_changed:
+            drift_reasons.append("registry lock file")
         print(
-            "[release-gate-registry-sync] ERROR: CI workflow is out of sync with release-gate registry. "
-            "Run `python scripts/release-gate-registry-sync.py --write`.",
+            (
+                "[release-gate-registry-sync] ERROR: Out of sync with release-gate registry: "
+                + ", ".join(drift_reasons)
+                + ". Run `python scripts/release-gate-registry-sync.py --write`."
+            ),
             file=sys.stderr,
         )
         return 1
@@ -499,7 +585,9 @@ def main(argv: list[str] | None = None) -> int:
                 "success": True,
                 "mode": "check",
                 "changed": False,
+                "lock_changed": False,
                 "registry_file": str(registry_file),
+                "lock_file": str(lock_file),
                 "ci_workflow_file": str(ci_workflow_file),
                 "release_gate_file": str(release_gate_file),
                 "schema_wrapper_file": str(schema_wrapper_file),

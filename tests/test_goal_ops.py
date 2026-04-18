@@ -5450,6 +5450,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     registry_sync_script = (project_root / "scripts" / "release-gate-registry-sync.py").read_text(encoding="utf-8")
     registry_sync_wrapper = (project_root / "scripts" / "run-release-gate-registry-sync.ps1").read_text(encoding="utf-8")
     registry = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
+    registry_lock = json.loads((project_root / "docs" / "release-gate-registry.lock.json").read_text(encoding="utf-8"))
 
     required_artifact_paths = [
         "artifacts/safe-mode-ux-degradation-release-gate.json",
@@ -5761,13 +5762,21 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "p0_runbook_contract" in runbook_contract_script
     assert "release-gate-registry-sync.py" in registry_sync_script
     assert "release_evidence_artifact_paths" in registry_sync_script
+    assert 'parser.add_argument("--lock-file", default="docs/release-gate-registry.lock.json")' in registry_sync_script
+    assert "build_registry_lock_payload" in registry_sync_script
+    assert "registry lock file" in registry_sync_script
     assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in runbook_contract_wrapper
     assert '"--registry-file", $RegistryFile' in runbook_contract_wrapper
     assert "release-gate-registry-sync.py" in registry_sync_wrapper
+    assert '[string]$LockFile = "docs\\\\release-gate-registry.lock.json"' in registry_sync_wrapper
+    assert '"--lock-file", $LockFile' in registry_sync_wrapper
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
     assert "[string]$RequiredRunbookTokens =" in runbook_contract_wrapper
+    assert registry_lock["version"] == "1.0.0"
+    assert registry_lock["registry_version"] == registry["version"]
+    assert registry_lock["counts"]["strict_flags_total"] == len(registry["release_gate_ci"]["strict_flags"])
 
 
 def test_155_p0_release_evidence_bundle_fails_when_required_label_is_mismatched():
@@ -9624,6 +9633,7 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["success"] is True
     assert payload["mode"] == "check"
     assert payload["changed"] is False
+    assert payload["lock_changed"] is False
     assert payload["strict_flags_total"] >= 1
     assert payload["artifact_paths_total"] >= 1
     assert payload["p0_schema_required_top_level_keys_total"] >= 1
@@ -9885,5 +9895,83 @@ def test_206_release_gate_registry_sync_fails_when_schema_keys_missing_success()
     )
     assert completed.returncode != 0
     assert "required_top_level_keys must include 'label' and 'success'" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_207_release_gate_registry_sync_fails_when_lock_file_is_out_of_sync():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-lock-drift").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    lock_file = workspace / "release-gate-registry.lock.json"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_file.write_text(json.dumps({"version": "1.0.0"}, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--lock-file",
+        str(lock_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "registry lock file" in completed.stderr
+    assert "Out of sync with release-gate registry" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_208_release_gate_registry_sync_write_updates_custom_lock_file():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-lock-write").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    lock_file = workspace / "release-gate-registry.lock.json"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--lock-file",
+        str(lock_file.resolve()),
+        "--write",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["mode"] == "write"
+    assert payload["lock_changed"] is True
+    assert lock_file.exists()
+
+    check_command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--lock-file",
+        str(lock_file.resolve()),
+    ]
+    check_completed = subprocess.run(
+        check_command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert check_completed.returncode == 0, check_completed.stderr
+    check_payload = json.loads([line.strip() for line in check_completed.stdout.splitlines() if line.strip()][-1])
+    assert check_payload["success"] is True
+    assert check_payload["lock_changed"] is False
 
     shutil.rmtree(workspace, ignore_errors=True)
