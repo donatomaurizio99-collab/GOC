@@ -1,0 +1,119 @@
+name: Master Reliability Digest Guard
+
+on:
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: "Maximum allowed age (hours) of latest completed reliability digest run"
+        required: false
+        default: "192"
+      per_page:
+        description: "Maximum completed digest runs fetched"
+        required: false
+        default: "20"
+      allow_breach:
+        description: "Do not fail workflow when digest guard breach is detected"
+        required: false
+        default: "false"
+      recovery_threshold:
+        description: "Healthy nightly runs required before auto-closing an open digest-guard issue"
+        required: false
+        default: "2"
+      active_comment_cooldown:
+        description: "Comment cooldown for unchanged active alerts (comment every N runs)"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reliability-digest-guard:
+    name: Reliability Digest Guard
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run reliability-digest guard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          MAX_AGE_HOURS: ${{ github.event.inputs.max_age_hours || '192' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '20' }}
+          ALLOW_BREACH: ${{ github.event.inputs.allow_breach || 'false' }}
+        run: |
+          $arguments = @(
+            "-Repo", "$env:REPO_FULL",
+            "-MaxAgeHours", "$env:MAX_AGE_HOURS",
+            "-PerPage", "$env:PER_PAGE",
+            "-OutputFile", "artifacts\\master-reliability-digest-guard.json"
+          )
+          if ($env:ALLOW_BREACH -eq "true") {
+            $arguments += "-AllowBreach"
+          }
+          .\scripts\run-master-reliability-digest-guard.ps1 @arguments
+
+      - name: Upsert reliability-digest guard issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
+          ACTIVE_COMMENT_COOLDOWN: ${{ github.event.inputs.active_comment_cooldown || '3' }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "master-reliability-digest-guard" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\master-reliability-digest-guard.json" `
+            -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -ActiveCommentCooldown "$env:ACTIVE_COMMENT_COOLDOWN" `
+            -OutputFile "artifacts\master-reliability-digest-guard-issue-upsert.json"
+
+      - name: Run reliability-digest guard chain selftest
+        if: always()
+        shell: pwsh
+        run: |
+          .\scripts\run-master-guard-chain-selftest.ps1 `
+            -SignalId "master-reliability-digest-guard" `
+            -GuardReportFile "artifacts\master-reliability-digest-guard.json" `
+            -IssueUpsertReportFile "artifacts\master-reliability-digest-guard-issue-upsert.json" `
+            -OutputFile "artifacts\master-reliability-digest-guard-selftest.json"
+
+      - name: Upload reliability-digest guard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-reliability-digest-guard
+          path: artifacts/master-reliability-digest-guard.json
+          if-no-files-found: error
+
+      - name: Upload reliability-digest guard issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-reliability-digest-guard-issue-upsert
+          path: artifacts/master-reliability-digest-guard-issue-upsert.json
+          if-no-files-found: error
+
+      - name: Upload reliability-digest guard chain selftest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-reliability-digest-guard-selftest
+          path: artifacts/master-reliability-digest-guard-selftest.json
+          if-no-files-found: error

@@ -33,10 +33,19 @@ on:
         description: "Fail digest workflow when warning-level findings are present"
         required: false
         default: "false"
+      recovery_threshold:
+        description: "Healthy digest runs required before auto-closing an open reliability-digest warning issue"
+        required: false
+        default: "2"
+      active_comment_cooldown:
+        description: "Comment cooldown for unchanged active alerts (comment every N runs)"
+        required: false
+        default: "3"
 
 permissions:
   contents: read
   actions: read
+  issues: write
 
 jobs:
   reliability-digest:
@@ -90,6 +99,25 @@ jobs:
             Get-Content "artifacts\master-reliability-digest.md" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
 
+      - name: Upsert reliability digest warning issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
+          ACTIVE_COMMENT_COOLDOWN: ${{ github.event.inputs.active_comment_cooldown || '3' }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "master-reliability-digest-warning" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\master-reliability-digest.json" `
+            -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -ActiveCommentCooldown "$env:ACTIVE_COMMENT_COOLDOWN" `
+            -OutputFile "artifacts\master-reliability-digest-warning-issue-upsert.json"
+
       - name: Upload reliability digest artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,4 +126,12 @@ jobs:
           path: |
             artifacts/master-reliability-digest.json
             artifacts/master-reliability-digest.md
+          if-no-files-found: error
+
+      - name: Upload reliability digest warning issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-reliability-digest-warning-issue-upsert
+          path: artifacts/master-reliability-digest-warning-issue-upsert.json
           if-no-files-found: error

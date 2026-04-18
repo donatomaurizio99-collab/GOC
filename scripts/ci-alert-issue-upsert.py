@@ -33,6 +33,14 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
         "title": "[CI Drift] watchdog rehearsal drill SLO breached on master",
         "labels": ["ci-drift", "watchdog-rehearsal"],
     },
+    "master-reliability-digest-warning": {
+        "title": "[CI Drift] master reliability digest warning detected",
+        "labels": ["ci-drift", "reliability-digest"],
+    },
+    "master-reliability-digest-guard": {
+        "title": "[CI Drift] master reliability digest guard SLO breached",
+        "labels": ["ci-drift", "reliability-digest-guard"],
+    },
 }
 
 LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
@@ -59,6 +67,14 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
     "watchdog-rehearsal": {
         "color": "5319E7",
         "description": "Watchdog rehearsal drill freshness/health SLO breached",
+    },
+    "reliability-digest": {
+        "color": "0052CC",
+        "description": "Master reliability digest detected warning-level regression",
+    },
+    "reliability-digest-guard": {
+        "color": "B60205",
+        "description": "Nightly reliability-digest guard detected stale/failed digest coverage",
     },
 }
 
@@ -100,7 +116,7 @@ def _hours_between(started_at: datetime | None, ended_at: datetime | None) -> fl
 
 def _load_json_file(path: Path) -> Any:
     _expect(path.exists(), f"JSON file not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _run_gh_api(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
@@ -455,6 +471,78 @@ def _signal_alert_state(
         ]
         return alert_triggered, summary, branch, {}
 
+    if signal_id == "master-reliability-digest-warning":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        release_gate_samples = (
+            report.get("release_gate_samples") if isinstance(report.get("release_gate_samples"), list) else []
+        )
+        guard_non_success_runs = (
+            report.get("guard_non_success_runs") if isinstance(report.get("guard_non_success_runs"), list) else []
+        )
+        latest_release_sample = (
+            release_gate_samples[0] if release_gate_samples and isinstance(release_gate_samples[0], dict) else {}
+        )
+        latest_degraded_guard_run = (
+            guard_non_success_runs[0] if guard_non_success_runs and isinstance(guard_non_success_runs[0], dict) else {}
+        )
+
+        warning_level = str(decision.get("warning_level") or "healthy")
+        top_cause = str(decision.get("top_cause") or "none")
+        top_cause_detail = str(decision.get("top_cause_detail") or "none")
+        mttr_trend = str(decision.get("mttr_trend") or "insufficient_data")
+        alert_triggered = bool(
+            warning_level == "warning"
+            or bool(decision.get("release_gate_warning_triggered"))
+            or bool(decision.get("guard_health_degraded"))
+        )
+
+        latest_release_run_id = int(latest_release_sample.get("run_id") or 0)
+        latest_release_run_url = str(latest_release_sample.get("run_url") or "").strip()
+        latest_release_runtime = latest_release_sample.get("release_gate_duration_seconds")
+        latest_release_runtime_text = (
+            f"{float(latest_release_runtime):.3f}s"
+            if latest_release_runtime is not None
+            else "unknown"
+        )
+        if latest_release_run_id > 0 and latest_release_run_url:
+            latest_release_text = (
+                f"#{latest_release_run_id} ({latest_release_run_url})"
+                f" runtime={latest_release_runtime_text}"
+            )
+        elif latest_release_run_id > 0:
+            latest_release_text = f"#{latest_release_run_id} runtime={latest_release_runtime_text}"
+        else:
+            latest_release_text = "none"
+
+        latest_guard_run_id = int(latest_degraded_guard_run.get("run_id") or 0)
+        latest_guard_run_url = str(latest_degraded_guard_run.get("run_url") or "").strip()
+        latest_guard_conclusion = str(latest_degraded_guard_run.get("conclusion") or "unknown")
+        if latest_guard_run_id > 0 and latest_guard_run_url:
+            latest_guard_text = (
+                f"#{latest_guard_run_id} ({latest_guard_run_url})"
+                f" conclusion={latest_guard_conclusion}"
+            )
+        elif latest_guard_run_id > 0:
+            latest_guard_text = f"#{latest_guard_run_id} conclusion={latest_guard_conclusion}"
+        else:
+            latest_guard_text = "none"
+
+        summary = [
+            f"- Warning level: {warning_level}",
+            f"- Top cause: {top_cause}",
+            f"- Top cause detail: {top_cause_detail}",
+            f"- Latest release-gate trend sample: {latest_release_text}",
+            f"- Latest degraded guard sample: {latest_guard_text}",
+            f"- MTTR trend: {mttr_trend}",
+            (
+                "- active_comment_suppressed_total sum: "
+                f"{int(metrics.get('active_comment_suppressed_total_sum') or 0)}"
+            ),
+            f"- Recommended action: {decision.get('recommended_action') or 'master_reliability_stable'}",
+        ]
+        return alert_triggered, summary, branch, {}
+
     if signal_id == "release-gate-runtime-alert-age-slo":
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
         warning_triggered = bool(decision.get("warning_triggered"))
@@ -537,6 +625,50 @@ def _signal_alert_state(
                 "recommended_action": recommended_action,
             },
         )
+
+    if signal_id == "master-reliability-digest-guard":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        latest_run = report.get("latest_run") if isinstance(report.get("latest_run"), dict) else {}
+
+        latest_run_id = int(latest_run.get("run_id") or 0)
+        latest_run_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
+        latest_run_status = str(latest_run.get("status") or "")
+        latest_run_conclusion = str(latest_run.get("conclusion") or "")
+        latest_run_age_hours = metrics.get("latest_run_age_hours")
+        max_age_hours = metrics.get("max_age_hours")
+        required_artifact_name = str(latest_run.get("required_artifact_name") or "")
+        required_artifact_missing = bool(metrics.get("required_artifact_missing"))
+        breach_reason = str(decision.get("breach_reason") or "none")
+        alert_triggered = bool(decision.get("reliability_digest_guard_breached"))
+
+        if latest_run_id > 0 and latest_run_url:
+            latest_run_text = f"#{latest_run_id} ({latest_run_url})"
+        elif latest_run_id > 0:
+            latest_run_text = f"#{latest_run_id}"
+        elif latest_run_url:
+            latest_run_text = latest_run_url
+        else:
+            latest_run_text = "none"
+        age_text = (
+            f"{float(latest_run_age_hours):.2f}h"
+            if latest_run_age_hours is not None
+            else "unknown"
+        )
+
+        summary = [
+            f"- Reliability digest guard breached: {'yes' if alert_triggered else 'no'}",
+            f"- Breach reason: {breach_reason}",
+            f"- Latest digest workflow run: {latest_run_text}",
+            f"- Latest digest workflow run status: {latest_run_status or 'unknown'} / {latest_run_conclusion or 'unknown'}",
+            f"- Latest digest workflow run age: {age_text} (threshold={max_age_hours}h)",
+            (
+                f"- Required artifact `{required_artifact_name}` missing: "
+                f"{'yes' if required_artifact_missing else 'no'}"
+            ),
+            f"- Recommended action: {decision.get('recommended_action') or 'reliability_digest_guard_healthy'}",
+        ]
+        return alert_triggered, summary, branch, {}
 
     raise RuntimeError(f"Unsupported signal id: {signal_id}")
 
@@ -632,43 +764,115 @@ def _signal_immediate_actions(
     repo: str,
     branch: str,
 ) -> list[str]:
-    if signal_id != "master-guard-workflow-health":
-        return []
-
-    degraded_workflow_details = (
-        report.get("degraded_workflows") if isinstance(report.get("degraded_workflows"), list) else []
-    )
-    degraded_items = [item for item in degraded_workflow_details if isinstance(item, dict)]
-
-    latest_run_references: list[str] = []
-    missing_required_artifacts: list[str] = []
-    for item in degraded_items:
-        workflow_name = str(item.get("workflow_name") or "").strip() or "unknown_workflow"
-        latest_run = item.get("latest_run") if isinstance(item.get("latest_run"), dict) else {}
-        latest_run_references.append(
-            _format_guard_workflow_latest_run_reference(
-                repo=repo,
-                workflow_name=workflow_name,
-                latest_run=latest_run,
-            )
+    if signal_id == "master-guard-workflow-health":
+        degraded_workflow_details = (
+            report.get("degraded_workflows") if isinstance(report.get("degraded_workflows"), list) else []
         )
-        for artifact_name in _coerce_string_list(item.get("missing_required_artifacts")):
-            if artifact_name not in missing_required_artifacts:
-                missing_required_artifacts.append(artifact_name)
+        degraded_items = [item for item in degraded_workflow_details if isinstance(item, dict)]
 
-    run_references_text = ", ".join(latest_run_references) if latest_run_references else "none"
-    missing_artifacts_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
+        latest_run_references: list[str] = []
+        missing_required_artifacts: list[str] = []
+        for item in degraded_items:
+            workflow_name = str(item.get("workflow_name") or "").strip() or "unknown_workflow"
+            latest_run = item.get("latest_run") if isinstance(item.get("latest_run"), dict) else {}
+            latest_run_references.append(
+                _format_guard_workflow_latest_run_reference(
+                    repo=repo,
+                    workflow_name=workflow_name,
+                    latest_run=latest_run,
+                )
+            )
+            for artifact_name in _coerce_string_list(item.get("missing_required_artifacts")):
+                if artifact_name not in missing_required_artifacts:
+                    missing_required_artifacts.append(artifact_name)
 
-    return [
-        f"- Open degraded guard workflow run(s) immediately: {run_references_text}",
-        f"- Verify and restore missing required artifacts: {missing_artifacts_text}",
-        (
-            "- Re-run watchdog check locally for confirmation: "
-            "`.\\scripts\\run-master-guard-workflow-health-check.ps1 "
-            "-LookbackHours 30 -PerPage 50 "
-            "-OutputFile artifacts\\master-guard-workflow-health-check.json`"
-        ),
-    ]
+        run_references_text = ", ".join(latest_run_references) if latest_run_references else "none"
+        missing_artifacts_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
+
+        return [
+            f"- Open degraded guard workflow run(s) immediately: {run_references_text}",
+            f"- Verify and restore missing required artifacts: {missing_artifacts_text}",
+            (
+                "- Re-run watchdog check locally for confirmation: "
+                "`.\\scripts\\run-master-guard-workflow-health-check.ps1 "
+                "-LookbackHours 30 -PerPage 50 "
+                "-OutputFile artifacts\\master-guard-workflow-health-check.json`"
+            ),
+        ]
+
+    if signal_id == "master-reliability-digest-warning":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        release_gate_samples = (
+            report.get("release_gate_samples") if isinstance(report.get("release_gate_samples"), list) else []
+        )
+        guard_non_success_runs = (
+            report.get("guard_non_success_runs") if isinstance(report.get("guard_non_success_runs"), list) else []
+        )
+        latest_release_sample = (
+            release_gate_samples[0] if release_gate_samples and isinstance(release_gate_samples[0], dict) else {}
+        )
+        latest_guard_sample = (
+            guard_non_success_runs[0] if guard_non_success_runs and isinstance(guard_non_success_runs[0], dict) else {}
+        )
+
+        release_reference = "none"
+        release_run_id = int(latest_release_sample.get("run_id") or 0)
+        release_run_url = str(latest_release_sample.get("run_url") or "").strip()
+        if release_run_id > 0 and release_run_url:
+            release_reference = f"#{release_run_id} ({release_run_url})"
+        elif release_run_id > 0:
+            release_reference = f"#{release_run_id}"
+
+        guard_reference = "none"
+        guard_run_id = int(latest_guard_sample.get("run_id") or 0)
+        guard_run_url = str(latest_guard_sample.get("run_url") or "").strip()
+        if guard_run_id > 0 and guard_run_url:
+            guard_reference = f"#{guard_run_id} ({guard_run_url})"
+        elif guard_run_id > 0:
+            guard_reference = f"#{guard_run_id}"
+
+        return [
+            f"- Open latest release-gate trend sample: {release_reference}",
+            f"- Open latest degraded guard sample: {guard_reference}",
+            (
+                f"- Investigate top cause and detail: "
+                f"{decision.get('top_cause') or 'none'} / {decision.get('top_cause_detail') or 'none'}"
+            ),
+            (
+                "- Re-run digest locally for confirmation: "
+                "`.\\scripts\\run-master-reliability-digest.ps1 "
+                "-ReleaseGateWarningSeconds 540 "
+                "-WarningSustainedRuns 3 "
+                "-OutputFile artifacts\\master-reliability-digest.json "
+                "-MarkdownOutputFile artifacts\\master-reliability-digest.md`"
+            ),
+        ]
+
+    if signal_id == "master-reliability-digest-guard":
+        latest_run = report.get("latest_run") if isinstance(report.get("latest_run"), dict) else {}
+        latest_run_id = int(latest_run.get("run_id") or 0)
+        latest_run_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
+        if latest_run_id > 0 and latest_run_url:
+            latest_reference = f"#{latest_run_id} ({latest_run_url})"
+        elif latest_run_id > 0:
+            latest_reference = f"#{latest_run_id}"
+        else:
+            latest_reference = "none"
+        required_artifact_name = str(latest_run.get("required_artifact_name") or "master-reliability-digest")
+
+        return [
+            f"- Open latest reliability-digest run immediately: {latest_reference}",
+            f"- Verify required artifact exists and is not expired: `{required_artifact_name}`",
+            (
+                "- Re-run digest guard locally for confirmation: "
+                "`.\\scripts\\run-master-reliability-digest-guard.ps1 "
+                "-MaxAgeHours 192 "
+                "-PerPage 20 "
+                "-OutputFile artifacts\\master-reliability-digest-guard.json`"
+            ),
+        ]
+
+    return []
 
 
 def _build_issue_body(
