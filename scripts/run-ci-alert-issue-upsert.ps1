@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("master-branch-protection-drift", "release-gate-runtime-early-warning", "release-gate-runtime-alert-age-slo")]
+    [ValidateSet("master-branch-protection-drift", "master-guard-workflow-health", "release-gate-runtime-early-warning", "release-gate-runtime-alert-age-slo")]
     [string]$SignalId,
     [Parameter(Mandatory = $true)]
     [string]$ReportFile,
