@@ -3,6 +3,7 @@ param(
     [string]$RegistryFile = "docs\\release-gate-registry.json",
     [string]$LockFile = "docs\\release-gate-registry.lock.json",
     [string]$CiWorkflowFile = ".github\\workflows\\ci.yml",
+    [string]$OutputFile = "",
     [switch]$Write
 )
 
@@ -17,6 +18,9 @@ $arguments = @(
     "--lock-file", $LockFile,
     "--ci-workflow-file", $CiWorkflowFile
 )
+if ($OutputFile) {
+    $arguments += @("--output-file", $OutputFile)
+}
 if ($Write) {
     $arguments += "--write"
 }
