@@ -448,6 +448,19 @@ def _extract_release_gate_strict_switches(release_gate_text: str) -> list[str]:
     return list(dict.fromkeys(matches))
 
 
+def _find_declared_strict_switches_without_runtime_usage(
+    release_gate_text: str,
+    strict_switches: list[str],
+) -> list[str]:
+    missing_runtime_usage: list[str] = []
+    for flag in strict_switches:
+        occurrences = len(re.findall(rf"\${re.escape(flag)}\b", release_gate_text))
+        # One occurrence is expected from the [switch] declaration itself.
+        if occurrences <= 1:
+            missing_runtime_usage.append(flag)
+    return missing_runtime_usage
+
+
 def validate_registry_wiring(
     *,
     strict_flags: list[str],
@@ -535,6 +548,17 @@ def validate_registry_wiring(
             f"{strict_switches_missing_in_registry}"
         ),
     )
+    strict_switches_without_runtime_usage = _find_declared_strict_switches_without_runtime_usage(
+        release_gate_text,
+        release_gate_strict_switches,
+    )
+    _expect(
+        not strict_switches_without_runtime_usage,
+        (
+            "Registry contract mismatch: declared strict switches without runtime usage in release-gate: "
+            f"{sorted(strict_switches_without_runtime_usage)}"
+        ),
+    )
 
     return {
         "release_gate_registry_argument_occurrences": release_gate_registry_arg_count,
@@ -547,6 +571,7 @@ def validate_registry_wiring(
         "registry_strict_flags_declared_total": len(strict_flags),
         "strict_flags_missing_in_release_gate_total": len(strict_flags_missing_in_release_gate),
         "strict_switches_missing_in_registry_total": len(strict_switches_missing_in_registry),
+        "declared_strict_switches_without_runtime_usage_total": len(strict_switches_without_runtime_usage),
     }
 
 
@@ -612,6 +637,9 @@ def _build_sync_report_payload(
         "registry_strict_flags_declared_total": wiring_metrics["registry_strict_flags_declared_total"],
         "strict_flags_missing_in_release_gate_total": wiring_metrics["strict_flags_missing_in_release_gate_total"],
         "strict_switches_missing_in_registry_total": wiring_metrics["strict_switches_missing_in_registry_total"],
+        "declared_strict_switches_without_runtime_usage_total": wiring_metrics[
+            "declared_strict_switches_without_runtime_usage_total"
+        ],
     }
 
 
