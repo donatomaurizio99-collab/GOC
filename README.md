@@ -947,6 +947,7 @@ Nightly master required-checks monitoring now hard-fails on non-green required C
 Nightly branch-protection drift guard now verifies that `master` keeps exactly the 5 required checks (no missing or unexpected status contexts).
 Nightly guard-workflow health watchdog now verifies that the guard workflows themselves run successfully on `master` and publish their expected artifacts.
 It also enforces a coverage contract so all relevant `master-*` guard/warning/required-checks workflow files are declared in the watchdog with expected artifact contracts.
+Guard-health issue summaries now include per-degraded-workflow diagnostics (reason(s), missing required artifacts, and latest run ID/URL) so on-call can triage directly from the issue.
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
 Nightly drift/warning workflows now upsert deduplicated GitHub issues (labels: `ci-drift` + signal label), enforce the invariant of at most one open issue per signal, reset recovery streak on active alerts, and auto-close recovered issues after 2 healthy nightly runs (configurable threshold). The runtime alert-age SLO escalation issue now carries a mandatory parent runtime-warning reference in its issue body and closes immediately when parent-coupled escalation criteria are no longer met.
 
