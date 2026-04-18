@@ -54,6 +54,7 @@ jobs:
             artifacts/p0-closure-report-release-gate.json
             artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json
             artifacts/p0-disaster-recovery-rehearsal-pack-evidence-release-gate/**
+            artifacts/incident-rollback-release-gate.json
             artifacts/failure-budget-dashboard-release-gate.json
             artifacts/safe-mode-ux-degradation-release-gate.json
             artifacts/a11y-test-harness-release-gate.json

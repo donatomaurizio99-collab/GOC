@@ -1,6 +1,7 @@
 param(
     [string]$PythonExe = "python",
     [string]$WorkspaceDir = ".tmp\\incident-rollback-drills",
+    [string]$OutputFile = "",
     [int]$LoadRequests = 30,
     [switch]$KeepArtifacts
 )
@@ -16,6 +17,9 @@ $args = @(
     "--label", "manual",
     "--load-requests", [string]$LoadRequests
 )
+if (-not [string]::IsNullOrWhiteSpace($OutputFile)) {
+    $args += @("--output-file", $OutputFile)
+}
 if ($KeepArtifacts) {
     $args += "--keep-artifacts"
 }

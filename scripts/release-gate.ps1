@@ -1197,12 +1197,15 @@ if (-not $SkipMultiDbAtomicSwitchDrill) {
 if (-not $SkipIncidentRollbackDrill) {
     Invoke-GateStep -Name "Incident/rollback drill (burst load + ring rollback)" -Action {
         $workspace = Join-Path $ProjectRoot ".tmp\incident-rollback-drills"
+        $reportPath = Join-Path $ProjectRoot "artifacts\incident-rollback-release-gate.json"
+        $script:P0EvidenceReportPaths += $reportPath
         try {
             Invoke-NativeCommand -Executable $PythonExe -Arguments @(
                 ".\scripts\incident-rollback-drill.py",
                 "--workspace", $workspace,
                 "--label", "release-gate",
-                "--load-requests", "30"
+                "--load-requests", "30",
+                "--output-file", $reportPath
             )
         } catch {
             if ($StrictIncidentRollbackDrill) {

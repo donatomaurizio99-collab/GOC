@@ -1615,6 +1615,7 @@ def test_73_slo_alert_check_reports_ok_memory():
 def test_74_incident_rollback_drill_reports_success():
     workspace = _local_test_dir("pytest-incident-rollback-drill")
     project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-rollback-release-gate.json"
     command = [
         sys.executable,
         str(project_root / "scripts" / "incident-rollback-drill.py"),
@@ -1624,6 +1625,8 @@ def test_74_incident_rollback_drill_reports_success():
         "pytest-drill",
         "--load-requests",
         "30",
+        "--output-file",
+        str(output_file.resolve()),
     ]
     completed = subprocess.run(
         command,
@@ -1643,6 +1646,9 @@ def test_74_incident_rollback_drill_reports_success():
     assert payload["rollback"]["ok"] is True
     assert payload["incident"]["slo_status"] in {"degraded", "critical"}
     assert payload["incident"]["load"]["throttled_count"] > 0
+    assert output_file.exists()
+    output_payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert output_payload["success"] is True
     shutil.rmtree(workspace, ignore_errors=True)
 
 
@@ -5448,6 +5454,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-runtime-stability-release-gate.json",
         "artifacts/critical-drill-flake-gate-release-gate.json",
         "artifacts/p0-report-schema-contract-release-gate.json",
+        "artifacts/incident-rollback-release-gate.json",
         "artifacts/release-gate-step-timings-release-gate.json",
         "artifacts/release-gate-evidence-freshness-release-gate.json",
         "artifacts/release-gate-evidence-hash-manifest-release-gate.json",
@@ -5596,6 +5603,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-rollback-trigger-integrity-check.ps1" in runbook_contract_script
     assert "run-release-gate-post-cutover-finalization-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
+    assert "artifacts/incident-rollback-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-history-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-budget-release-gate.json" in runbook_contract_script

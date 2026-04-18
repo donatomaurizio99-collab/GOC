@@ -134,6 +134,7 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/p0-report-schema-contract-release-gate.json",
     "artifacts/p0-release-evidence-bundle-release-gate.json",
     "artifacts/p0-closure-report-release-gate.json",
+    "artifacts/incident-rollback-release-gate.json",
     "artifacts/release-gate-step-timings-release-gate.json",
     "artifacts/release-gate-evidence-freshness-release-gate.json",
     "artifacts/release-gate-evidence-hash-manifest-release-gate.json",
