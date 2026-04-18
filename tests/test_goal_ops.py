@@ -10884,3 +10884,289 @@ def test_225_master_branch_protection_drift_guard_workflow_wrapper_and_docs_wiri
 
     assert "[master-branch-protection-drift-guard.yml]" in readme
     assert "keeps exactly the 5 required checks" in readme
+
+
+def test_226_release_gate_runtime_early_warning_warns_without_failing_by_default():
+    workspace = _local_test_dir("pytest-release-gate-runtime-early-warning-warning-only").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    output_file = workspace / "release-gate-runtime-early-warning.json"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    run_ids = [8103, 8102, 8101, 8001]
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": run_ids[0],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8103",
+                        "updated_at": "2026-04-18T14:50:00Z",
+                    },
+                    {
+                        "id": run_ids[1],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8102",
+                        "updated_at": "2026-04-18T14:20:00Z",
+                    },
+                    {
+                        "id": run_ids[2],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8101",
+                        "updated_at": "2026-04-18T13:50:00Z",
+                    },
+                    {
+                        "id": run_ids[3],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8001",
+                        "updated_at": "2026-04-16T09:00:00Z",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    (jobs_dir / f"{run_ids[0]}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "conclusion": "success",
+                        "started_at": "2026-04-18T14:39:00Z",
+                        "completed_at": "2026-04-18T14:49:30Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_ids[1]}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "conclusion": "success",
+                        "started_at": "2026-04-18T14:10:00Z",
+                        "completed_at": "2026-04-18T14:19:30Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_ids[2]}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "conclusion": "success",
+                        "started_at": "2026-04-18T13:40:00Z",
+                        "completed_at": "2026-04-18T13:49:20Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_ids[3]}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "conclusion": "success",
+                        "started_at": "2026-04-16T08:45:00Z",
+                        "completed_at": "2026-04-16T08:50:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-runtime-early-warning.py"),
+        "--label",
+        "pytest-runtime-warning",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--lookback-hours",
+        "24",
+        "--now-utc",
+        "2026-04-18T15:00:00Z",
+        "--threshold-seconds",
+        "540",
+        "--sustained-runs",
+        "3",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "::warning::Release Gate runtime early warning:" in completed.stdout
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["warning_triggered"] is True
+    assert payload["decision"]["release_blocked"] is False
+    assert payload["metrics"]["consecutive_runs_over_threshold"] == 3
+    assert payload["metrics"]["runs_over_threshold_total"] == 3
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_227_release_gate_runtime_early_warning_can_fail_on_warning():
+    workspace = _local_test_dir("pytest-release-gate-runtime-early-warning-fail-on-warning").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    run_ids = [8202, 8201, 8200]
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": run_ids[0],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8202",
+                        "updated_at": "2026-04-18T14:40:00Z",
+                    },
+                    {
+                        "id": run_ids[1],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8201",
+                        "updated_at": "2026-04-18T14:10:00Z",
+                    },
+                    {
+                        "id": run_ids[2],
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-8200",
+                        "updated_at": "2026-04-18T13:40:00Z",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    for run_id in run_ids:
+        (jobs_dir / f"{run_id}.json").write_text(
+            json.dumps(
+                {
+                    "jobs": [
+                        {
+                            "name": "Release Gate (Windows)",
+                            "conclusion": "success",
+                            "started_at": "2026-04-18T13:00:00Z",
+                            "completed_at": "2026-04-18T13:09:45Z",
+                        }
+                    ]
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-runtime-early-warning.py"),
+        "--label",
+        "pytest-runtime-warning-fail",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--lookback-hours",
+        "24",
+        "--now-utc",
+        "2026-04-18T15:00:00Z",
+        "--threshold-seconds",
+        "540",
+        "--sustained-runs",
+        "3",
+        "--fail-on-warning",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Release-gate runtime early warning failed: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["decision"]["warning_triggered"] is True
+    assert payload["decision"]["release_blocked"] is True
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_228_release_gate_runtime_early_warning_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml"
+    ).read_text(encoding="utf-8")
+    wrapper = (project_root / "scripts" / "run-release-gate-runtime-early-warning.ps1").read_text(
+        encoding="utf-8"
+    )
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Release Gate Runtime Early Warning" in workflow
+    assert 'cron: "10 3 * * *"' in workflow
+    assert ".\\scripts\\run-release-gate-runtime-early-warning.ps1" in workflow
+    assert "release-gate-runtime-early-warning.json" in workflow
+    assert "fail_on_warning" in workflow
+
+    assert "Release Gate (Windows)" in wrapper
+    assert "--threshold-seconds" in wrapper
+    assert "--sustained-runs" in wrapper
+    assert "--fail-on-warning" in wrapper
+    assert "release-gate-runtime-early-warning.py" in wrapper
+
+    assert "[master-release-gate-runtime-early-warning.yml]" in readme
+    assert "3 consecutive runs >= 540s" in readme
