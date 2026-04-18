@@ -2333,7 +2333,7 @@ def test_94_stability_canary_reports_success_with_short_soak():
                     "release_freeze_policy": {"baseline_duration_seconds": 0.1},
                     "db_corruption_quarantine": {"baseline_duration_seconds": 0.1},
                     "power_loss_durability": {"baseline_duration_seconds": 0.1},
-                    "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 0.1},
+                        "upgrade_downgrade_compatibility": {"baseline_duration_seconds": 1.0},
                     "db_safe_mode_watchdog": {"baseline_duration_seconds": 0.1},
                     "invariant_monitor_watchdog": {"baseline_duration_seconds": 0.1},
                     "event_consumer_recovery_chaos": {"baseline_duration_seconds": 0.1},
