@@ -915,6 +915,7 @@ Workflow file:
 
 Release-gate CI strict flags + release evidence upload paths are now sourced from:
 - [release-gate-registry.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/release-gate-registry.json)
+- [release-gate-registry.lock.json](/C:/Users/raffa/OneDrive/Documents/New%20project/docs/release-gate-registry.lock.json)
 
 P0 report schema contract defaults (`required_top_level_keys`, `required_decision_keys`, `required_label`) and
 P0 release evidence bundle defaults (`required_label`) are also sourced from the same registry.
@@ -922,6 +923,10 @@ P0 release evidence bundle defaults (`required_label`) are also sourced from the
 Sync/verify command:
 ```powershell
 python .\scripts\release-gate-registry-sync.py
+```
+Write/sync command:
+```powershell
+python .\scripts\release-gate-registry-sync.py --write
 ```
 The check validates CI strict flags/artifact uploads and registry wiring in `scripts\release-gate.ps1` plus P0 schema/bundle wrappers.
 It also enforces cross-contract consistency (required labels + artifact coverage across registry sections).
