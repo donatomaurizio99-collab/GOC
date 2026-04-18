@@ -124,6 +124,14 @@ param(
     [switch]$StrictReleaseGateReleaseTrainReadinessCheck,
     [switch]$SkipReleaseGateProductionFinalAttestationCheck,
     [switch]$StrictReleaseGateProductionFinalAttestationCheck,
+    [switch]$SkipReleaseGateProductionCutoverReadinessCheck,
+    [switch]$StrictReleaseGateProductionCutoverReadinessCheck,
+    [switch]$SkipReleaseGateHypercareActivationCheck,
+    [switch]$StrictReleaseGateHypercareActivationCheck,
+    [switch]$SkipReleaseGateRollbackTriggerIntegrityCheck,
+    [switch]$StrictReleaseGateRollbackTriggerIntegrityCheck,
+    [switch]$SkipReleaseGatePostCutoverFinalizationCheck,
+    [switch]$StrictReleaseGatePostCutoverFinalizationCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -1978,6 +1986,111 @@ if (-not $SkipReleaseGateProductionFinalAttestationCheck) {
             }
             Write-Warning (
                 "Release-gate production final attestation failed but StrictReleaseGateProductionFinalAttestationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateProductionCutoverReadinessCheck) {
+    Invoke-GateStep -Name "Release-gate production cutover readiness check (Stage AC cutover readiness gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-production-cutover-readiness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-production-cutover-readiness-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-production-cutover-policy.json",
+                "--required-reports", "artifacts/release-gate-production-final-attestation-release-gate.json,artifacts/release-gate-release-train-readiness-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json,artifacts/p0-closure-report-release-gate.json",
+                "--production-final-report-file", "artifacts/release-gate-production-final-attestation-release-gate.json",
+                "--release-train-report-file", "artifacts/release-gate-release-train-readiness-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateProductionCutoverReadinessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate production cutover readiness check failed but StrictReleaseGateProductionCutoverReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateHypercareActivationCheck) {
+    Invoke-GateStep -Name "Release-gate hypercare activation check (Stage AD hypercare activation gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-hypercare-activation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-hypercare-activation-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-hypercare-policy.json",
+                "--required-reports", "artifacts/release-gate-production-cutover-readiness-release-gate.json,artifacts/release-gate-production-final-attestation-release-gate.json,artifacts/release-gate-slo-burn-rate-v2-release-gate.json,artifacts/failure-budget-dashboard-release-gate.json",
+                "--cutover-report-file", "artifacts/release-gate-production-cutover-readiness-release-gate.json",
+                "--burn-rate-report-file", "artifacts/release-gate-slo-burn-rate-v2-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateHypercareActivationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate hypercare activation check failed but StrictReleaseGateHypercareActivationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateRollbackTriggerIntegrityCheck) {
+    Invoke-GateStep -Name "Release-gate rollback trigger integrity check (Stage AE rollback integrity gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-rollback-trigger-integrity-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-rollback-trigger-integrity-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-rollback-trigger-integrity-policy.json",
+                "--required-reports", "artifacts/release-gate-hypercare-activation-release-gate.json,artifacts/auto-rollback-policy-release-gate.json,artifacts/incident-rollback-release-gate.json,artifacts/release-gate-slo-burn-rate-v2-release-gate.json",
+                "--auto-rollback-report-file", "artifacts/auto-rollback-policy-release-gate.json",
+                "--incident-rollback-report-file", "artifacts/incident-rollback-release-gate.json",
+                "--hypercare-report-file", "artifacts/release-gate-hypercare-activation-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateRollbackTriggerIntegrityCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate rollback trigger integrity check failed but StrictReleaseGateRollbackTriggerIntegrityCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGatePostCutoverFinalizationCheck) {
+    Invoke-GateStep -Name "Release-gate post-cutover finalization check (Stage AF production finalization gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-post-cutover-finalization-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-post-cutover-finalization-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-post-cutover-finalization-policy.json",
+                "--required-reports", "artifacts/release-gate-production-cutover-readiness-release-gate.json,artifacts/release-gate-hypercare-activation-release-gate.json,artifacts/release-gate-rollback-trigger-integrity-release-gate.json,artifacts/release-gate-production-final-attestation-release-gate.json",
+                "--rollback-integrity-report-file", "artifacts/release-gate-rollback-trigger-integrity-release-gate.json",
+                "--production-final-report-file", "artifacts/release-gate-production-final-attestation-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePostCutoverFinalizationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate post-cutover finalization check failed but StrictReleaseGatePostCutoverFinalizationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }
