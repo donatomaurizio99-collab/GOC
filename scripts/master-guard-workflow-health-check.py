@@ -41,6 +41,14 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
             "master-guard-workflow-health-issue-upsert",
         ],
     },
+    {
+        "workflow_file": "master-watchdog-rehearsal-slo-guard.yml",
+        "workflow_name": "Master Watchdog Rehearsal SLO Guard",
+        "required_artifacts": [
+            "master-watchdog-rehearsal-slo-guard",
+            "master-watchdog-rehearsal-slo-guard-issue-upsert",
+        ],
+    },
 ]
 
 GUARD_WORKFLOW_DISCOVERY_TOKENS = (

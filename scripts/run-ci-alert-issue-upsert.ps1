@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("master-branch-protection-drift", "master-guard-workflow-health", "release-gate-runtime-early-warning", "release-gate-runtime-alert-age-slo")]
+    [ValidateSet("master-branch-protection-drift", "master-guard-workflow-health", "release-gate-runtime-early-warning", "release-gate-runtime-alert-age-slo", "master-watchdog-rehearsal-drill-slo")]
     [string]$SignalId,
     [Parameter(Mandatory = $true)]
     [string]$ReportFile,
@@ -11,6 +11,7 @@
     [string]$IssueOplogFile = "",
     [int]$RecoveryThreshold = 2,
     [double]$AlertAgeHours = 72,
+    [int]$ActiveCommentCooldown = 3,
     [string]$OutputFile = "artifacts\\ci-alert-issue-upsert.json",
     [switch]$DryRun
 )
@@ -28,6 +29,7 @@ $args = @(
     "--report-file", $ReportFile,
     "--recovery-threshold", [string]$RecoveryThreshold,
     "--alert-age-hours", [string]$AlertAgeHours,
+    "--active-comment-cooldown", [string]$ActiveCommentCooldown,
     "--output-file", $OutputFile
 )
 if ($RunUrl) {
