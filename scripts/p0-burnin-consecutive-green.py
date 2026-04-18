@@ -11,10 +11,21 @@ from typing import Any
 
 DEFAULT_REQUIRED_JOBS = [
     "Release Gate (Windows)",
+    "Security CI Lane",
     "Pytest (Python 3.11)",
     "Pytest (Python 3.12)",
     "Desktop Smoke (Windows)",
 ]
+
+CONCLUSION_SEVERITY = {
+    "success": 0,
+    "neutral": 1,
+    "skipped": 1,
+    "cancelled": 2,
+    "timed_out": 3,
+    "failure": 4,
+    "action_required": 5,
+}
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -45,6 +56,50 @@ def _parse_required_jobs(text: str) -> list[str]:
     jobs = [item.strip() for item in str(text).split(",") if item.strip()]
     _expect(jobs, "At least one required job must be configured.")
     return jobs
+
+
+def _dedupe_ordered_strings(values: list[str]) -> tuple[list[str], list[str]]:
+    deduped: list[str] = []
+    duplicates: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        token = str(raw).strip()
+        if not token:
+            continue
+        if token in seen:
+            duplicates.append(token)
+            continue
+        seen.add(token)
+        deduped.append(token)
+    return deduped, duplicates
+
+
+def _collapse_job_conclusion(conclusions: list[str]) -> str:
+    normalized = [str(item).strip().lower() for item in conclusions if str(item).strip()]
+    if not normalized:
+        return ""
+    return max(normalized, key=lambda item: CONCLUSION_SEVERITY.get(item, 6))
+
+
+def _build_job_conclusion_map(jobs: list[dict[str, Any]]) -> tuple[dict[str, str], list[str], int, int]:
+    conclusions_by_name: dict[str, list[str]] = {}
+    named_job_entries_total = 0
+    for job in jobs:
+        name = str(job.get("name") or "").strip()
+        if not name:
+            continue
+        named_job_entries_total += 1
+        conclusions_by_name.setdefault(name, []).append(str(job.get("conclusion") or ""))
+
+    job_map: dict[str, str] = {}
+    duplicate_job_names: list[str] = []
+    for name, conclusions in conclusions_by_name.items():
+        if len(conclusions) > 1:
+            duplicate_job_names.append(name)
+        job_map[name] = _collapse_job_conclusion(conclusions)
+
+    duplicate_job_entries_dropped = max(0, named_job_entries_total - len(job_map))
+    return job_map, sorted(duplicate_job_names), named_job_entries_total, duplicate_job_entries_dropped
 
 
 def _fetch_workflow_id(*, repo: str, workflow_name: str) -> int:
@@ -112,12 +167,9 @@ def _evaluate_run(
     run_head_sha = str(run.get("head_sha") or "")
     run_updated_at = str(run.get("updated_at") or "")
 
-    job_map: dict[str, str] = {}
-    for job in jobs:
-        name = str(job.get("name") or "")
-        if not name:
-            continue
-        job_map[name] = str(job.get("conclusion") or "")
+    job_map, duplicate_job_names, named_job_entries_total, duplicate_job_entries_dropped = _build_job_conclusion_map(
+        jobs
+    )
 
     missing_jobs = [job_name for job_name in required_jobs if job_name not in job_map]
     failing_jobs = [
@@ -141,6 +193,13 @@ def _evaluate_run(
         "head_sha": run_head_sha,
         "updated_at": run_updated_at,
         "required_jobs": {name: job_map.get(name, "") for name in required_jobs},
+        "job_dedupe": {
+            "named_job_entries_total": int(named_job_entries_total),
+            "unique_job_names_total": int(len(job_map)),
+            "duplicate_job_name_total": int(len(duplicate_job_names)),
+            "duplicate_job_entries_dropped": int(duplicate_job_entries_dropped),
+            "duplicate_job_names": duplicate_job_names,
+        },
         "missing_jobs": missing_jobs,
         "failing_jobs": failing_jobs,
         "is_green": bool(is_green),
@@ -164,6 +223,8 @@ def run_burnin_check(
     _expect(required_consecutive > 0, "required_consecutive must be > 0.")
     _expect(per_page > 0, "per_page must be > 0.")
     _expect(per_page >= required_consecutive, "per_page should be >= required_consecutive.")
+    resolved_required_jobs, duplicate_required_jobs = _dedupe_ordered_strings(required_jobs)
+    _expect(resolved_required_jobs, "At least one required job must be configured.")
 
     started = time.perf_counter()
     if runs_file is not None:
@@ -193,7 +254,7 @@ def run_burnin_check(
             jobs = _fetch_run_jobs_from_github(repo=repo, run_id=run_id)
         evaluation = _evaluate_run(
             run=run,
-            required_jobs=required_jobs,
+            required_jobs=resolved_required_jobs,
             jobs=jobs,
             ignore_run_conclusion=bool(ignore_run_conclusion),
         )
@@ -207,6 +268,19 @@ def run_burnin_check(
             break
 
     success = consecutive_green >= required_consecutive
+    duplicate_job_name_observations = sum(
+        int(((evaluation.get("job_dedupe") or {}).get("duplicate_job_name_total") or 0))
+        for evaluation in evaluations
+    )
+    duplicate_job_entries_dropped_total = sum(
+        int(((evaluation.get("job_dedupe") or {}).get("duplicate_job_entries_dropped") or 0))
+        for evaluation in evaluations
+    )
+    evaluated_runs_with_duplicate_job_names = sum(
+        1
+        for evaluation in evaluations
+        if int(((evaluation.get("job_dedupe") or {}).get("duplicate_job_name_total") or 0)) > 0
+    )
     report = {
         "label": label,
         "success": bool(success),
@@ -214,7 +288,10 @@ def run_burnin_check(
             "repo": repo,
             "branch": branch,
             "workflow_name": workflow_name,
-            "required_jobs": required_jobs,
+            "required_jobs": resolved_required_jobs,
+            "required_jobs_declared_total": int(len(required_jobs)),
+            "required_jobs_unique_total": int(len(resolved_required_jobs)),
+            "required_jobs_duplicates_removed": duplicate_required_jobs,
             "required_consecutive": int(required_consecutive),
             "per_page": int(per_page),
             "allow_not_met": bool(allow_not_met),
@@ -226,6 +303,10 @@ def run_burnin_check(
             "consecutive_green": int(consecutive_green),
             "required_consecutive": int(required_consecutive),
             "evaluated_runs": int(len(evaluations)),
+            "required_jobs_duplicates_removed_total": int(len(duplicate_required_jobs)),
+            "duplicate_job_name_observations": int(duplicate_job_name_observations),
+            "duplicate_job_entries_dropped_total": int(duplicate_job_entries_dropped_total),
+            "evaluated_runs_with_duplicate_job_names": int(evaluated_runs_with_duplicate_job_names),
         },
         "first_non_green": first_non_green,
         "evaluations": evaluations,
