@@ -46,6 +46,8 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
 }
 
 RECOVERY_STREAK_PATTERN = re.compile(r"<!--\s*ci-alert-recovery-streak:(\d+)\s*-->")
+PARENT_RUNTIME_ISSUE_MARKER_PATTERN = re.compile(r"<!--\s*ci-alert-parent-runtime-warning-issue:(\d+)\s*-->")
+PARENT_RUNTIME_ISSUE_LINE_PATTERN = re.compile(r"^- Parent runtime warning issue: #\d+.*$", re.MULTILINE)
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -189,7 +191,7 @@ def _signal_alert_state(
     repo: str,
     issues: list[dict[str, Any]],
     alert_age_hours: float,
-) -> tuple[bool, list[str], str]:
+) -> tuple[bool, list[str], str, dict[str, Any]]:
     config = report.get("config") if isinstance(report.get("config"), dict) else {}
     branch = str(config.get("branch") or "master")
 
@@ -206,7 +208,7 @@ def _signal_alert_state(
             f"- Unexpected required checks: {', '.join(str(item) for item in unexpected) if unexpected else 'none'}",
             f"- Recommended action: {decision.get('recommended_action') or 'branch_protection_in_sync'}",
         ]
-        return alert_triggered, summary, branch
+        return alert_triggered, summary, branch, {}
 
     if signal_id == "release-gate-runtime-early-warning":
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
@@ -228,7 +230,7 @@ def _signal_alert_state(
             ),
             f"- Recommended action: {decision.get('recommended_action') or 'runtime_within_warning_budget'}",
         ]
-        return alert_triggered, summary, branch
+        return alert_triggered, summary, branch, {}
 
     if signal_id == "release-gate-runtime-alert-age-slo":
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
@@ -253,6 +255,7 @@ def _signal_alert_state(
             )
         runtime_open_issue = runtime_open_matches[0] if runtime_open_matches else None
         runtime_issue_number = int(runtime_open_issue.get("number") or 0) if runtime_open_issue else None
+        runtime_issue_url = str(runtime_open_issue.get("html_url") or "") if runtime_open_issue else ""
         runtime_issue_created_at = (
             _parse_utc_timestamp(str(runtime_open_issue.get("created_at") or "")) if runtime_open_issue else None
         )
@@ -287,9 +290,30 @@ def _signal_alert_state(
         summary = [
             f"- Runtime warning currently active: {'yes' if warning_triggered else 'no'}",
             f"- Runtime warning open issue: {runtime_issue_text}",
+            (
+                f"- Parent runtime warning issue: #{runtime_issue_number} ({runtime_issue_url})"
+                if runtime_open_issue is not None and runtime_issue_url
+                else (
+                    f"- Parent runtime warning issue: #{runtime_issue_number}"
+                    if runtime_open_issue is not None
+                    else "- Parent runtime warning issue: none"
+                )
+            ),
             f"- Recommended action: {recommended_action}",
         ]
-        return alert_triggered, summary, branch
+        return (
+            alert_triggered,
+            summary,
+            branch,
+            {
+                "runtime_warning_active": bool(warning_triggered),
+                "runtime_open_issue_number": int(runtime_issue_number or 0),
+                "runtime_open_issue_url": runtime_issue_url or None,
+                "runtime_open_issue_age_hours": float(runtime_issue_age_hours) if age_known else None,
+                "runtime_open_issue_age_known": bool(age_known),
+                "recommended_action": recommended_action,
+            },
+        )
 
     raise RuntimeError(f"Unsupported signal id: {signal_id}")
 
@@ -300,6 +324,36 @@ def _build_issue_marker(*, signal_id: str, repo: str, branch: str) -> str:
 
 def _build_recovery_marker(streak: int) -> str:
     return f"<!-- ci-alert-recovery-streak:{max(0, int(streak))} -->"
+
+
+def _build_parent_runtime_issue_marker(parent_issue_number: int) -> str:
+    return f"<!-- ci-alert-parent-runtime-warning-issue:{max(1, int(parent_issue_number))} -->"
+
+
+def _apply_parent_runtime_issue_reference(
+    *,
+    body: str,
+    parent_issue_number: int,
+    parent_issue_url: str | None,
+) -> str:
+    text = str(body or "")
+    marker = _build_parent_runtime_issue_marker(parent_issue_number)
+    marker_applied = (
+        PARENT_RUNTIME_ISSUE_MARKER_PATTERN.sub(marker, text)
+        if PARENT_RUNTIME_ISSUE_MARKER_PATTERN.search(text)
+        else (text.rstrip() + "\n" + marker if text.strip() else marker)
+    )
+
+    line = (
+        f"- Parent runtime warning issue: #{int(parent_issue_number)} ({parent_issue_url})"
+        if parent_issue_url
+        else f"- Parent runtime warning issue: #{int(parent_issue_number)}"
+    )
+    if PARENT_RUNTIME_ISSUE_LINE_PATTERN.search(marker_applied):
+        return PARENT_RUNTIME_ISSUE_LINE_PATTERN.sub(line, marker_applied, count=1)
+    if marker_applied.strip():
+        return marker_applied.rstrip() + "\n" + line
+    return line
 
 
 def _extract_recovery_streak(body: str) -> int:
@@ -431,6 +485,28 @@ def _build_recovery_comment(
     return "\n".join(lines)
 
 
+def _build_immediate_close_comment(
+    *,
+    signal_id: str,
+    branch: str,
+    summary_lines: list[str],
+    report_file: Path,
+    run_url: str | None,
+) -> str:
+    lines = [
+        f"Signal `{signal_id}` no longer requires escalation on `{branch}` ({_utc_now_text()}).",
+        "",
+        "## Resolution",
+        "- Closing immediately because parent-coupled escalation criteria are no longer met.",
+        *summary_lines,
+        "",
+        f"- Report file: `{report_file}`",
+    ]
+    if run_url:
+        lines.append(f"- Workflow run: {run_url}")
+    return "\n".join(lines)
+
+
 def run_issue_upsert(
     *,
     label: str,
@@ -462,7 +538,7 @@ def run_issue_upsert(
     actions: list[dict[str, Any]] = []
 
     all_issues = _load_issues(repo=repo, state="all", issues_file=issues_file, dry_run=dry_run)
-    alert_triggered, summary_lines, branch = _signal_alert_state(
+    alert_triggered, summary_lines, branch, signal_context = _signal_alert_state(
         signal_id=signal_id,
         report=report_payload,
         repo=repo,
@@ -473,6 +549,14 @@ def run_issue_upsert(
     title = str(signal_spec["title"])
     labels = [str(item) for item in signal_spec["labels"]]
     marker = _build_issue_marker(signal_id=signal_id, repo=repo, branch=branch)
+    parent_runtime_issue_number: int | None = None
+    parent_runtime_issue_url: str | None = None
+    if signal_id == "release-gate-runtime-alert-age-slo":
+        resolved_parent_issue_number = int(signal_context.get("runtime_open_issue_number") or 0)
+        if resolved_parent_issue_number > 0:
+            parent_runtime_issue_number = resolved_parent_issue_number
+            parent_runtime_issue_url = str(signal_context.get("runtime_open_issue_url") or "") or None
+
     open_matches = _matching_issues(
         issues=[item for item in all_issues if _issue_state(item) == "open"],
         marker=marker,
@@ -501,6 +585,12 @@ def run_issue_upsert(
             issue_url = str(open_issue.get("html_url") or "") or None
 
             updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=0)
+            if parent_runtime_issue_number is not None:
+                updated_body = _apply_parent_runtime_issue_reference(
+                    body=updated_body,
+                    parent_issue_number=int(parent_runtime_issue_number),
+                    parent_issue_url=parent_runtime_issue_url,
+                )
             recovery_streak = 0
             actions.append(
                 {
@@ -544,6 +634,12 @@ def run_issue_upsert(
             issue_url = str(closed_issue.get("html_url") or "") or None
 
             updated_body = _apply_recovery_marker(body=str(closed_issue.get("body") or ""), streak=0)
+            if parent_runtime_issue_number is not None:
+                updated_body = _apply_parent_runtime_issue_reference(
+                    body=updated_body,
+                    parent_issue_number=int(parent_runtime_issue_number),
+                    parent_issue_url=parent_runtime_issue_url,
+                )
             recovery_streak = 0
             actions.append(
                 {
@@ -591,6 +687,12 @@ def run_issue_upsert(
                 summary_lines=summary_lines,
                 run_url=run_url,
             )
+            if parent_runtime_issue_number is not None:
+                issue_body = _apply_parent_runtime_issue_reference(
+                    body=issue_body,
+                    parent_issue_number=int(parent_runtime_issue_number),
+                    parent_issue_url=parent_runtime_issue_url,
+                )
             recovery_streak = 0
             actions.append(
                 {
@@ -626,53 +728,55 @@ def run_issue_upsert(
             issue_number = int(open_issue.get("number") or 0)
             issue_url = str(open_issue.get("html_url") or "") or None
 
-            previous_streak = _extract_recovery_streak(str(open_issue.get("body") or ""))
-            recovery_streak = previous_streak + 1
-            will_close = recovery_streak >= int(recovery_threshold)
-
-            updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=recovery_streak)
-            actions.append(
-                {
-                    "action": "update_issue_body",
-                    "issue_number": issue_number,
-                    "body": updated_body,
-                }
-            )
-            if not dry_run:
-                _run_gh_api(
-                    f"repos/{repo}/issues/{issue_number}",
-                    method="PATCH",
-                    payload={"body": updated_body},
-                )
-
-            recovery_comment = _build_recovery_comment(
-                signal_id=signal_id,
-                branch=branch,
-                summary_lines=summary_lines,
-                report_file=report_file,
-                run_url=run_url,
-                recovery_streak=recovery_streak,
-                recovery_threshold=int(recovery_threshold),
-                will_close=will_close,
-            )
-            actions.append(
-                {
-                    "action": "add_comment",
-                    "issue_number": issue_number,
-                    "issue_url": issue_url,
-                    "body": recovery_comment,
-                }
-            )
-            if not dry_run:
-                _run_gh_api(
-                    f"repos/{repo}/issues/{issue_number}/comments",
-                    method="POST",
-                    payload={"body": recovery_comment},
-                )
-
-            if will_close:
+            immediate_close_signal = signal_id == "release-gate-runtime-alert-age-slo"
+            if immediate_close_signal:
                 issue_action = "closed"
                 issue_closed = True
+                recovery_streak = 0
+
+                updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=0)
+                if parent_runtime_issue_number is not None:
+                    updated_body = _apply_parent_runtime_issue_reference(
+                        body=updated_body,
+                        parent_issue_number=int(parent_runtime_issue_number),
+                        parent_issue_url=parent_runtime_issue_url,
+                    )
+                actions.append(
+                    {
+                        "action": "update_issue_body",
+                        "issue_number": issue_number,
+                        "body": updated_body,
+                    }
+                )
+                if not dry_run:
+                    _run_gh_api(
+                        f"repos/{repo}/issues/{issue_number}",
+                        method="PATCH",
+                        payload={"body": updated_body},
+                    )
+
+                close_comment = _build_immediate_close_comment(
+                    signal_id=signal_id,
+                    branch=branch,
+                    summary_lines=summary_lines,
+                    report_file=report_file,
+                    run_url=run_url,
+                )
+                actions.append(
+                    {
+                        "action": "add_comment",
+                        "issue_number": issue_number,
+                        "issue_url": issue_url,
+                        "body": close_comment,
+                    }
+                )
+                if not dry_run:
+                    _run_gh_api(
+                        f"repos/{repo}/issues/{issue_number}/comments",
+                        method="POST",
+                        payload={"body": close_comment},
+                    )
+
                 actions.append(
                     {
                         "action": "close_issue",
@@ -686,7 +790,67 @@ def run_issue_upsert(
                         payload={"state": "closed", "state_reason": "completed"},
                     )
             else:
-                issue_action = "recovery_progress"
+                previous_streak = _extract_recovery_streak(str(open_issue.get("body") or ""))
+                recovery_streak = previous_streak + 1
+                will_close = recovery_streak >= int(recovery_threshold)
+
+                updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=recovery_streak)
+                actions.append(
+                    {
+                        "action": "update_issue_body",
+                        "issue_number": issue_number,
+                        "body": updated_body,
+                    }
+                )
+                if not dry_run:
+                    _run_gh_api(
+                        f"repos/{repo}/issues/{issue_number}",
+                        method="PATCH",
+                        payload={"body": updated_body},
+                    )
+
+                recovery_comment = _build_recovery_comment(
+                    signal_id=signal_id,
+                    branch=branch,
+                    summary_lines=summary_lines,
+                    report_file=report_file,
+                    run_url=run_url,
+                    recovery_streak=recovery_streak,
+                    recovery_threshold=int(recovery_threshold),
+                    will_close=will_close,
+                )
+                actions.append(
+                    {
+                        "action": "add_comment",
+                        "issue_number": issue_number,
+                        "issue_url": issue_url,
+                        "body": recovery_comment,
+                    }
+                )
+                if not dry_run:
+                    _run_gh_api(
+                        f"repos/{repo}/issues/{issue_number}/comments",
+                        method="POST",
+                        payload={"body": recovery_comment},
+                    )
+
+                if will_close:
+                    issue_action = "closed"
+                    issue_closed = True
+                    actions.append(
+                        {
+                            "action": "close_issue",
+                            "issue_number": issue_number,
+                        }
+                    )
+                    if not dry_run:
+                        _run_gh_api(
+                            f"repos/{repo}/issues/{issue_number}",
+                            method="PATCH",
+                            payload={"state": "closed", "state_reason": "completed"},
+                        )
+                else:
+                    issue_action = "recovery_progress"
 
     if issue_oplog_file is not None:
         issue_oplog_file.parent.mkdir(parents=True, exist_ok=True)
@@ -716,6 +880,7 @@ def run_issue_upsert(
             "matching_open_issues_total": int(len(open_matches)),
             "matching_closed_issues_total": int(len(closed_matches)),
             "matching_issues_total": int(len(open_matches) + len(closed_matches)),
+            "runtime_parent_issue_number": int(parent_runtime_issue_number or 0),
         },
         "decision": {
             "alert_triggered": bool(alert_triggered),
@@ -724,6 +889,7 @@ def run_issue_upsert(
             "issue_closed": bool(issue_closed),
             "recovery_streak": int(recovery_streak),
             "invariant_max_open_issues_ok": True,
+            "immediate_close_mode": bool(signal_id == "release-gate-runtime-alert-age-slo"),
         },
         "issue": {
             "number": issue_number,
