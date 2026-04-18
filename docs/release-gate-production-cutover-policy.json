@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "required_cutover_windows": [
+    "t0_cutover_window",
+    "t_plus_6h_stabilization_window"
+  ],
+  "runbook_section": "3.45 Production cutover readiness gate"
+}

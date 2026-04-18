@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "required_finalization_steps": [
+    "rollback_integrity_handoff",
+    "final_attestation_lock",
+    "green_report_quorum"
+  ],
+  "min_required_green_reports": 4,
+  "runbook_section": "3.48 Post-cutover finalization"
+}

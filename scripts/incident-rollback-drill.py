@@ -304,6 +304,7 @@ def main() -> int:
     parser.add_argument("--load-requests", type=int, default=30)
     parser.add_argument("--previous-version", default="0.0.1")
     parser.add_argument("--incident-version", default="0.0.2")
+    parser.add_argument("--output-file")
     parser.add_argument("--keep-artifacts", action="store_true")
     args = parser.parse_args()
 
@@ -322,6 +323,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    output_file = Path(str(args.output_file)).expanduser() if args.output_file else None
 
     try:
         report = run_drill(
@@ -335,6 +337,10 @@ def main() -> int:
     except Exception as exc:
         print(f"[incident-rollback-drill] ERROR: {exc}", file=sys.stderr)
         return 1
+
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2), encoding="utf-8")
 
     print(json.dumps(report, ensure_ascii=True, sort_keys=True))
     return 0

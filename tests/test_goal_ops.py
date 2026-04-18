@@ -1615,6 +1615,7 @@ def test_73_slo_alert_check_reports_ok_memory():
 def test_74_incident_rollback_drill_reports_success():
     workspace = _local_test_dir("pytest-incident-rollback-drill")
     project_root = Path(__file__).resolve().parents[1]
+    output_file = workspace / "incident-rollback-release-gate.json"
     command = [
         sys.executable,
         str(project_root / "scripts" / "incident-rollback-drill.py"),
@@ -1624,6 +1625,8 @@ def test_74_incident_rollback_drill_reports_success():
         "pytest-drill",
         "--load-requests",
         "30",
+        "--output-file",
+        str(output_file.resolve()),
     ]
     completed = subprocess.run(
         command,
@@ -1643,6 +1646,9 @@ def test_74_incident_rollback_drill_reports_success():
     assert payload["rollback"]["ok"] is True
     assert payload["incident"]["slo_status"] in {"degraded", "critical"}
     assert payload["incident"]["load"]["throttled_count"] > 0
+    assert output_file.exists()
+    output_payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert output_payload["success"] is True
     shutil.rmtree(workspace, ignore_errors=True)
 
 
@@ -5448,6 +5454,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-runtime-stability-release-gate.json",
         "artifacts/critical-drill-flake-gate-release-gate.json",
         "artifacts/p0-report-schema-contract-release-gate.json",
+        "artifacts/incident-rollback-release-gate.json",
         "artifacts/release-gate-step-timings-release-gate.json",
         "artifacts/release-gate-evidence-freshness-release-gate.json",
         "artifacts/release-gate-evidence-hash-manifest-release-gate.json",
@@ -5468,6 +5475,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-evidence-attestation-release-gate.json",
         "artifacts/release-gate-release-train-readiness-release-gate.json",
         "artifacts/release-gate-production-final-attestation-release-gate.json",
+        "artifacts/release-gate-production-cutover-readiness-release-gate.json",
+        "artifacts/release-gate-hypercare-activation-release-gate.json",
+        "artifacts/release-gate-rollback-trigger-integrity-release-gate.json",
+        "artifacts/release-gate-post-cutover-finalization-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5498,6 +5509,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "Release-gate evidence attestation check (Stage Z manifest attestation gate)" in release_gate
     assert "Release-gate release-train readiness check (Stage AA expanded readiness gate)" in release_gate
     assert "Release-gate production final attestation (Stage AB final go/no-go attestation)" in release_gate
+    assert "Release-gate production cutover readiness check (Stage AC cutover readiness gate)" in release_gate
+    assert "Release-gate hypercare activation check (Stage AD hypercare activation gate)" in release_gate
+    assert "Release-gate rollback trigger integrity check (Stage AE rollback integrity gate)" in release_gate
+    assert "Release-gate post-cutover finalization check (Stage AF production finalization gate)" in release_gate
     assert "release-gate-evidence-lineage-check.py" in release_gate
     assert "release-gate-production-readiness-certification.py" in release_gate
     assert "release-gate-slo-burn-rate-v2-check.py" in release_gate
@@ -5508,6 +5523,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-evidence-attestation-check.py" in release_gate
     assert "release-gate-release-train-readiness-check.py" in release_gate
     assert "release-gate-production-final-attestation.py" in release_gate
+    assert "release-gate-production-cutover-readiness-check.py" in release_gate
+    assert "release-gate-hypercare-activation-check.py" in release_gate
+    assert "release-gate-rollback-trigger-integrity-check.py" in release_gate
+    assert "release-gate-post-cutover-finalization-check.py" in release_gate
     assert "--step-timings-file" in release_gate
     assert "release-gate-performance-budget-policy.json" in release_gate
     assert "release-gate-evidence-freshness-policy.json" in release_gate
@@ -5519,6 +5538,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-chaos-matrix-policy.json" in release_gate
     assert "release-gate-artifact-trust-policy.json" in release_gate
     assert "release-gate-evidence-attestation-policy.json" in release_gate
+    assert "release-gate-production-cutover-policy.json" in release_gate
+    assert "release-gate-hypercare-policy.json" in release_gate
+    assert "release-gate-rollback-trigger-integrity-policy.json" in release_gate
+    assert "release-gate-post-cutover-finalization-policy.json" in release_gate
     assert "artifacts\\release-gate-step-timings-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-freshness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-hash-manifest-release-gate.json" in release_gate
@@ -5538,6 +5561,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-evidence-attestation-release-gate.json" in release_gate
     assert "artifacts\\release-gate-release-train-readiness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-production-final-attestation-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-production-cutover-readiness-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-hypercare-activation-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-rollback-trigger-integrity-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-post-cutover-finalization-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5571,7 +5598,12 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-evidence-attestation-check.ps1" in runbook_contract_script
     assert "run-release-gate-release-train-readiness-check.ps1" in runbook_contract_script
     assert "run-release-gate-production-final-attestation-check.ps1" in runbook_contract_script
+    assert "run-release-gate-production-cutover-readiness-check.ps1" in runbook_contract_script
+    assert "run-release-gate-hypercare-activation-check.ps1" in runbook_contract_script
+    assert "run-release-gate-rollback-trigger-integrity-check.ps1" in runbook_contract_script
+    assert "run-release-gate-post-cutover-finalization-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
+    assert "artifacts/incident-rollback-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-history-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-performance-budget-release-gate.json" in runbook_contract_script
@@ -5588,6 +5620,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts/release-gate-evidence-attestation-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-release-train-readiness-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-production-final-attestation-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-production-cutover-readiness-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-hypercare-activation-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-rollback-trigger-integrity-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-post-cutover-finalization-release-gate.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
@@ -5626,6 +5662,16 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "metrics.release_train_block_signals=0" in runbook_contract_script
     assert "metrics.final_attestation_reports_non_green=0" in runbook_contract_script
     assert "metrics.final_attestation_block_signals=0" in runbook_contract_script
+    assert "metrics.cutover_reports_non_green=0" in runbook_contract_script
+    assert "metrics.cutover_release_block_signals=0" in runbook_contract_script
+    assert "metrics.hypercare_reports_non_green=0" in runbook_contract_script
+    assert "metrics.hypercare_release_block_signals=0" in runbook_contract_script
+    assert "metrics.rollback_integrity_reports_non_green=0" in runbook_contract_script
+    assert "metrics.rollback_integrity_expected_reason_mismatches=0" in runbook_contract_script
+    assert "metrics.rollback_integrity_trigger_reason_violations=0" in runbook_contract_script
+    assert "metrics.post_cutover_reports_non_green=0" in runbook_contract_script
+    assert "metrics.post_cutover_release_block_signals=0" in runbook_contract_script
+    assert "metrics.post_cutover_final_signal_failed=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -8451,6 +8497,447 @@ def test_192_release_gate_evidence_attestation_allows_entries_generated_after_ma
     assert payload["metrics"]["evidence_attestation_missing_entries"] == 0
     assert payload["metrics"]["evidence_attestation_generated_after_manifest_entries"] == 2
     assert sorted(payload["entries_generated_after_manifest"]) == sorted([supply_report.name, handoff_report.name])
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_193_release_gate_production_cutover_readiness_check_fails_when_release_block_signal_is_present():
+    workspace = _local_test_dir("pytest-release-gate-production-cutover-readiness-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    production_final_report = artifacts_dir / "release-gate-production-final-attestation-release-gate.json"
+    release_train_report = artifacts_dir / "release-gate-release-train-readiness-release-gate.json"
+    ops_handoff_report = artifacts_dir / "release-gate-operations-handoff-readiness-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    policy_file = workspace / "release-gate-production-cutover-policy.json"
+    output_file = artifacts_dir / "release-gate-production-cutover-readiness-release-gate.json"
+
+    production_final_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ac"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    release_train_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ac"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    ops_handoff_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": True}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    closure_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_cutover_windows": ["t0_cutover", "t_plus_6h_stabilization"],
+                "runbook_section": "3.45 Production cutover readiness gate",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-production-cutover-readiness-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [production_final_report, release_train_report, ops_handoff_report, closure_report]
+        ),
+        "--production-final-report-file",
+        str(production_final_report.resolve()),
+        "--release-train-report-file",
+        str(release_train_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-production-cutover-readiness-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate production cutover readiness check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["cutover_release_block_signals"] >= 1
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_194_release_gate_hypercare_activation_check_fails_when_cutover_signal_is_invalid():
+    workspace = _local_test_dir("pytest-release-gate-hypercare-activation-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    cutover_report = artifacts_dir / "release-gate-production-cutover-readiness-release-gate.json"
+    production_final_report = artifacts_dir / "release-gate-production-final-attestation-release-gate.json"
+    burn_rate_report = artifacts_dir / "release-gate-slo-burn-rate-v2-release-gate.json"
+    failure_budget_report = artifacts_dir / "failure-budget-dashboard-release-gate.json"
+    policy_file = workspace / "release-gate-hypercare-policy.json"
+    output_file = artifacts_dir / "release-gate-hypercare-activation-release-gate.json"
+
+    cutover_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "block_release"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    for report_path in [production_final_report, failure_budget_report]:
+        report_path.write_text(
+            json.dumps(
+                {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    burn_rate_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"non_ok_window_violations": 0},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_hypercare_windows": [
+                    {"name": "h_plus_24", "duration_hours": 24},
+                    {"name": "h_plus_72", "duration_hours": 72},
+                ],
+                "min_hypercare_hours": 24,
+                "runbook_section": "3.46 Hypercare activation",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-hypercare-activation-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [cutover_report, production_final_report, burn_rate_report, failure_budget_report]
+        ),
+        "--cutover-report-file",
+        str(cutover_report.resolve()),
+        "--burn-rate-report-file",
+        str(burn_rate_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-hypercare-activation-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate hypercare activation check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["hypercare_cutover_signal_failed"] == 1
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_195_release_gate_rollback_trigger_integrity_check_fails_when_expected_reason_is_mismatched():
+    workspace = _local_test_dir("pytest-release-gate-rollback-trigger-integrity-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    hypercare_report = artifacts_dir / "release-gate-hypercare-activation-release-gate.json"
+    auto_rollback_report = artifacts_dir / "auto-rollback-policy-release-gate.json"
+    incident_rollback_report = artifacts_dir / "incident-rollback-release-gate.json"
+    burn_rate_report = artifacts_dir / "release-gate-slo-burn-rate-v2-release-gate.json"
+    policy_file = workspace / "release-gate-rollback-trigger-integrity-policy.json"
+    output_file = artifacts_dir / "release-gate-rollback-trigger-integrity-release-gate.json"
+
+    hypercare_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ae"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    auto_rollback_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {
+                    "release_blocked": False,
+                    "observed_trigger_reason": "readiness_regression",
+                    "expected_reason_matched": False,
+                },
+                "rollback": {"executed": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    incident_rollback_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "rollback": {"ok": True},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burn_rate_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_trigger_reasons": ["readiness_regression", "error_budget_burn_rate", "critical_window"],
+                "max_expected_reason_mismatches": 0,
+                "max_trigger_reason_violations": 0,
+                "runbook_section": "3.47 Rollback trigger integrity",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-rollback-trigger-integrity-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [hypercare_report, auto_rollback_report, incident_rollback_report, burn_rate_report]
+        ),
+        "--auto-rollback-report-file",
+        str(auto_rollback_report.resolve()),
+        "--incident-rollback-report-file",
+        str(incident_rollback_report.resolve()),
+        "--hypercare-report-file",
+        str(hypercare_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-rollback-trigger-integrity-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate rollback trigger integrity check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["rollback_integrity_expected_reason_mismatches"] == 1
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_196_release_gate_post_cutover_finalization_check_succeeds_for_green_chain():
+    workspace = _local_test_dir("pytest-release-gate-post-cutover-finalization-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    cutover_report = artifacts_dir / "release-gate-production-cutover-readiness-release-gate.json"
+    hypercare_report = artifacts_dir / "release-gate-hypercare-activation-release-gate.json"
+    rollback_integrity_report = artifacts_dir / "release-gate-rollback-trigger-integrity-release-gate.json"
+    production_final_report = artifacts_dir / "release-gate-production-final-attestation-release-gate.json"
+    policy_file = workspace / "release-gate-post-cutover-finalization-policy.json"
+    output_file = artifacts_dir / "release-gate-post-cutover-finalization-release-gate.json"
+
+    cutover_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ad"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    hypercare_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ae"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    rollback_integrity_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_af"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    production_final_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False, "recommended_action": "production_ready"}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_finalization_steps": [
+                    "rollback_integrity_handoff",
+                    "final_attestation_lock",
+                    "green_report_quorum",
+                ],
+                "min_required_green_reports": 4,
+                "runbook_section": "3.48 Post-cutover finalization",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-post-cutover-finalization-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [cutover_report, hypercare_report, rollback_integrity_report, production_final_report]
+        ),
+        "--rollback-integrity-report-file",
+        str(rollback_integrity_report.resolve()),
+        "--production-final-report-file",
+        str(production_final_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["post_cutover_reports_non_green"] == 0
+    assert payload["metrics"]["post_cutover_release_block_signals"] == 0
+    assert payload["metrics"]["post_cutover_final_signal_failed"] == 0
+    assert payload["decision"]["recommended_action"] == "production_ready_finalized"
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "required_trigger_reasons": [
+    "readiness_regression",
+    "error_budget_burn_rate",
+    "critical_window"
+  ],
+  "max_expected_reason_mismatches": 0,
+  "max_trigger_reason_violations": 0,
+  "runbook_section": "3.47 Rollback trigger integrity"
+}

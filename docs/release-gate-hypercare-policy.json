@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "required_hypercare_windows": [
+    {
+      "name": "h_plus_24",
+      "duration_hours": 24
+    },
+    {
+      "name": "h_plus_72",
+      "duration_hours": 72
+    }
+  ],
+  "min_hypercare_hours": 24,
+  "runbook_section": "3.46 Hypercare activation"
+}
