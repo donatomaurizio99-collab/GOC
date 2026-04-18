@@ -547,7 +547,7 @@ class WorkflowCatalog:
                     limit=self.reaper_batch_size,
                 )
             except Exception:
-                self._metric("workflows.worker.errors")
+                self._safe_metric("workflows.worker.errors")
 
             processed_any = False
             while not self._worker_stop.is_set():
@@ -556,10 +556,10 @@ class WorkflowCatalog:
                 except sqlite3.OperationalError:
                     # SQLite lock contention is transient in concurrent test/desktop scenarios.
                     # Keep worker alive and retry on the next wake cycle.
-                    self._metric("workflows.worker.lock_conflicts")
+                    self._safe_metric("workflows.worker.lock_conflicts")
                     break
                 except Exception:
-                    self._metric("workflows.worker.errors")
+                    self._safe_metric("workflows.worker.errors")
                     break
                 if claimed is None:
                     break
@@ -994,3 +994,10 @@ class WorkflowCatalog:
         if self.observability is None:
             return
         self.observability.increment_metric(name, delta=delta, tx=tx)
+
+    def _safe_metric(self, name: str, delta: int = 1, *, tx: Transaction | None = None) -> None:
+        try:
+            self._metric(name, delta=delta, tx=tx)
+        except sqlite3.OperationalError:
+            # Metrics are best-effort; transient lock conflicts must not crash the worker.
+            return

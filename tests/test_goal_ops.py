@@ -1447,6 +1447,54 @@ def test_64_workflow_worker_survives_claim_lock_conflict(monkeypatch):
         assert catalog.worker_status()["is_running"] is True
 
 
+def test_64b_workflow_worker_survives_lock_conflict_metric_write_error(monkeypatch):
+    app = create_app(
+        Settings(
+            database_url=":memory:",
+            workflow_worker_poll_interval_seconds=0.05,
+        )
+    )
+    with TestClient(app) as local_client:
+        catalog = local_client.app.state.services.workflow_catalog
+        original_claim = catalog._claim_next_queued_run
+        original_metric = catalog._metric
+        claim_fail_once = {"remaining": 1}
+        metric_fail_once = {"remaining": 1}
+
+        def _flaky_claim():
+            if claim_fail_once["remaining"] > 0:
+                claim_fail_once["remaining"] -= 1
+                raise sqlite3.OperationalError("database table is locked: workflow_runs")
+            return original_claim()
+
+        def _flaky_metric(name, delta=1, *, tx=None):
+            if name == "workflows.worker.lock_conflicts" and metric_fail_once["remaining"] > 0:
+                metric_fail_once["remaining"] -= 1
+                raise sqlite3.OperationalError("database table is locked: metrics")
+            return original_metric(name, delta=delta, tx=tx)
+
+        monkeypatch.setattr(catalog, "_claim_next_queued_run", _flaky_claim)
+        monkeypatch.setattr(catalog, "_metric", _flaky_metric)
+
+        started = local_client.post(
+            "/workflows/maintenance.retention_cleanup/start",
+            json={"requested_by": "workflow-test", "payload": {"source": "lock-conflict-metric"}},
+        )
+        assert started.status_code == 201
+        run_id = started.json()["run"]["run_id"]
+
+        final_run = _wait_for_run_in_states(
+            local_client,
+            run_id,
+            {"succeeded", "failed", "timed_out", "cancelled"},
+            timeout_seconds=3.0,
+        )
+        assert final_run["status"] == "succeeded"
+        assert claim_fail_once["remaining"] == 0
+        assert metric_fail_once["remaining"] == 0
+        assert catalog.worker_status()["is_running"] is True
+
+
 def test_65_database_creates_backup_before_pending_migration():
     temp_dir = _local_test_dir("pytest-db-migration-backup")
     db_path = temp_dir / "goal_ops.db"
