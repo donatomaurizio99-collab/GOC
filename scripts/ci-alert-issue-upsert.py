@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 
 SIGNAL_SPECS: dict[str, dict[str, Any]] = {
@@ -173,7 +174,22 @@ def _ensure_label_exists(*, repo: str, label: str) -> None:
         return
     if "unprocessable entity" in stderr and "already exists" in stderr:
         return
-    raise RuntimeError(f"Failed to ensure label '{label}' in repo '{repo}': {completed.stderr.strip()}")
+
+    # GitHub sometimes returns a generic 422 text for an existing label.
+    # Verify by reading the label endpoint before failing hard.
+    encoded_label = quote(label, safe="")
+    verify_command = ["gh", "api", f"repos/{repo}/labels/{encoded_label}"]
+    verify = subprocess.run(
+        verify_command,
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode == 0:
+        return
+    raise RuntimeError(
+        f"Failed to ensure label '{label}' in repo '{repo}': {completed.stderr.strip()} "
+        f"(verify failed: {verify.stderr.strip()})"
+    )
 
 
 def _issue_state(issue: dict[str, Any]) -> str:

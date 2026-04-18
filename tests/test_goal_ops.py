@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sqlite3
@@ -14044,3 +14045,70 @@ def test_260_master_workflow_wrapper_invocations_use_named_parameters():
         text = path.read_text(encoding="utf-8")
         assert "$arguments = @(" not in text
         assert "@arguments" not in text
+
+
+def test_261_master_branch_protection_drift_guard_writes_report_when_payload_load_fails():
+    workspace = _local_test_dir("pytest-master-branch-protection-drift-guard-payload-load-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    missing_required_status_checks_file = workspace / "missing-required-status-checks.json"
+    output_file = workspace / "master-branch-protection-drift-guard.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-branch-protection-drift-guard.py"),
+        "--label",
+        "pytest-branch-protection-payload-load-failure",
+        "--required-status-checks-file",
+        str(missing_required_status_checks_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master branch-protection drift guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["load_error"] is not None
+    assert "JSON file not found" in str(payload["load_error"])
+    assert payload["metrics"]["payload_load_errors_total"] == 1
+    assert payload["metrics"]["missing_required_checks_total"] == 5
+    assert payload["decision"]["recommended_action"] == "branch_protection_payload_unavailable"
+    assert "required_status_checks_payload_loaded" in [item["name"] for item in payload["failed_criteria"]]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_262_ci_alert_issue_upsert_label_ensure_accepts_generic_422_when_label_exists(monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+    script_path = project_root / "scripts" / "ci-alert-issue-upsert.py"
+    spec = importlib.util.spec_from_file_location("ci_alert_issue_upsert_script", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    calls: list[list[str]] = []
+
+    def _fake_run(command, input=None, capture_output=True, text=True):
+        _ = input
+        _ = capture_output
+        _ = text
+        calls.append([str(item) for item in command])
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(command, 1, "", "gh: Validation Failed (HTTP 422)")
+        if len(calls) == 2:
+            return subprocess.CompletedProcess(command, 0, '{"name":"ci-drift"}', "")
+        raise AssertionError("Unexpected subprocess.run invocation.")
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+    module._ensure_label_exists(repo="donatomaurizio99-collab/GOC", label="ci-drift")
+
+    assert len(calls) == 2
+    assert calls[0][0:4] == ["gh", "api", "repos/donatomaurizio99-collab/GOC/labels", "-X"]
+    assert calls[1][0:3] == ["gh", "api", "repos/donatomaurizio99-collab/GOC/labels/ci-drift"]

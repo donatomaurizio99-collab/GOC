@@ -945,6 +945,7 @@ It also enforces registry attestation-gate invariants over sync-report mode/drif
 P0 burn-in CI-check evaluation now dedupes duplicate check names per run and keeps failure-biased conclusions for stability-first gating.
 Nightly master required-checks monitoring now hard-fails on non-green required CI checks in the last 24h (with duplicate-check-name handling).
 Nightly branch-protection drift guard now verifies that `master` keeps exactly the 5 required checks (no missing or unexpected status contexts).
+The drift guard reads required status checks from the branch API payload and still emits a drift report artifact even when branch-protection payload loading fails (for example token-scope/API-access errors), so issue upsert and artifact diagnostics stay intact.
 Nightly guard-workflow health watchdog now verifies that the guard workflows themselves run successfully on `master` and publish their expected artifacts.
 It also enforces a coverage contract so all relevant `master-*` guard/warning/required-checks workflow files are declared in the watchdog with expected artifact contracts.
 Guard-health issue summaries now include per-degraded-workflow diagnostics (reason(s), missing required artifacts, and latest run ID/URL) so on-call can triage directly from the issue.

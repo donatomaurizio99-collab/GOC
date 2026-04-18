@@ -35,6 +35,23 @@ def _run_gh_api(path: str) -> dict[str, Any]:
     return payload
 
 
+def _resolve_required_status_checks_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if "contexts" in payload or "checks" in payload:
+        return payload
+
+    protection = payload.get("protection")
+    _expect(
+        isinstance(protection, dict),
+        "Branch payload missing 'protection' field while resolving required status checks.",
+    )
+    required_status_checks = protection.get("required_status_checks")
+    _expect(
+        isinstance(required_status_checks, dict),
+        "Branch payload missing 'protection.required_status_checks' field.",
+    )
+    return required_status_checks
+
+
 def _load_json_file(path: Path) -> dict[str, Any]:
     _expect(path.exists(), f"JSON file not found: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -100,10 +117,18 @@ def run_drift_guard(
     resolved_required_checks, duplicate_required_checks = _dedupe_ordered_strings(required_checks)
     _expect(resolved_required_checks, "At least one required check must be configured.")
 
-    if required_status_checks_file is not None:
-        payload = _load_json_file(required_status_checks_file)
-    else:
-        payload = _run_gh_api(f"repos/{repo}/branches/{branch}/protection/required_status_checks")
+    payload_load_error: str | None = None
+    payload_source = "fixture_file" if required_status_checks_file is not None else "branch_api"
+    payload: dict[str, Any]
+    try:
+        if required_status_checks_file is not None:
+            raw_payload = _load_json_file(required_status_checks_file)
+        else:
+            raw_payload = _run_gh_api(f"repos/{repo}/branches/{branch}")
+        payload = _resolve_required_status_checks_payload(raw_payload)
+    except Exception as exc:
+        payload_load_error = str(exc)
+        payload = {"contexts": [], "checks": []}
 
     observed_contexts, observed_context_duplicates = _extract_contexts_from_contexts_field(payload)
     checks_contexts, checks_context_duplicates = _extract_contexts_from_checks(payload)
@@ -118,6 +143,11 @@ def run_drift_guard(
     )
 
     criteria = [
+        {
+            "name": "required_status_checks_payload_loaded",
+            "passed": bool(payload_load_error is None),
+            "details": "payload_loaded" if payload_load_error is None else payload_load_error,
+        },
         {
             "name": "required_checks_exact_match",
             "passed": bool(not missing_required_checks and not unexpected_required_checks),
@@ -155,6 +185,7 @@ def run_drift_guard(
             "required_checks_duplicates_removed": duplicate_required_checks,
             "allow_drift": bool(allow_drift),
             "required_status_checks_file": str(required_status_checks_file) if required_status_checks_file else None,
+            "required_status_checks_payload_source": payload_source,
             "output_file": str(output_file),
         },
         "metrics": {
@@ -163,10 +194,12 @@ def run_drift_guard(
             "unexpected_required_checks_total": int(len(unexpected_required_checks)),
             "contexts_duplicates_total": int(len(observed_context_duplicates)),
             "checks_context_duplicates_total": int(len(checks_context_duplicates)),
+            "payload_load_errors_total": int(1 if payload_load_error is not None else 0),
             "criteria_failed": int(len(failed_criteria)),
         },
         "criteria": criteria,
         "failed_criteria": failed_criteria,
+        "load_error": payload_load_error,
         "observed": {
             "strict": payload.get("strict"),
             "contexts": observed_contexts,
@@ -182,7 +215,15 @@ def run_drift_guard(
         },
         "decision": {
             "branch_protection_drift_detected": not bool(success),
-            "recommended_action": "branch_protection_in_sync" if success else "branch_protection_drift_detected",
+            "recommended_action": (
+                "branch_protection_in_sync"
+                if success
+                else (
+                    "branch_protection_payload_unavailable"
+                    if payload_load_error is not None
+                    else "branch_protection_drift_detected"
+                )
+            ),
         },
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
