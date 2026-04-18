@@ -11382,6 +11382,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
     assert "auto-close recovered issues after 2 healthy nightly runs" in readme
+    assert "at most one open issue per signal" in readme
 
 
 def test_232_ci_alert_issue_upsert_auto_closes_after_recovery_threshold():
@@ -11569,5 +11570,240 @@ def test_233_ci_alert_issue_upsert_reopens_closed_issue_on_realert():
     issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
     action_names = [item["action"] for item in issue_oplog["actions"]]
     assert action_names == ["reopen_issue", "add_comment"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_234_ci_alert_issue_state_machine_transitions_remain_stable():
+    workspace = _local_test_dir("pytest-ci-alert-issue-state-machine").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "report.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    signal_id = "release-gate-runtime-early-warning"
+    title = "[Release Gate Runtime] sustained runtime warning on master"
+    marker = "<!-- ci-alert-key:release-gate-runtime-early-warning:donatomaurizio99-collab/GOC:master -->"
+
+    def run_case(*, report_payload: dict, issues_payload: list[dict], case_label: str) -> tuple[dict, list[str]]:
+        report_file.write_text(
+            json.dumps(report_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+        issues_file.write_text(
+            json.dumps(issues_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+        command = [
+            sys.executable,
+            str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+            "--label",
+            case_label,
+            "--signal-id",
+            signal_id,
+            "--repo",
+            "donatomaurizio99-collab/GOC",
+            "--report-file",
+            str(report_file.resolve()),
+            "--issues-file",
+            str(issues_file.resolve()),
+            "--issue-oplog-file",
+            str(issue_oplog_file.resolve()),
+            "--recovery-threshold",
+            "2",
+            "--dry-run",
+            "--output-file",
+            str(output_file.resolve()),
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+        action_names = [item["action"] for item in json.loads(issue_oplog_file.read_text(encoding="utf-8"))["actions"]]
+        return payload, action_names
+
+    healthy_report = {
+        "label": "pytest-runtime-healthy",
+        "config": {"branch": "master", "threshold_seconds": 540, "sustained_runs": 3},
+        "metrics": {"consecutive_runs_over_threshold": 0},
+        "decision": {"warning_triggered": False, "recommended_action": "runtime_within_warning_budget"},
+        "generated_at_utc": "2026-04-21T10:00:00Z",
+    }
+    alert_report = {
+        "label": "pytest-runtime-alert",
+        "config": {"branch": "master", "threshold_seconds": 540, "sustained_runs": 3},
+        "metrics": {"consecutive_runs_over_threshold": 3},
+        "decision": {"warning_triggered": True, "recommended_action": "investigate_release_gate_runtime_regression"},
+        "warning_message": "Release Gate runtime early warning triggered",
+        "generated_at_utc": "2026-04-21T10:30:00Z",
+    }
+
+    open_issue_streak0 = [
+        {
+            "number": 910,
+            "state": "open",
+            "title": title,
+            "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/910",
+            "body": f"managed\\n{marker}\\n<!-- ci-alert-recovery-streak:0 -->",
+        }
+    ]
+    open_issue_streak1 = [
+        {
+            "number": 910,
+            "state": "open",
+            "title": title,
+            "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/910",
+            "body": f"managed\\n{marker}\\n<!-- ci-alert-recovery-streak:1 -->",
+        }
+    ]
+    closed_issue_streak2 = [
+        {
+            "number": 910,
+            "state": "closed",
+            "title": title,
+            "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/910",
+            "body": f"managed\\n{marker}\\n<!-- ci-alert-recovery-streak:2 -->",
+        }
+    ]
+
+    payload1, actions1 = run_case(
+        report_payload=healthy_report,
+        issues_payload=open_issue_streak0,
+        case_label="pytest-state-recovery-progress",
+    )
+    assert payload1["decision"]["issue_action"] == "recovery_progress"
+    assert payload1["decision"]["recovery_streak"] == 1
+    assert actions1 == ["update_issue_body", "add_comment"]
+
+    payload2, actions2 = run_case(
+        report_payload=healthy_report,
+        issues_payload=open_issue_streak1,
+        case_label="pytest-state-close",
+    )
+    assert payload2["decision"]["issue_action"] == "closed"
+    assert payload2["decision"]["issue_closed"] is True
+    assert payload2["decision"]["recovery_streak"] == 2
+    assert actions2 == ["update_issue_body", "add_comment", "close_issue"]
+
+    payload3, actions3 = run_case(
+        report_payload=alert_report,
+        issues_payload=closed_issue_streak2,
+        case_label="pytest-state-reopen",
+    )
+    assert payload3["decision"]["issue_action"] == "reopened"
+    assert payload3["decision"]["recovery_streak"] == 0
+    assert actions3 == ["reopen_issue", "add_comment"]
+
+    payload4, actions4 = run_case(
+        report_payload=alert_report,
+        issues_payload=open_issue_streak0,
+        case_label="pytest-state-commented-idempotent",
+    )
+    assert payload4["decision"]["issue_action"] == "commented"
+    assert payload4["decision"]["issue_deduped"] is True
+    assert payload4["decision"]["recovery_streak"] == 0
+    assert actions4 == ["update_issue_body", "add_comment"]
+
+    payload5, actions5 = run_case(
+        report_payload=healthy_report,
+        issues_payload=closed_issue_streak2,
+        case_label="pytest-state-closed-healthy-noop",
+    )
+    assert payload5["decision"]["issue_action"] == "none"
+    assert payload5["decision"]["issue_deduped"] is False
+    assert payload5["decision"]["issue_closed"] is False
+    assert payload5["decision"]["recovery_streak"] == 0
+    assert actions5 == []
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_235_ci_alert_issue_invariant_fails_with_multiple_open_issues():
+    workspace = _local_test_dir("pytest-ci-alert-issue-invariant").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-branch-protection-drift-guard.json"
+    issues_file = workspace / "issues.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-invariant-alert",
+                "config": {"branch": "master"},
+                "decision": {
+                    "branch_protection_drift_detected": True,
+                    "recommended_action": "branch_protection_drift_detected",
+                },
+                "drift": {
+                    "missing_required_checks": ["Desktop Smoke (Windows)"],
+                    "unexpected_required_checks": [],
+                },
+                "generated_at_utc": "2026-04-22T08:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 1001,
+                    "state": "open",
+                    "title": "[CI Drift] master branch protection required checks drift",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/1001",
+                    "body": (
+                        "managed\\n"
+                        "<!-- ci-alert-key:master-branch-protection-drift:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                },
+                {
+                    "number": 1002,
+                    "state": "open",
+                    "title": "[CI Drift] master branch protection required checks drift",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/1002",
+                    "body": (
+                        "managed\\n"
+                        "<!-- ci-alert-key:master-branch-protection-drift:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                },
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-invariant",
+        "--signal-id",
+        "master-branch-protection-drift",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--dry-run",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "Issue state invariant violated" in completed.stderr
+    assert "expected at most 1 open issue" in completed.stderr
 
     shutil.rmtree(workspace, ignore_errors=True)

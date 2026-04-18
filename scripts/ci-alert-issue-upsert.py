@@ -226,15 +226,29 @@ def _apply_recovery_marker(*, body: str, streak: int) -> str:
     return marker
 
 
-def _find_existing_issue(*, issues: list[dict[str, Any]], marker: str, title: str) -> dict[str, Any] | None:
+def _matching_issues(*, issues: list[dict[str, Any]], marker: str, title: str) -> list[dict[str, Any]]:
+    matched: list[dict[str, Any]] = []
+    seen_numbers: set[int] = set()
+
+    def _append(issue: dict[str, Any]) -> None:
+        number = int(issue.get("number") or 0)
+        if number <= 0:
+            return
+        if number in seen_numbers:
+            return
+        seen_numbers.add(number)
+        matched.append(issue)
+
     for issue in issues:
         body = str(issue.get("body") or "")
         if marker in body:
-            return issue
+            _append(issue)
+
     for issue in issues:
         if str(issue.get("title") or "").strip() == title:
-            return issue
-    return None
+            _append(issue)
+
+    return matched
 
 
 def _build_issue_body(
@@ -355,16 +369,25 @@ def run_issue_upsert(
     actions: list[dict[str, Any]] = []
 
     all_issues = _load_issues(repo=repo, state="all", issues_file=issues_file, dry_run=dry_run)
-    open_issue = _find_existing_issue(
+    open_matches = _matching_issues(
         issues=[item for item in all_issues if _issue_state(item) == "open"],
         marker=marker,
         title=title,
     )
-    closed_issue = _find_existing_issue(
+    closed_matches = _matching_issues(
         issues=[item for item in all_issues if _issue_state(item) == "closed"],
         marker=marker,
         title=title,
     )
+    if len(open_matches) > 1:
+        open_numbers = [int(item.get("number") or 0) for item in open_matches]
+        raise RuntimeError(
+            "Issue state invariant violated for signal "
+            f"'{signal_id}' on branch '{branch}': expected at most 1 open issue, "
+            f"found {len(open_matches)} ({open_numbers})"
+        )
+    open_issue = open_matches[0] if open_matches else None
+    closed_issue = closed_matches[0] if closed_matches else None
 
     if alert_triggered:
         if open_issue is not None:
@@ -581,7 +604,13 @@ def run_issue_upsert(
             "issue_oplog_file": str(issue_oplog_file) if issue_oplog_file is not None else None,
             "dry_run": bool(dry_run),
             "recovery_threshold": int(recovery_threshold),
+            "open_issue_invariant_max": 1,
             "output_file": str(output_file),
+        },
+        "metrics": {
+            "matching_open_issues_total": int(len(open_matches)),
+            "matching_closed_issues_total": int(len(closed_matches)),
+            "matching_issues_total": int(len(open_matches) + len(closed_matches)),
         },
         "decision": {
             "alert_triggered": bool(alert_triggered),
@@ -589,6 +618,7 @@ def run_issue_upsert(
             "issue_deduped": bool(issue_deduped),
             "issue_closed": bool(issue_closed),
             "recovery_streak": int(recovery_streak),
+            "invariant_max_open_issues_ok": True,
         },
         "issue": {
             "number": issue_number,
