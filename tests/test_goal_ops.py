@@ -5497,6 +5497,12 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     runbook_contract_wrapper = (project_root / "scripts" / "run-p0-runbook-contract-check.ps1").read_text(encoding="utf-8")
     registry_sync_script = (project_root / "scripts" / "release-gate-registry-sync.py").read_text(encoding="utf-8")
     registry_sync_wrapper = (project_root / "scripts" / "run-release-gate-registry-sync.ps1").read_text(encoding="utf-8")
+    registry_attestation_script = (
+        project_root / "scripts" / "release-gate-registry-attestation-gate.py"
+    ).read_text(encoding="utf-8")
+    registry_attestation_wrapper = (
+        project_root / "scripts" / "run-release-gate-registry-attestation-gate.ps1"
+    ).read_text(encoding="utf-8")
     registry = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
     registry_lock = json.loads((project_root / "docs" / "release-gate-registry.lock.json").read_text(encoding="utf-8"))
 
@@ -5536,6 +5542,7 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-post-release-continuity-release-gate.json",
         "artifacts/release-gate-production-sustainability-certification-release-gate.json",
         "artifacts/release-gate-registry-sync-ci.json",
+        "artifacts/release-gate-registry-attestation-gate-ci.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5544,6 +5551,12 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert (
         '.\\scripts\\run-release-gate-registry-sync.ps1 -OutputFile '
         '"artifacts/release-gate-registry-sync-ci.json"'
+    ) in ci_workflow
+    assert "Attest release-gate registry sync report" in ci_workflow
+    assert (
+        '.\\scripts\\run-release-gate-registry-attestation-gate.ps1 -RegistrySyncReportFile '
+        '"artifacts/release-gate-registry-sync-ci.json" -OutputFile '
+        '"artifacts/release-gate-registry-attestation-gate-ci.json"'
     ) in ci_workflow
     assert "release_gate_ci" in registry
     assert "p0_runbook_contract" in registry
@@ -5561,12 +5574,24 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         in registry["release_gate_ci"]["release_evidence_artifact_paths"]
     )
     assert "artifacts/release-gate-registry-sync-ci.json" in registry["release_gate_ci"]["release_evidence_artifact_paths"]
+    assert (
+        "artifacts/release-gate-registry-attestation-gate-ci.json"
+        in registry["release_gate_ci"]["release_evidence_artifact_paths"]
+    )
     assert "required_runbook_scripts" in registry["p0_runbook_contract"]
     assert "required_release_gate_tokens" in registry["p0_runbook_contract"]
     assert "required_ci_artifact_paths" in registry["p0_runbook_contract"]
     assert "required_runbook_tokens" in registry["p0_runbook_contract"]
     assert "run-release-gate-registry-sync.ps1" in registry["p0_runbook_contract"]["required_runbook_scripts"]
+    assert (
+        "run-release-gate-registry-attestation-gate.ps1"
+        in registry["p0_runbook_contract"]["required_runbook_scripts"]
+    )
     assert "artifacts/release-gate-registry-sync-ci.json" in registry["p0_runbook_contract"]["required_ci_artifact_paths"]
+    assert (
+        "artifacts/release-gate-registry-attestation-gate-ci.json"
+        in registry["p0_runbook_contract"]["required_ci_artifact_paths"]
+    )
     assert registry["p0_report_schema_contract"]["required_top_level_keys"] == ["label", "success"]
     assert registry["p0_report_schema_contract"]["required_label"] == "release-gate"
     assert registry["p0_release_evidence_bundle"]["required_label"] == "release-gate"
@@ -5716,6 +5741,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-steady-state-certification-check.ps1" in runbook_contract_script
     assert "run-release-gate-post-release-continuity-check.ps1" in runbook_contract_script
     assert "run-release-gate-production-sustainability-certification-check.ps1" in runbook_contract_script
+    assert "run-release-gate-registry-sync.ps1" in runbook_contract_script
+    assert "run-release-gate-registry-attestation-gate.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert "artifacts/incident-rollback-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
@@ -5742,6 +5769,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts/release-gate-steady-state-certification-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-post-release-continuity-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-production-sustainability-certification-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-registry-sync-ci.json" in runbook_contract_script
+    assert "artifacts/release-gate-registry-attestation-gate-ci.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
@@ -5836,6 +5865,14 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert '[string]$OutputFile = ""' in registry_sync_wrapper
     assert '"--lock-file", $LockFile' in registry_sync_wrapper
     assert '@("--output-file", $OutputFile)' in registry_sync_wrapper
+    assert "release-gate-registry-sync.py" in registry_attestation_script
+    assert 'parser.add_argument("--registry-sync-report-file", default=' in registry_attestation_script
+    assert 'parser.add_argument("--expected-registry-sync-report-path", default=' in registry_attestation_script
+    assert "release-gate-registry-attestation-gate.py" in registry_attestation_wrapper
+    assert '[string]$RegistrySyncReportFile = "artifacts\\\\release-gate-registry-sync-ci.json"' in registry_attestation_wrapper
+    assert '[string]$OutputFile = ""' in registry_attestation_wrapper
+    assert '"--registry-sync-report-file", $RegistrySyncReportFile' in registry_attestation_wrapper
+    assert '@("--output-file", $OutputFile)' in registry_attestation_wrapper
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -10223,5 +10260,112 @@ def test_213_release_gate_registry_sync_fails_when_runbook_default_lists_drift_f
     assert completed.returncode != 0
     assert "default lists in p0-runbook-contract-check.py must match registry p0_runbook_contract" in completed.stderr
     assert "required_runbook_scripts" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_214_release_gate_registry_attestation_gate_reports_success():
+    workspace = _local_test_dir("pytest-release-gate-registry-attestation-gate-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    sync_report_file = artifacts_dir / "release-gate-registry-sync-check.json"
+    output_file = artifacts_dir / "release-gate-registry-attestation-check.json"
+
+    sync_command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(sync_report_file.resolve()),
+    ]
+    sync_completed = subprocess.run(
+        sync_command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert sync_completed.returncode == 0, sync_completed.stderr
+    assert sync_report_file.exists()
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-attestation-gate.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--registry-sync-report-file",
+        str(sync_report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["checks_failed"] == 0
+    assert payload["decision"]["release_blocked"] is False
+    assert payload["decision"]["recommended_action"] == "registry_attestation_passed"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_215_release_gate_registry_attestation_gate_fails_when_sync_report_declares_drift():
+    workspace = _local_test_dir("pytest-release-gate-registry-attestation-gate-drift-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    sync_report_file = artifacts_dir / "release-gate-registry-sync-check.json"
+
+    sync_command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--output-file",
+        str(sync_report_file.resolve()),
+    ]
+    sync_completed = subprocess.run(
+        sync_command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert sync_completed.returncode == 0, sync_completed.stderr
+
+    sync_payload = json.loads(sync_report_file.read_text(encoding="utf-8"))
+    sync_payload["changed"] = True
+    sync_report_file.write_text(json.dumps(sync_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-attestation-gate.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--registry-sync-report-file",
+        str(sync_report_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-registry-attestation-gate] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate registry attestation gate failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert "report_changed_false" in payload["failed_checks"]
 
     shutil.rmtree(workspace, ignore_errors=True)

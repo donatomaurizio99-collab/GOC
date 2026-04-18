@@ -57,6 +57,7 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-release-gate-post-release-continuity-check.ps1",
     "run-release-gate-production-sustainability-certification-check.ps1",
     "run-release-gate-registry-sync.ps1",
+    "run-release-gate-registry-attestation-gate.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -181,6 +182,7 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/release-gate-post-release-continuity-release-gate.json",
     "artifacts/release-gate-production-sustainability-certification-release-gate.json",
     "artifacts/release-gate-registry-sync-ci.json",
+    "artifacts/release-gate-registry-attestation-gate-ci.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [

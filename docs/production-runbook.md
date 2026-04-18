@@ -519,11 +519,17 @@ Manual release-gate registry sync check + JSON report artifact:
 ```powershell
 .\scripts\run-release-gate-registry-sync.ps1 -OutputFile artifacts\release-gate-registry-sync-manual.json
 ```
+Manual release-gate registry attestation gate invocation:
+
+```powershell
+.\scripts\run-release-gate-registry-attestation-gate.ps1 -RegistrySyncReportFile artifacts\release-gate-registry-sync-manual.json -OutputFile artifacts\release-gate-registry-attestation-gate-manual.json
+```
 (Also verifies registry wiring in `scripts\release-gate.ps1`, `run-p0-report-schema-contract-check.ps1`, and `run-p0-release-evidence-bundle.ps1`.)
 (Also enforces registry cross-contract consistency for P0 required labels and CI artifact coverage.)
 (Also enforces strict-flag parity between registry `release_gate_ci.strict_flags` and release-gate `[switch]$Strict*` declarations.)
 (Also enforces that each declared release-gate strict switch has runtime usage beyond its declaration.)
 (Also enforces that `p0_runbook_contract` registry lists stay in lockstep with `DEFAULT_REQUIRED_*` lists in `scripts\p0-runbook-contract-check.py`.)
+(Also enforces registry attestation-gate invariants over sync-report mode/drift fields and lock payload integrity.)
 
 Manual release-gate registry + lockfile write/sync invocation:
 
@@ -563,6 +569,7 @@ Verify before release:
   - `Pytest (Python 3.11)`
   - `Pytest (Python 3.12)`
   - `Desktop Smoke (Windows)`
+- registry attestation report is present and green (`artifacts\release-gate-registry-attestation-gate-ci.json`, `success=true`, `metrics.checks_failed=0`)
 - burn-in monitor report confirms threshold met (`metrics.consecutive_green >= metrics.required_consecutive`)
 - runbook contract report confirms zero missing flags/scripts and canary baseline drills (`success=true`)
 - report schema contract check confirms zero baseline schema violations on required reports (`success=true`, `metrics.schema_failed_reports=0`, `metrics.missing_required_files=0`)
