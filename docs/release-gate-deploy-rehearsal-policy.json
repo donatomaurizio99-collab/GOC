@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "required_rehearsal_steps": [
+    "rollback_rehearsal",
+    "restore_validation"
+  ]
+}

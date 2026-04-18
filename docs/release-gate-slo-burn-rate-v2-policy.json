@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "burn_rate_windows": [
+    {
+      "name": "5m",
+      "max_burn_rate_percent": 2.0,
+      "max_non_ok_seconds": 300
+    },
+    {
+      "name": "1h",
+      "max_burn_rate_percent": 1.5,
+      "max_non_ok_seconds": 900
+    },
+    {
+      "name": "6h",
+      "max_burn_rate_percent": 1.0,
+      "max_non_ok_seconds": 1800
+    }
+  ]
+}

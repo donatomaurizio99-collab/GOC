@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "required_manifest_entries": [
+    "release-gate-production-readiness-certification-release-gate.json",
+    "release-gate-slo-burn-rate-v2-release-gate.json",
+    "release-gate-deploy-rehearsal-release-gate.json",
+    "release-gate-chaos-matrix-continuous-release-gate.json",
+    "release-gate-supply-chain-artifact-trust-release-gate.json",
+    "release-gate-operations-handoff-readiness-release-gate.json"
+  ],
+  "require_sha256": true,
+  "max_missing_entries": 0,
+  "max_unverified_entries": 0
+}

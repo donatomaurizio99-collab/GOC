@@ -108,6 +108,22 @@ param(
     [switch]$StrictReleaseGateEvidenceLineageCheck,
     [switch]$SkipReleaseGateProductionReadinessCertificationCheck,
     [switch]$StrictReleaseGateProductionReadinessCertificationCheck,
+    [switch]$SkipReleaseGateSloBurnRateV2Check,
+    [switch]$StrictReleaseGateSloBurnRateV2Check,
+    [switch]$SkipReleaseGateDeployRehearsalCheck,
+    [switch]$StrictReleaseGateDeployRehearsalCheck,
+    [switch]$SkipReleaseGateChaosMatrixContinuousCheck,
+    [switch]$StrictReleaseGateChaosMatrixContinuousCheck,
+    [switch]$SkipReleaseGateSupplyChainArtifactTrustCheck,
+    [switch]$StrictReleaseGateSupplyChainArtifactTrustCheck,
+    [switch]$SkipReleaseGateOperationsHandoffReadinessCheck,
+    [switch]$StrictReleaseGateOperationsHandoffReadinessCheck,
+    [switch]$SkipReleaseGateEvidenceAttestationCheck,
+    [switch]$StrictReleaseGateEvidenceAttestationCheck,
+    [switch]$SkipReleaseGateReleaseTrainReadinessCheck,
+    [switch]$StrictReleaseGateReleaseTrainReadinessCheck,
+    [switch]$SkipReleaseGateProductionFinalAttestationCheck,
+    [switch]$StrictReleaseGateProductionFinalAttestationCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -1766,6 +1782,202 @@ if (-not $SkipReleaseGateProductionReadinessCertificationCheck) {
             }
             Write-Warning (
                 "Release-gate production readiness certification failed but StrictReleaseGateProductionReadinessCertificationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateSloBurnRateV2Check) {
+    Invoke-GateStep -Name "Release-gate SLO burn-rate v2 check (Stage U multi-window burn-rate gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-slo-burn-rate-v2-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-slo-burn-rate-v2-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-slo-burn-rate-v2-policy.json",
+                "--required-reports", "artifacts/failure-budget-dashboard-release-gate.json,artifacts/release-gate-staging-soak-readiness-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateSloBurnRateV2Check) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate SLO burn-rate v2 check failed but StrictReleaseGateSloBurnRateV2Check is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateDeployRehearsalCheck) {
+    Invoke-GateStep -Name "Release-gate deploy rehearsal check (Stage V deploy/rollback rehearsal gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-deploy-rehearsal-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-deploy-rehearsal-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-deploy-rehearsal-policy.json",
+                "--required-reports", "artifacts/release-gate-production-readiness-certification-release-gate.json,artifacts/release-gate-rc-canary-rollout-release-gate.json,artifacts/auto-rollback-policy-release-gate.json,artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json",
+                "--rollback-report-file", "artifacts/auto-rollback-policy-release-gate.json",
+                "--disaster-recovery-report-file", "artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateDeployRehearsalCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate deploy rehearsal check failed but StrictReleaseGateDeployRehearsalCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateChaosMatrixContinuousCheck) {
+    Invoke-GateStep -Name "Release-gate chaos matrix continuous check (Stage W chaos continuity gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-chaos-matrix-continuous-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-chaos-matrix-continuous-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-chaos-matrix-policy.json",
+                "--required-reports", "artifacts/critical-drill-flake-gate-release-gate.json,artifacts/release-gate-runtime-stability-release-gate.json,artifacts/p0-disaster-recovery-rehearsal-pack-release-gate.json",
+                "--critical-drill-report-file", "artifacts/critical-drill-flake-gate-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateChaosMatrixContinuousCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate chaos matrix continuous check failed but StrictReleaseGateChaosMatrixContinuousCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateSupplyChainArtifactTrustCheck) {
+    Invoke-GateStep -Name "Release-gate supply-chain artifact trust check (Stage X artifact trust gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-supply-chain-artifact-trust-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-supply-chain-artifact-trust-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-artifact-trust-policy.json",
+                "--required-reports", "artifacts/security-ci-lane-release-gate.json,artifacts/release-gate-evidence-hash-manifest-release-gate.json",
+                "--manifest-file", "artifacts/release-gate-evidence-manifest-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateSupplyChainArtifactTrustCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate supply-chain artifact trust check failed but StrictReleaseGateSupplyChainArtifactTrustCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateOperationsHandoffReadinessCheck) {
+    Invoke-GateStep -Name "Release-gate operations handoff readiness check (Stage Y cross-gate handoff readiness)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-operations-handoff-readiness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-operations-handoff-readiness-check.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/release-gate-production-readiness-certification-release-gate.json,artifacts/release-gate-slo-burn-rate-v2-release-gate.json,artifacts/release-gate-deploy-rehearsal-release-gate.json,artifacts/release-gate-chaos-matrix-continuous-release-gate.json,artifacts/release-gate-supply-chain-artifact-trust-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateOperationsHandoffReadinessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate operations handoff readiness check failed but StrictReleaseGateOperationsHandoffReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateEvidenceAttestationCheck) {
+    Invoke-GateStep -Name "Release-gate evidence attestation check (Stage Z manifest attestation gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-evidence-attestation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-evidence-attestation-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-evidence-attestation-policy.json",
+                "--required-reports", "artifacts/release-gate-supply-chain-artifact-trust-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json,artifacts/release-gate-evidence-hash-manifest-release-gate.json",
+                "--manifest-file", "artifacts/release-gate-evidence-manifest-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateEvidenceAttestationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate evidence attestation check failed but StrictReleaseGateEvidenceAttestationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateReleaseTrainReadinessCheck) {
+    Invoke-GateStep -Name "Release-gate release-train readiness check (Stage AA expanded readiness gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-release-train-readiness-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-release-train-readiness-check.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/release-gate-production-readiness-certification-release-gate.json,artifacts/release-gate-slo-burn-rate-v2-release-gate.json,artifacts/release-gate-deploy-rehearsal-release-gate.json,artifacts/release-gate-chaos-matrix-continuous-release-gate.json,artifacts/release-gate-supply-chain-artifact-trust-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json,artifacts/release-gate-evidence-attestation-release-gate.json,artifacts/p0-closure-report-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateReleaseTrainReadinessCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate release-train readiness check failed but StrictReleaseGateReleaseTrainReadinessCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateProductionFinalAttestationCheck) {
+    Invoke-GateStep -Name "Release-gate production final attestation (Stage AB final go/no-go attestation)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-production-final-attestation-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-production-final-attestation.py",
+                "--label", "release-gate",
+                "--required-reports", "artifacts/release-gate-release-train-readiness-release-gate.json,artifacts/p0-closure-report-release-gate.json,artifacts/p0-runbook-contract-check-release-gate.json,artifacts/p0-report-schema-contract-release-gate.json,artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--burnin-report-file", "artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--required-consecutive", "10",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateProductionFinalAttestationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate production final attestation failed but StrictReleaseGateProductionFinalAttestationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

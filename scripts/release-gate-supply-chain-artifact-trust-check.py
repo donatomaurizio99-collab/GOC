@@ -11,10 +11,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_REQUIRED_REPORTS = [
-    "artifacts/release-gate-stability-final-readiness-release-gate.json",
-    "artifacts/release-gate-staging-soak-readiness-release-gate.json",
-    "artifacts/release-gate-rc-canary-rollout-release-gate.json",
-    "artifacts/p0-closure-report-release-gate.json",
+    "artifacts/security-ci-lane-release-gate.json",
+    "artifacts/release-gate-evidence-hash-manifest-release-gate.json",
 ]
 
 
@@ -62,32 +60,92 @@ def _read_mtime_epoch(path: Path) -> float | None:
         return None
 
 
+def _resolve_required_entry_path(project_root: Path, manifest_file: Path, required_entry: str) -> Path:
+    raw_path = Path(str(required_entry).strip())
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    else:
+        candidates.append(_resolve_path(project_root, str(raw_path)))
+        candidates.append((manifest_file.parent / raw_path).resolve())
+        if len(raw_path.parts) == 1:
+            candidates.append((project_root / "artifacts" / raw_path.name).resolve())
+
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
+    for candidate in deduped:
+        if candidate.exists():
+            return candidate
+
+    if deduped:
+        return deduped[0]
+    return (project_root / raw_path.name).resolve()
+
+
+def _is_generated_after_manifest(
+    *,
+    entry_path: Path,
+    manifest_generated_at_epoch: float | None,
+    manifest_mtime_epoch: float | None,
+) -> bool:
+    if manifest_generated_at_epoch is None or not entry_path.exists():
+        return False
+
+    try:
+        entry_payload = _read_json_object(entry_path)
+    except Exception:
+        return False
+
+    entry_generated_at_epoch = _parse_utc_timestamp(entry_payload.get("generated_at_utc"))
+    if entry_generated_at_epoch is None:
+        return False
+    if float(entry_generated_at_epoch) > float(manifest_generated_at_epoch):
+        return True
+    if float(entry_generated_at_epoch) < float(manifest_generated_at_epoch):
+        return False
+
+    entry_mtime_epoch = _read_mtime_epoch(entry_path)
+    return (
+        manifest_mtime_epoch is not None
+        and entry_mtime_epoch is not None
+        and float(entry_mtime_epoch) > float(manifest_mtime_epoch)
+    )
+
+
 def run_check(
     *,
     label: str,
     project_root: Path,
+    policy_file: Path,
     required_reports: list[str],
     manifest_file: Path,
     required_label: str,
-    max_report_timestamp_skew_seconds: int,
     output_file: Path,
     allow_missing_reports: bool,
     allow_not_ready: bool,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     _expect(required_reports, "At least one required report must be configured.")
-    _expect(max_report_timestamp_skew_seconds >= 0, "--max-report-timestamp-skew-seconds must be >= 0.")
+
+    policy = _read_json_object(policy_file)
+    raw_required_entries = policy.get("required_manifest_entries")
+    required_manifest_entries = [str(item).strip() for item in raw_required_entries] if isinstance(raw_required_entries, list) else []
+    required_manifest_entries = [item for item in required_manifest_entries if item]
+    require_sha256 = bool(policy.get("require_sha256", True))
+    _expect(required_manifest_entries, f"Policy must define required_manifest_entries: {policy_file}")
 
     resolved_required_reports = [_resolve_path(project_root, value) for value in required_reports]
-
     missing_reports: list[str] = []
     report_records: list[dict[str, Any]] = []
     non_green_reports: list[dict[str, Any]] = []
     label_mismatch_reports: list[dict[str, Any]] = []
-    invalid_timestamp_reports: list[dict[str, Any]] = []
-    parsed_timestamps: list[float] = []
-    report_timestamp_by_path: dict[str, float | None] = {}
-    report_mtime_by_path: dict[str, float | None] = {}
 
     for report_path in resolved_required_reports:
         if not report_path.exists():
@@ -99,82 +157,54 @@ def run_check(
         has_success_flag = isinstance(success_value, bool)
         is_non_green = (not has_success_flag) or (success_value is False)
         label_matches = (not required_label) or (report_label == required_label)
-        generated_at = payload.get("generated_at_utc")
-        parsed_timestamp = _parse_utc_timestamp(generated_at)
-        has_valid_timestamp = parsed_timestamp is not None
-        report_mtime = _read_mtime_epoch(report_path)
-
         record = {
             "path": str(report_path),
             "label": report_label,
             "success": bool(success_value) if has_success_flag else None,
             "has_success_flag": bool(has_success_flag),
             "label_matches_required": bool(label_matches),
-            "generated_at_utc": str(generated_at or ""),
-            "has_valid_generated_at_utc": bool(has_valid_timestamp),
         }
         report_records.append(record)
         if is_non_green:
             non_green_reports.append(record)
         if not label_matches:
             label_mismatch_reports.append(record)
-        if has_valid_timestamp:
-            parsed_timestamps.append(float(parsed_timestamp))
-        else:
-            invalid_timestamp_reports.append(record)
-        report_timestamp_by_path[str(report_path)] = float(parsed_timestamp) if has_valid_timestamp else None
-        report_mtime_by_path[str(report_path)] = report_mtime
 
-    manifest_present = manifest_file.exists()
-    manifest_payload: dict[str, Any] = _read_json_object(manifest_file) if manifest_present else {}
-    manifest_mtime_epoch = _read_mtime_epoch(manifest_file) if manifest_present else None
-    manifest_entries_raw = manifest_payload.get("files")
-    manifest_entries = manifest_entries_raw if isinstance(manifest_entries_raw, list) else []
-    manifest_paths = {
-        str(_resolve_path(project_root, str(item.get("path") or "")))
-        for item in manifest_entries
-        if isinstance(item, dict) and str(item.get("path") or "").strip()
-    }
-    manifest_generated_at_epoch = _parse_utc_timestamp(manifest_payload.get("generated_at_utc"))
-    reports_expected_in_manifest: list[str] = []
-    reports_generated_after_manifest: list[str] = []
-    for report_path in resolved_required_reports:
-        report_key = str(report_path)
-        if report_key in missing_reports:
-            continue
-        report_timestamp = report_timestamp_by_path.get(report_key)
-        report_generated_after_manifest = False
-        if (
-            manifest_generated_at_epoch is not None
-            and report_timestamp is not None
-            and float(report_timestamp) > float(manifest_generated_at_epoch)
-        ):
-            report_generated_after_manifest = True
-        elif (
-            manifest_generated_at_epoch is not None
-            and report_timestamp is not None
-            and float(report_timestamp) == float(manifest_generated_at_epoch)
-        ):
-            report_mtime = report_mtime_by_path.get(report_key)
-            if (
-                manifest_mtime_epoch is not None
-                and report_mtime is not None
-                and float(report_mtime) > float(manifest_mtime_epoch)
-            ):
-                report_generated_after_manifest = True
-
-        if report_generated_after_manifest:
-            reports_generated_after_manifest.append(report_key)
-            continue
-        reports_expected_in_manifest.append(report_key)
-
-    manifest_missing_entries = [
-        report_path for report_path in reports_expected_in_manifest if report_path not in manifest_paths
-    ]
-
-    timestamp_skew_seconds = 0.0
-    if len(parsed_timestamps) >= 2:
-        timestamp_skew_seconds = max(parsed_timestamps) - min(parsed_timestamps)
+    manifest_missing = []
+    unverified_entries = []
+    manifest_entries = []
+    entries_generated_after_manifest: list[str] = []
+    if manifest_file.exists():
+        manifest_payload = _read_json_object(manifest_file)
+        raw_files = manifest_payload.get("files")
+        manifest_entries = raw_files if isinstance(raw_files, list) else []
+        manifest_generated_at_epoch = _parse_utc_timestamp(manifest_payload.get("generated_at_utc"))
+        manifest_mtime_epoch = _read_mtime_epoch(manifest_file)
+        manifest_entry_by_name = {}
+        for entry in manifest_entries:
+            if not isinstance(entry, dict):
+                continue
+            path_value = str(entry.get("path") or "").replace("\\", "/")
+            file_name = Path(path_value).name
+            if file_name:
+                manifest_entry_by_name[file_name] = entry
+        for required_name in required_manifest_entries:
+            entry = manifest_entry_by_name.get(Path(required_name).name)
+            if entry is None:
+                entry_path = _resolve_required_entry_path(project_root, manifest_file, required_name)
+                if _is_generated_after_manifest(
+                    entry_path=entry_path,
+                    manifest_generated_at_epoch=manifest_generated_at_epoch,
+                    manifest_mtime_epoch=manifest_mtime_epoch,
+                ):
+                    entries_generated_after_manifest.append(required_name)
+                    continue
+                manifest_missing.append(required_name)
+                continue
+            if require_sha256 and not str(entry.get("sha256") or "").strip():
+                unverified_entries.append(required_name)
+    else:
+        manifest_missing = list(required_manifest_entries)
 
     criteria = [
         _criterion(
@@ -193,27 +223,14 @@ def run_check(
             f"label_mismatch_reports={len(label_mismatch_reports)}",
         ),
         _criterion(
-            "required_reports_have_valid_timestamp",
-            len(invalid_timestamp_reports) == 0,
-            f"invalid_timestamp_reports={len(invalid_timestamp_reports)}",
+            "artifact_trust_manifest_coverage",
+            len(manifest_missing) == 0,
+            f"manifest_missing_entries={len(manifest_missing)}",
         ),
         _criterion(
-            "report_timestamp_skew_within_budget",
-            float(timestamp_skew_seconds) <= float(max_report_timestamp_skew_seconds),
-            (
-                f"observed={int(round(timestamp_skew_seconds))}, "
-                f"max_allowed={int(max_report_timestamp_skew_seconds)}"
-            ),
-        ),
-        _criterion(
-            "manifest_present",
-            bool(manifest_present),
-            f"manifest_present={manifest_present}",
-        ),
-        _criterion(
-            "manifest_covers_required_reports",
-            len(manifest_missing_entries) == 0,
-            f"manifest_missing_entries={len(manifest_missing_entries)}",
+            "artifact_trust_sha256_verified",
+            len(unverified_entries) == 0,
+            f"unverified_entries={len(unverified_entries)}",
         ),
     ]
 
@@ -225,27 +242,30 @@ def run_check(
         "success": bool(success),
         "paths": {
             "project_root": str(project_root),
+            "policy_file": str(policy_file),
             "manifest_file": str(manifest_file),
             "output_file": str(output_file),
         },
         "config": {
             "required_reports": required_reports,
             "required_label": required_label,
-            "max_report_timestamp_skew_seconds": int(max_report_timestamp_skew_seconds),
             "allow_missing_reports": bool(allow_missing_reports),
             "allow_not_ready": bool(allow_not_ready),
+        },
+        "policy": {
+            "version": str(policy.get("version") or ""),
+            "required_manifest_entries": required_manifest_entries,
+            "require_sha256": bool(require_sha256),
         },
         "metrics": {
             "required_reports_total": len(required_reports),
             "required_reports_present": len(report_records),
             "required_reports_missing": len(missing_reports),
-            "lineage_reports_non_green": len(non_green_reports),
+            "artifact_trust_reports_non_green": len(non_green_reports),
             "label_mismatch_reports": len(label_mismatch_reports),
-            "invalid_timestamp_reports": len(invalid_timestamp_reports),
-            "manifest_missing_entries": len(manifest_missing_entries),
-            "manifest_expected_reports": len(reports_expected_in_manifest),
-            "reports_generated_after_manifest": len(reports_generated_after_manifest),
-            "max_report_timestamp_skew_seconds": int(round(timestamp_skew_seconds)),
+            "artifact_trust_missing_entries": len(manifest_missing),
+            "artifact_trust_unverified_entries": len(unverified_entries),
+            "artifact_trust_generated_after_manifest_entries": len(entries_generated_after_manifest),
             "criteria_failed": len(failed_criteria),
         },
         "decision": {
@@ -258,10 +278,9 @@ def run_check(
         "missing_reports": missing_reports,
         "non_green_reports": non_green_reports,
         "label_mismatch_reports": label_mismatch_reports,
-        "invalid_timestamp_reports": invalid_timestamp_reports,
-        "manifest_missing_entries": manifest_missing_entries,
-        "reports_expected_in_manifest": reports_expected_in_manifest,
-        "reports_generated_after_manifest": reports_generated_after_manifest,
+        "manifest_missing_entries": manifest_missing,
+        "artifact_trust_unverified_entries": unverified_entries,
+        "entries_generated_after_manifest": entries_generated_after_manifest,
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
@@ -270,29 +289,32 @@ def run_check(
     output_file.write_text(json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2), encoding="utf-8")
 
     if not success and not allow_not_ready:
-        raise RuntimeError(f"Release-gate evidence lineage check failed: {json.dumps(report, sort_keys=True)}")
+        raise RuntimeError(
+            f"Release-gate supply-chain artifact trust check failed: {json.dumps(report, sort_keys=True)}"
+        )
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate cross-report evidence lineage coherence over Stage-P/Q/R outputs and the evidence hash manifest."
+            "Validate supply-chain and artifact trust constraints (security report + evidence manifest coverage)."
         )
     )
-    parser.add_argument("--label", default="release-gate-evidence-lineage-check")
+    parser.add_argument("--label", default="release-gate-supply-chain-artifact-trust-check")
     parser.add_argument("--project-root")
+    parser.add_argument("--policy-file", default="docs/release-gate-artifact-trust-policy.json")
     parser.add_argument("--required-reports", default=",".join(DEFAULT_REQUIRED_REPORTS))
     parser.add_argument("--manifest-file", default="artifacts/release-gate-evidence-manifest-release-gate.json")
     parser.add_argument("--required-label", default="release-gate")
-    parser.add_argument("--max-report-timestamp-skew-seconds", type=int, default=900)
-    parser.add_argument("--output-file", default="artifacts/release-gate-evidence-lineage-release-gate.json")
+    parser.add_argument("--output-file", default="artifacts/release-gate-supply-chain-artifact-trust-release-gate.json")
     parser.add_argument("--allow-missing-reports", action="store_true")
     parser.add_argument("--allow-not-ready", action="store_true")
     args = parser.parse_args(argv)
 
     inferred_project_root = Path(__file__).resolve().parents[1]
     project_root = _resolve_path(inferred_project_root, args.project_root) if args.project_root else inferred_project_root
+    policy_file = _resolve_path(project_root, args.policy_file)
     required_reports = _parse_csv_list(args.required_reports)
     manifest_file = _resolve_path(project_root, args.manifest_file)
     output_file = _resolve_path(project_root, args.output_file)
@@ -301,16 +323,16 @@ def main(argv: list[str] | None = None) -> int:
         report = run_check(
             label=str(args.label),
             project_root=project_root,
+            policy_file=policy_file,
             required_reports=required_reports,
             manifest_file=manifest_file,
             required_label=str(args.required_label),
-            max_report_timestamp_skew_seconds=int(args.max_report_timestamp_skew_seconds),
             output_file=output_file,
             allow_missing_reports=bool(args.allow_missing_reports),
             allow_not_ready=bool(args.allow_not_ready),
         )
     except Exception as exc:
-        print(f"[release-gate-evidence-lineage-check] ERROR: {exc}", file=sys.stderr)
+        print(f"[release-gate-supply-chain-artifact-trust-check] ERROR: {exc}", file=sys.stderr)
         return 1
 
     print(json.dumps(report, ensure_ascii=True, sort_keys=True))

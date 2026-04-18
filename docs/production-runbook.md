@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck -StrictReleaseGateEvidenceLineageCheck -StrictReleaseGateProductionReadinessCertificationCheck
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck -StrictReleaseGateEvidenceLineageCheck -StrictReleaseGateProductionReadinessCertificationCheck -StrictReleaseGateSloBurnRateV2Check -StrictReleaseGateDeployRehearsalCheck -StrictReleaseGateChaosMatrixContinuousCheck -StrictReleaseGateSupplyChainArtifactTrustCheck -StrictReleaseGateOperationsHandoffReadinessCheck -StrictReleaseGateEvidenceAttestationCheck -StrictReleaseGateReleaseTrainReadinessCheck -StrictReleaseGateProductionFinalAttestationCheck
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
@@ -71,6 +71,14 @@ This gate covers:
 - release-gate RC canary rollout check (Stage R rollout policy contract with deterministic staged promotion plan)
 - release-gate evidence lineage check (Stage S timestamp + manifest coherence contract across Stage P/Q/R outputs)
 - release-gate production readiness certification (Stage T final consolidated release certificate over Stage P/Q/R/S + P0 burn-in/closure)
+- release-gate SLO burn-rate v2 check (Stage U multi-window SLO burn-rate budget contract over failure budget + staging soak evidence)
+- release-gate deploy rehearsal check (Stage V deploy/rollback rehearsal coverage over production certificate + rollback + DR evidence)
+- release-gate chaos matrix continuous check (Stage W chaos continuity and regression budget gate over critical drill/runtime/DR evidence)
+- release-gate supply-chain artifact trust check (Stage X manifest coverage + SHA256 trust contract over security + evidence hash reports)
+- release-gate operations handoff readiness check (Stage Y cross-gate handoff over Stage T/U/V/W/X outcomes)
+- release-gate evidence attestation check (Stage Z manifest attestation contract for Stage T/U/V/W/X/Y evidence entries)
+- release-gate release-train readiness check (Stage AA expanded consolidated go/no-go over Stage T..Z + P0 closure)
+- release-gate production final attestation (Stage AB final production-ready certificate over Stage AA + P0 closure/runbook/schema/burn-in)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
 - P0 report schema contract check (baseline `label/success` schema contract across required release-gate evidence reports)
@@ -383,6 +391,54 @@ Manual release-gate production readiness certification invocation:
 .\scripts\run-release-gate-production-readiness-certification-check.ps1 -RequiredConsecutive 10
 ```
 
+Manual release-gate SLO burn-rate v2 invocation:
+
+```powershell
+.\scripts\run-release-gate-slo-burn-rate-v2-check.ps1 -PolicyFile "docs\release-gate-slo-burn-rate-v2-policy.json"
+```
+
+Manual release-gate deploy rehearsal invocation:
+
+```powershell
+.\scripts\run-release-gate-deploy-rehearsal-check.ps1 -PolicyFile "docs\release-gate-deploy-rehearsal-policy.json"
+```
+
+Manual release-gate chaos matrix continuous invocation:
+
+```powershell
+.\scripts\run-release-gate-chaos-matrix-continuous-check.ps1 -PolicyFile "docs\release-gate-chaos-matrix-policy.json"
+```
+
+Manual release-gate supply-chain artifact trust invocation:
+
+```powershell
+.\scripts\run-release-gate-supply-chain-artifact-trust-check.ps1 -PolicyFile "docs\release-gate-artifact-trust-policy.json"
+```
+
+Manual release-gate operations handoff readiness invocation:
+
+```powershell
+.\scripts\run-release-gate-operations-handoff-readiness-check.ps1
+```
+
+Manual release-gate evidence attestation invocation:
+
+```powershell
+.\scripts\run-release-gate-evidence-attestation-check.ps1 -PolicyFile "docs\release-gate-evidence-attestation-policy.json"
+```
+
+Manual release-gate release-train readiness invocation:
+
+```powershell
+.\scripts\run-release-gate-release-train-readiness-check.ps1
+```
+
+Manual release-gate production final attestation invocation:
+
+```powershell
+.\scripts\run-release-gate-production-final-attestation-check.ps1 -RequiredConsecutive 10
+```
+
 Manual canary determinism + flake intelligence invocation:
 
 ```powershell
@@ -450,6 +506,14 @@ Verify before release:
 - Stage-R RC canary rollout report is present and green (`artifacts\release-gate-rc-canary-rollout-release-gate.json`, `success=true`)
 - Stage-S evidence lineage report is present and green (`artifacts\release-gate-evidence-lineage-release-gate.json`, `success=true`)
 - Stage-T production readiness certification report is present and green (`artifacts\release-gate-production-readiness-certification-release-gate.json`, `success=true`)
+- Stage-U SLO burn-rate v2 report is present and green (`artifacts\release-gate-slo-burn-rate-v2-release-gate.json`, `success=true`)
+- Stage-V deploy rehearsal report is present and green (`artifacts\release-gate-deploy-rehearsal-release-gate.json`, `success=true`)
+- Stage-W chaos matrix continuous report is present and green (`artifacts\release-gate-chaos-matrix-continuous-release-gate.json`, `success=true`)
+- Stage-X supply-chain artifact trust report is present and green (`artifacts\release-gate-supply-chain-artifact-trust-release-gate.json`, `success=true`)
+- Stage-Y operations handoff readiness report is present and green (`artifacts\release-gate-operations-handoff-readiness-release-gate.json`, `success=true`)
+- Stage-Z evidence attestation report is present and green (`artifacts\release-gate-evidence-attestation-release-gate.json`, `success=true`)
+- Stage-AA release-train readiness report is present and green (`artifacts\release-gate-release-train-readiness-release-gate.json`, `success=true`)
+- Stage-AB production final attestation report is present and green (`artifacts\release-gate-production-final-attestation-release-gate.json`, `success=true`)
 - release-gate evidence freshness report confirms zero freshness regressions (`success=true`, `metrics.stale_reports=0`, `metrics.non_green_reports=0`)
 - release-gate step timing schema report confirms zero schema violations (`success=true`, `metrics.schema_failed_steps=0`)
 - release-gate performance history report confirms zero history regressions (`success=true`, `metrics.history_regression_violations=0`)
@@ -459,6 +523,14 @@ Verify before release:
 - release-gate RC canary rollout report confirms rollout policy and required reports are green (`success=true`, `metrics.rollout_required_reports_non_green=0`, `metrics.rollout_policy_invalid=0`)
 - release-gate evidence lineage report confirms coherent timestamps + manifest coverage (`success=true`, `metrics.lineage_reports_non_green=0`, `metrics.invalid_timestamp_reports=0`, `metrics.manifest_missing_entries=0`)
 - release-gate production readiness certification confirms no downstream block signals and burn-in threshold reached (`success=true`, `metrics.reports_with_release_block_signal=0`, `metrics.burnin_threshold_failed=0`)
+- release-gate SLO burn-rate v2 report confirms multi-window burn-rate budgets are green (`success=true`, `metrics.slo_burn_rate_non_green=0`, `metrics.burn_rate_violations=0`, `metrics.non_ok_window_violations=0`)
+- release-gate deploy rehearsal report confirms policy + rollback + restore evidence are green (`success=true`, `metrics.deploy_rehearsal_non_green=0`, `metrics.deploy_rehearsal_policy_invalid=0`, `metrics.deploy_rehearsal_rollback_failed=0`, `metrics.deploy_rehearsal_restore_failed=0`)
+- release-gate chaos matrix report confirms scenario/regression budgets are green (`success=true`, `metrics.chaos_required_reports_non_green=0`, `metrics.chaos_failed_scenarios=0`, `metrics.chaos_regression_violations=0`)
+- release-gate supply-chain artifact trust report confirms manifest coverage and sha256 trust (`success=true`, `metrics.artifact_trust_reports_non_green=0`, `metrics.artifact_trust_missing_entries=0`, `metrics.artifact_trust_unverified_entries=0`)
+- release-gate operations handoff report confirms zero cross-gate handoff regressions (`success=true`, `metrics.ops_handoff_reports_non_green=0`, `metrics.ops_handoff_release_block_signals=0`)
+- release-gate evidence attestation report confirms zero missing/unverified attested entries (`success=true`, `metrics.evidence_attestation_reports_non_green=0`, `metrics.evidence_attestation_missing_entries=0`, `metrics.evidence_attestation_unverified_entries=0`)
+- release-gate release-train readiness report confirms no non-green or block-signal regressions (`success=true`, `metrics.release_train_reports_non_green=0`, `metrics.release_train_block_signals=0`)
+- release-gate production final attestation confirms expanded final gate is green (`success=true`, `metrics.final_attestation_reports_non_green=0`, `metrics.final_attestation_block_signals=0`, `metrics.burnin_threshold_failed=0`)
 - closure report confirms all readiness criteria and required evidence checks are green (`success=true`, `metrics.criteria_failed=0`, `metrics.required_evidence_reports_missing=0`, `metrics.required_evidence_reports_non_green=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).

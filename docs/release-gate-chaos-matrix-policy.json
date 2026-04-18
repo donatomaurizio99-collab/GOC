@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "required_scenarios": [
+    "storage_fault_chain",
+    "rollback_recovery_chain",
+    "runtime_safety_rail_chain"
+  ],
+  "max_failed_scenarios": 0,
+  "max_regression_violations": 0
+}
