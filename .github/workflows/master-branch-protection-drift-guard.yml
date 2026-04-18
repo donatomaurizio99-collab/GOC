@@ -9,6 +9,10 @@ on:
         description: "Do not fail workflow when branch-protection drift is detected"
         required: false
         default: "false"
+      recovery_threshold:
+        description: "Healthy nightly runs required before auto-closing an open drift issue"
+        required: false
+        default: "2"
 
 permissions:
   contents: read
@@ -50,12 +54,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO_FULL: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
         run: |
           .\scripts\run-ci-alert-issue-upsert.ps1 `
             -SignalId "master-branch-protection-drift" `
             -Repo "$env:REPO_FULL" `
             -ReportFile "artifacts\master-branch-protection-drift-guard.json" `
             -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
             -OutputFile "artifacts\master-branch-protection-drift-issue-upsert.json"
 
       - name: Upload branch-protection drift report

@@ -25,6 +25,10 @@ on:
         description: "Fail workflow when warning is triggered"
         required: false
         default: "false"
+      recovery_threshold:
+        description: "Healthy nightly runs required before auto-closing an open runtime warning issue"
+        required: false
+        default: "2"
 
 permissions:
   contents: read
@@ -74,12 +78,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO_FULL: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
         run: |
           .\scripts\run-ci-alert-issue-upsert.ps1 `
             -SignalId "release-gate-runtime-early-warning" `
             -Repo "$env:REPO_FULL" `
             -ReportFile "artifacts\release-gate-runtime-early-warning.json" `
             -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
             -OutputFile "artifacts\release-gate-runtime-early-warning-issue-upsert.json"
 
       - name: Upload runtime early warning report
