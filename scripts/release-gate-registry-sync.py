@@ -442,8 +442,15 @@ def _update_release_evidence_paths(ci_text: str, artifact_paths: list[str]) -> t
     return ("\n".join(updated_lines) + ("\n" if ci_text.endswith("\n") else "")), changed
 
 
+def _extract_release_gate_strict_switches(release_gate_text: str) -> list[str]:
+    matches = re.findall(r"\[switch\]\$(Strict[A-Za-z0-9]+)", release_gate_text)
+    # Keep declaration order while removing duplicates.
+    return list(dict.fromkeys(matches))
+
+
 def validate_registry_wiring(
     *,
+    strict_flags: list[str],
     release_gate_text: str,
     schema_wrapper_text: str,
     bundle_wrapper_text: str,
@@ -505,6 +512,30 @@ def validate_registry_wiring(
         "Registry sync wrapper must call scripts\\release-gate-registry-sync.py.",
     )
 
+    release_gate_strict_switches = _extract_release_gate_strict_switches(release_gate_text)
+    release_gate_strict_switch_set = set(release_gate_strict_switches)
+    registry_strict_flag_set = set(strict_flags)
+    strict_flags_missing_in_release_gate = sorted(
+        flag for flag in strict_flags if flag not in release_gate_strict_switch_set
+    )
+    strict_switches_missing_in_registry = sorted(
+        flag for flag in release_gate_strict_switches if flag not in registry_strict_flag_set
+    )
+    _expect(
+        not strict_flags_missing_in_release_gate,
+        (
+            "Registry contract mismatch: strict_flags in registry not declared as release-gate strict switches: "
+            f"{strict_flags_missing_in_release_gate}"
+        ),
+    )
+    _expect(
+        not strict_switches_missing_in_registry,
+        (
+            "Registry contract mismatch: release-gate strict switches missing from registry strict_flags: "
+            f"{strict_switches_missing_in_registry}"
+        ),
+    )
+
     return {
         "release_gate_registry_argument_occurrences": release_gate_registry_arg_count,
         "schema_wrapper_registry_argument_occurrences": schema_wrapper_text.count(wrapper_registry_arg),
@@ -512,6 +543,10 @@ def validate_registry_wiring(
         "registry_sync_wrapper_output_file_argument_occurrences": registry_sync_wrapper_text.count(
             '@("--output-file", $OutputFile)'
         ),
+        "release_gate_strict_switches_total": len(release_gate_strict_switches),
+        "registry_strict_flags_declared_total": len(strict_flags),
+        "strict_flags_missing_in_release_gate_total": len(strict_flags_missing_in_release_gate),
+        "strict_switches_missing_in_registry_total": len(strict_switches_missing_in_registry),
     }
 
 
@@ -573,6 +608,10 @@ def _build_sync_report_payload(
         "registry_sync_wrapper_output_file_argument_occurrences": wiring_metrics[
             "registry_sync_wrapper_output_file_argument_occurrences"
         ],
+        "release_gate_strict_switches_total": wiring_metrics["release_gate_strict_switches_total"],
+        "registry_strict_flags_declared_total": wiring_metrics["registry_strict_flags_declared_total"],
+        "strict_flags_missing_in_release_gate_total": wiring_metrics["strict_flags_missing_in_release_gate_total"],
+        "strict_switches_missing_in_registry_total": wiring_metrics["strict_switches_missing_in_registry_total"],
     }
 
 
@@ -638,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle_wrapper_text = _read_text(bundle_wrapper_file)
         registry_sync_wrapper_text = _read_text(registry_sync_wrapper_file)
         wiring_metrics = validate_registry_wiring(
+            strict_flags=registry["strict_flags"],
             release_gate_text=release_gate_text,
             schema_wrapper_text=schema_wrapper_text,
             bundle_wrapper_text=bundle_wrapper_text,
