@@ -10567,3 +10567,35 @@ def test_218_required_checks_hardened_in_burnin_workflows_and_branch_protection_
     master_jobs = [item.strip() for item in master_jobs_csv.split(",") if item.strip()]
     assert len(burnin_jobs) == len(set(burnin_jobs))
     assert len(master_jobs) == len(set(master_jobs))
+
+
+def test_219_ci_workflow_dedupes_pr_checks_by_avoiding_codex_push_trigger():
+    project_root = Path(__file__).resolve().parents[1]
+    ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    lines = ci_workflow.splitlines()
+
+    def _event_branches(event_name: str) -> list[str]:
+        event_header = f"  {event_name}:"
+        for index, line in enumerate(lines):
+            if line != event_header:
+                continue
+            cursor = index + 1
+            while cursor < len(lines) and not lines[cursor].strip():
+                cursor += 1
+            assert cursor < len(lines)
+            assert lines[cursor].strip() == "branches:"
+            cursor += 1
+            branches: list[str] = []
+            while cursor < len(lines):
+                current = lines[cursor]
+                if current.startswith("  ") and not current.startswith("    "):
+                    break
+                stripped = current.strip()
+                if stripped.startswith("- "):
+                    branches.append(stripped[2:].strip())
+                cursor += 1
+            return branches
+        raise AssertionError(f"Workflow event block not found: {event_name}")
+
+    assert _event_branches("push") == ["master"]
+    assert _event_branches("pull_request") == ["master"]
