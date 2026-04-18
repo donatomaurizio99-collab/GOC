@@ -9629,6 +9629,9 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["p0_schema_required_top_level_keys_total"] >= 1
     assert payload["p0_schema_required_decision_keys_total"] >= 0
     assert payload["p0_bundle_required_files_total"] >= 0
+    assert payload["ci_artifact_paths_checked_total"] >= 1
+    assert payload["schema_required_files_checked_total"] >= 0
+    assert payload["bundle_required_files_checked_total"] >= 0
     assert payload["release_gate_registry_argument_occurrences"] >= 2
     assert payload["schema_wrapper_registry_argument_occurrences"] >= 1
     assert payload["bundle_wrapper_registry_argument_occurrences"] >= 1
@@ -9796,5 +9799,91 @@ def test_203_p0_release_evidence_bundle_uses_registry_required_label_default():
     assert payload["success"] is False
     assert payload["metrics"]["label_mismatch_reports"] == 1
     assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_204_release_gate_registry_sync_fails_when_p0_required_labels_differ():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-label-mismatch").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    registry_file = workspace / "release-gate-registry.json"
+    registry_payload = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
+    registry_payload["p0_release_evidence_bundle"]["required_label"] = "manual"
+    registry_file.write_text(json.dumps(registry_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--registry-file",
+        str(registry_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "p0_report_schema_contract.required_label must match" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_205_release_gate_registry_sync_fails_when_ci_artifact_path_not_covered():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-artifact-coverage").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    registry_file = workspace / "release-gate-registry.json"
+    registry_payload = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
+    registry_payload["p0_runbook_contract"]["required_ci_artifact_paths"].append(
+        "artifacts/not-covered-release-gate.json"
+    )
+    registry_file.write_text(json.dumps(registry_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--registry-file",
+        str(registry_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "required_ci_artifact_paths contains entries not covered" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_206_release_gate_registry_sync_fails_when_schema_keys_missing_success():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-schema-keys").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    registry_file = workspace / "release-gate-registry.json"
+    registry_payload = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
+    registry_payload["p0_report_schema_contract"]["required_top_level_keys"] = ["label"]
+    registry_file.write_text(json.dumps(registry_payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--registry-file",
+        str(registry_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "required_top_level_keys must include 'label' and 'success'" in completed.stderr
 
     shutil.rmtree(workspace, ignore_errors=True)

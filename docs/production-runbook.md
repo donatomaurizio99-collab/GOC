@@ -515,6 +515,7 @@ Manual release-gate registry sync check invocation:
 .\scripts\run-release-gate-registry-sync.ps1
 ```
 (Also verifies registry wiring in `scripts\release-gate.ps1`, `run-p0-report-schema-contract-check.ps1`, and `run-p0-release-evidence-bundle.ps1`.)
+(Also enforces registry cross-contract consistency for P0 required labels and CI artifact coverage.)
 
 Manual P0 runbook contract check invocation:
 

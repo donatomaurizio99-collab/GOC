@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import re
 import sys
@@ -70,6 +71,97 @@ def _normalize_string_list(
     if not allow_empty:
         _expect(normalized, f"Registry key '{key}' must contain at least one token in {context}.")
     return normalized
+
+
+def _normalize_artifact_token(token: str) -> str:
+    return str(token).strip().replace("\\", "/")
+
+
+def _artifact_path_is_covered(path: str, patterns: list[str]) -> bool:
+    normalized_path = _normalize_artifact_token(path)
+    for pattern in patterns:
+        normalized_pattern = _normalize_artifact_token(pattern)
+        if fnmatch.fnmatch(normalized_path, normalized_pattern):
+            return True
+    return False
+
+
+def _validate_cross_contracts(
+    *,
+    release_evidence_artifact_paths: list[str],
+    p0_runbook_contract: dict[str, list[str]],
+    p0_report_schema_contract: dict[str, Any],
+    p0_release_evidence_bundle: dict[str, Any],
+) -> dict[str, int]:
+    schema_required_label = str(p0_report_schema_contract["required_label"])
+    bundle_required_label = str(p0_release_evidence_bundle["required_label"])
+    _expect(
+        schema_required_label == bundle_required_label,
+        (
+            "Registry contract mismatch: "
+            "p0_report_schema_contract.required_label must match "
+            "p0_release_evidence_bundle.required_label."
+        ),
+    )
+
+    schema_required_top_level_keys = list(p0_report_schema_contract["required_top_level_keys"])
+    _expect(
+        "label" in schema_required_top_level_keys and "success" in schema_required_top_level_keys,
+        (
+            "Registry contract mismatch: "
+            "p0_report_schema_contract.required_top_level_keys must include 'label' and 'success'."
+        ),
+    )
+
+    uncovered_ci_artifact_paths = [
+        token
+        for token in p0_runbook_contract["required_ci_artifact_paths"]
+        if not _artifact_path_is_covered(token, release_evidence_artifact_paths)
+    ]
+    _expect(
+        not uncovered_ci_artifact_paths,
+        (
+            "Registry contract mismatch: p0_runbook_contract.required_ci_artifact_paths contains "
+            "entries not covered by release_gate_ci.release_evidence_artifact_paths: "
+            f"{uncovered_ci_artifact_paths}"
+        ),
+    )
+
+    schema_required_files = list(p0_report_schema_contract["required_files"])
+    uncovered_schema_required_files = [
+        token
+        for token in schema_required_files
+        if not _artifact_path_is_covered(token, release_evidence_artifact_paths)
+    ]
+    _expect(
+        not uncovered_schema_required_files,
+        (
+            "Registry contract mismatch: p0_report_schema_contract.required_files contains entries "
+            "not covered by release_gate_ci.release_evidence_artifact_paths: "
+            f"{uncovered_schema_required_files}"
+        ),
+    )
+
+    bundle_required_files = list(p0_release_evidence_bundle["required_files"])
+    uncovered_bundle_required_files = [
+        token
+        for token in bundle_required_files
+        if not _artifact_path_is_covered(token, release_evidence_artifact_paths)
+    ]
+    _expect(
+        not uncovered_bundle_required_files,
+        (
+            "Registry contract mismatch: p0_release_evidence_bundle.required_files contains entries "
+            "not covered by release_gate_ci.release_evidence_artifact_paths: "
+            f"{uncovered_bundle_required_files}"
+        ),
+    )
+
+    return {
+        "ci_artifact_paths_checked_total": len(p0_runbook_contract["required_ci_artifact_paths"]),
+        "schema_required_files_checked_total": len(schema_required_files),
+        "bundle_required_files_checked_total": len(bundle_required_files),
+    }
 
 
 def load_registry(registry_file: Path) -> dict[str, Any]:
@@ -145,7 +237,7 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
         allow_empty=True,
     )
 
-    return {
+    registry = {
         "strict_flags": strict_flags,
         "release_evidence_artifact_paths": artifact_paths,
         "p0_contract": p0_lists,
@@ -160,6 +252,13 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
             "required_files": p0_bundle_required_files,
         },
     }
+    registry["cross_contract_metrics"] = _validate_cross_contracts(
+        release_evidence_artifact_paths=registry["release_evidence_artifact_paths"],
+        p0_runbook_contract=registry["p0_contract"],
+        p0_report_schema_contract=registry["p0_report_schema_contract"],
+        p0_release_evidence_bundle=registry["p0_release_evidence_bundle"],
+    )
+    return registry
 
 
 def _leading_whitespace(text: str) -> str:
@@ -361,6 +460,15 @@ def main(argv: list[str] | None = None) -> int:
                     "p0_bundle_required_files_total": len(
                         registry["p0_release_evidence_bundle"]["required_files"]
                     ),
+                    "ci_artifact_paths_checked_total": registry["cross_contract_metrics"][
+                        "ci_artifact_paths_checked_total"
+                    ],
+                    "schema_required_files_checked_total": registry["cross_contract_metrics"][
+                        "schema_required_files_checked_total"
+                    ],
+                    "bundle_required_files_checked_total": registry["cross_contract_metrics"][
+                        "bundle_required_files_checked_total"
+                    ],
                     "release_gate_registry_argument_occurrences": wiring_metrics[
                         "release_gate_registry_argument_occurrences"
                     ],
@@ -407,6 +515,15 @@ def main(argv: list[str] | None = None) -> int:
                 "p0_bundle_required_files_total": len(
                     registry["p0_release_evidence_bundle"]["required_files"]
                 ),
+                "ci_artifact_paths_checked_total": registry["cross_contract_metrics"][
+                    "ci_artifact_paths_checked_total"
+                ],
+                "schema_required_files_checked_total": registry["cross_contract_metrics"][
+                    "schema_required_files_checked_total"
+                ],
+                "bundle_required_files_checked_total": registry["cross_contract_metrics"][
+                    "bundle_required_files_checked_total"
+                ],
                 "release_gate_registry_argument_occurrences": wiring_metrics[
                     "release_gate_registry_argument_occurrences"
                 ],
