@@ -16,6 +16,10 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
         "title": "[CI Drift] master branch protection required checks drift",
         "labels": ["ci-drift", "branch-protection"],
     },
+    "master-guard-workflow-health": {
+        "title": "[CI Drift] master guard workflow health degraded",
+        "labels": ["ci-drift", "guard-workflow-health"],
+    },
     "release-gate-runtime-early-warning": {
         "title": "[Release Gate Runtime] sustained runtime warning on master",
         "labels": ["ci-drift", "release-gate-runtime"],
@@ -34,6 +38,10 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
     "branch-protection": {
         "color": "1D76DB",
         "description": "master branch-protection required-check drift",
+    },
+    "guard-workflow-health": {
+        "color": "D93F0B",
+        "description": "Nightly guard-workflow watchdog detected degraded health",
     },
     "release-gate-runtime": {
         "color": "0E8A16",
@@ -207,6 +215,30 @@ def _signal_alert_state(
             f"- Missing required checks: {', '.join(str(item) for item in missing) if missing else 'none'}",
             f"- Unexpected required checks: {', '.join(str(item) for item in unexpected) if unexpected else 'none'}",
             f"- Recommended action: {decision.get('recommended_action') or 'branch_protection_in_sync'}",
+        ]
+        return alert_triggered, summary, branch, {}
+
+    if signal_id == "master-guard-workflow-health":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        degraded_workflows = (
+            report.get("degraded_workflow_names") if isinstance(report.get("degraded_workflow_names"), list) else []
+        )
+        missing_required_artifacts_total = int(metrics.get("missing_required_artifacts_total") or 0)
+        alert_triggered = bool(decision.get("guard_workflow_health_degraded"))
+        summary = [
+            (
+                f"- Degraded guard workflows: {', '.join(str(item) for item in degraded_workflows)}"
+                if degraded_workflows
+                else "- Degraded guard workflows: none"
+            ),
+            (
+                "- Guard workflows degraded total: "
+                f"{metrics.get('guard_workflows_degraded_total', 0)} "
+                f"(total={metrics.get('guard_workflows_total', 0)})"
+            ),
+            f"- Missing required artifacts total: {missing_required_artifacts_total}",
+            f"- Recommended action: {decision.get('recommended_action') or 'guard_workflow_health_green'}",
         ]
         return alert_triggered, summary, branch, {}
 

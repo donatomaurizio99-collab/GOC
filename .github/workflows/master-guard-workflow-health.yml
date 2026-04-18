@@ -1,0 +1,93 @@
+name: Master Guard Workflow Health
+
+on:
+  schedule:
+    - cron: "35 3 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Hours of guard-workflow history to inspect"
+        required: false
+        default: "30"
+      per_page:
+        description: "Maximum completed runs fetched per guard workflow"
+        required: false
+        default: "50"
+      allow_degraded:
+        description: "Do not fail workflow when guard workflow health is degraded"
+        required: false
+        default: "false"
+      recovery_threshold:
+        description: "Healthy nightly runs required before auto-closing an open guard-health issue"
+        required: false
+        default: "2"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  guard-workflow-health:
+    name: Guard Workflow Health
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run guard-workflow health watchdog
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '30' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '50' }}
+          ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
+        run: |
+          $arguments = @(
+            "-LookbackHours", "$env:LOOKBACK_HOURS",
+            "-PerPage", "$env:PER_PAGE",
+            "-OutputFile", "artifacts\\master-guard-workflow-health-check.json"
+          )
+          if ($env:ALLOW_DEGRADED -eq "true") {
+            $arguments += "-AllowDegraded"
+          }
+          .\scripts\run-master-guard-workflow-health-check.ps1 @arguments
+
+      - name: Upsert guard-health alert issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "master-guard-workflow-health" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\master-guard-workflow-health-check.json" `
+            -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -OutputFile "artifacts\master-guard-workflow-health-issue-upsert.json"
+
+      - name: Upload guard-workflow health report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-check
+          path: artifacts/master-guard-workflow-health-check.json
+          if-no-files-found: error
+
+      - name: Upload guard-workflow health issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-issue-upsert
+          path: artifacts/master-guard-workflow-health-issue-upsert.json
+          if-no-files-found: error

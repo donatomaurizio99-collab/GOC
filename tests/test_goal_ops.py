@@ -11355,6 +11355,9 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     branch_workflow = (
         project_root / ".github" / "workflows" / "master-branch-protection-drift-guard.yml"
     ).read_text(encoding="utf-8")
+    guard_workflow = (
+        project_root / ".github" / "workflows" / "master-guard-workflow-health.yml"
+    ).read_text(encoding="utf-8")
     runtime_workflow = (
         project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml"
     ).read_text(encoding="utf-8")
@@ -11368,6 +11371,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "--alert-age-hours" in wrapper
     assert "--dry-run" in wrapper
     assert "master-branch-protection-drift" in wrapper
+    assert "master-guard-workflow-health" in wrapper
     assert "release-gate-runtime-early-warning" in wrapper
     assert "release-gate-runtime-alert-age-slo" in wrapper
 
@@ -11375,6 +11379,11 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
     assert "master-branch-protection-drift-issue-upsert.json" in branch_workflow
     assert "recovery_threshold" in branch_workflow
+
+    assert "issues: write" in guard_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in guard_workflow
+    assert "master-guard-workflow-health-issue-upsert.json" in guard_workflow
+    assert "recovery_threshold" in guard_workflow
 
     assert "issues: write" in runtime_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in runtime_workflow
@@ -11385,6 +11394,8 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
 
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
+    assert "[master-guard-workflow-health.yml]" in readme
+    assert "guard-workflow health watchdog" in readme
     assert "auto-close recovered issues after 2 healthy nightly runs" in readme
     assert "at most one open issue per signal" in readme
     assert "stays open beyond the alert-age SLO" in readme
@@ -12186,5 +12197,206 @@ def test_239_ci_alert_issue_upsert_alert_age_slo_parent_coupling_state_machine()
     assert [item["action"] for item in actions4] == ["reopen_issue", "add_comment"]
     assert "<!-- ci-alert-parent-runtime-warning-issue:900 -->" in actions4[0]["body"]
     assert "- Parent runtime warning issue: #900" in actions4[0]["body"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflows():
+    workspace = _local_test_dir("pytest-master-guard-workflow-health-check-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_file = workspace / "fixtures.json"
+    output_file = workspace / "master-guard-workflow-health-check.json"
+
+    fixtures_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": {
+                    "Master Required Checks 24h": [
+                        {
+                            "id": 9101,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T02:50:00Z",
+                        }
+                    ],
+                    "Master Branch Protection Drift Guard": [
+                        {
+                            "id": 9102,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T02:30:00Z",
+                        }
+                    ],
+                    "Master Release Gate Runtime Early Warning": [
+                        {
+                            "id": 9103,
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "updated_at": "2026-04-18T03:20:00Z",
+                        }
+                    ],
+                },
+                "run_artifacts": {
+                    "9101": {
+                        "artifacts": [
+                            {"name": "master-required-checks-24h-report", "expired": False},
+                        ]
+                    },
+                    "9102": {
+                        "artifacts": [
+                            {"name": "master-branch-protection-drift-guard", "expired": False},
+                        ]
+                    },
+                    "9103": {
+                        "artifacts": [
+                            {"name": "release-gate-runtime-early-warning", "expired": False},
+                            {"name": "release-gate-runtime-early-warning-issue-upsert", "expired": False},
+                            {"name": "release-gate-runtime-alert-age-slo-issue-upsert", "expired": False},
+                        ]
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-workflow-health-check.py"),
+        "--label",
+        "pytest-master-guard-workflow-health-check",
+        "--fixtures-file",
+        str(fixtures_file.resolve()),
+        "--lookback-hours",
+        "30",
+        "--now-utc",
+        "2026-04-18T04:00:00Z",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master guard-workflow health check failed: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["guard_workflows_total"] == 3
+    assert payload["metrics"]["guard_workflows_degraded_total"] == 2
+    assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
+    assert payload["metrics"]["guard_workflows_non_success_total"] == 1
+    assert "Master Branch Protection Drift Guard" in payload["degraded_workflow_names"]
+    assert "Master Release Gate Runtime Early Warning" in payload["degraded_workflow_names"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-guard-workflow-health.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-guard-workflow-health-check.ps1").read_text(
+        encoding="utf-8"
+    )
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Guard Workflow Health" in workflow
+    assert 'cron: "35 3 * * *"' in workflow
+    assert ".\\scripts\\run-master-guard-workflow-health-check.ps1" in workflow
+    assert "master-guard-workflow-health-check.json" in workflow
+    assert "master-guard-workflow-health-issue-upsert.json" in workflow
+    assert "master-guard-workflow-health" in workflow
+
+    assert "--lookback-hours" in wrapper
+    assert "--per-page" in wrapper
+    assert "--allow-degraded" in wrapper
+    assert "--fixtures-file" in wrapper
+    assert "master-guard-workflow-health-check.py" in wrapper
+
+    assert "[master-guard-workflow-health.yml]" in readme
+    assert "guard-workflow health watchdog" in readme
+    assert "run-master-guard-workflow-health-check.ps1" in readme
+
+
+def test_242_ci_alert_issue_upsert_creates_issue_for_guard_workflow_health():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-guard-workflow-health-create").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-guard-workflow-health-check.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-guard-workflow-health",
+                "config": {"branch": "master"},
+                "metrics": {
+                    "guard_workflows_total": 3,
+                    "guard_workflows_degraded_total": 1,
+                    "missing_required_artifacts_total": 2,
+                },
+                "degraded_workflow_names": ["Master Branch Protection Drift Guard"],
+                "decision": {
+                    "guard_workflow_health_degraded": True,
+                    "recommended_action": "guard_workflow_health_degraded",
+                },
+                "generated_at_utc": "2026-04-18T04:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-create-guard-health",
+        "--signal-id",
+        "master-guard-workflow-health",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert payload["decision"]["issue_deduped"] is False
+    assert "guard-workflow-health" in payload["issue"]["labels"]
+    assert "ci-alert-key:master-guard-workflow-health:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "create_issue"
+    assert issue_oplog["actions"][0]["labels"] == ["ci-drift", "guard-workflow-health"]
 
     shutil.rmtree(workspace, ignore_errors=True)
