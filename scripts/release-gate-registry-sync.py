@@ -102,6 +102,7 @@ def _artifact_path_is_covered(path: str, patterns: list[str]) -> bool:
 def _validate_cross_contracts(
     *,
     release_evidence_artifact_paths: list[str],
+    registry_sync_report_path: str,
     p0_runbook_contract: dict[str, list[str]],
     p0_report_schema_contract: dict[str, Any],
     p0_release_evidence_bundle: dict[str, Any],
@@ -139,6 +140,20 @@ def _validate_cross_contracts(
             f"{uncovered_ci_artifact_paths}"
         ),
     )
+    _expect(
+        _artifact_path_is_covered(registry_sync_report_path, release_evidence_artifact_paths),
+        (
+            "Registry contract mismatch: release_gate_ci.registry_sync_report_path is not covered by "
+            "release_gate_ci.release_evidence_artifact_paths."
+        ),
+    )
+    _expect(
+        _artifact_path_is_covered(registry_sync_report_path, p0_runbook_contract["required_ci_artifact_paths"]),
+        (
+            "Registry contract mismatch: release_gate_ci.registry_sync_report_path is not covered by "
+            "p0_runbook_contract.required_ci_artifact_paths."
+        ),
+    )
 
     schema_required_files = list(p0_report_schema_contract["required_files"])
     uncovered_schema_required_files = [
@@ -174,6 +189,7 @@ def _validate_cross_contracts(
         "ci_artifact_paths_checked_total": len(p0_runbook_contract["required_ci_artifact_paths"]),
         "schema_required_files_checked_total": len(schema_required_files),
         "bundle_required_files_checked_total": len(bundle_required_files),
+        "registry_sync_report_path_covered_total": 1,
     }
 
 
@@ -196,6 +212,16 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
         release_gate_ci,
         "release_evidence_artifact_paths",
         context="release_gate_ci",
+    )
+    registry_sync_report_path_raw = release_gate_ci.get("registry_sync_report_path")
+    _expect(
+        isinstance(registry_sync_report_path_raw, str),
+        "Registry key 'registry_sync_report_path' must be a string in release_gate_ci.",
+    )
+    registry_sync_report_path = _normalize_artifact_token(registry_sync_report_path_raw)
+    _expect(
+        registry_sync_report_path,
+        "Registry key 'registry_sync_report_path' must not be empty in release_gate_ci.",
     )
 
     p0_contract = payload.get("p0_runbook_contract")
@@ -258,6 +284,7 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
         "registry_version": registry_version,
         "strict_flags": strict_flags,
         "release_evidence_artifact_paths": artifact_paths,
+        "registry_sync_report_path": registry_sync_report_path,
         "p0_contract": p0_lists,
         "p0_report_schema_contract": {
             "required_top_level_keys": p0_schema_top_level,
@@ -272,6 +299,7 @@ def load_registry(registry_file: Path) -> dict[str, Any]:
     }
     registry["cross_contract_metrics"] = _validate_cross_contracts(
         release_evidence_artifact_paths=registry["release_evidence_artifact_paths"],
+        registry_sync_report_path=registry["registry_sync_report_path"],
         p0_runbook_contract=registry["p0_contract"],
         p0_report_schema_contract=registry["p0_report_schema_contract"],
         p0_release_evidence_bundle=registry["p0_release_evidence_bundle"],
@@ -285,6 +313,7 @@ def build_registry_lock_payload(registry: dict[str, Any]) -> dict[str, Any]:
         "release_gate_ci": {
             "strict_flags": registry["strict_flags"],
             "release_evidence_artifact_paths": registry["release_evidence_artifact_paths"],
+            "registry_sync_report_path": registry["registry_sync_report_path"],
         },
         "p0_runbook_contract": registry["p0_contract"],
         "p0_report_schema_contract": registry["p0_report_schema_contract"],
@@ -344,6 +373,26 @@ def _update_release_gate_command_line(ci_text: str, strict_flags: list[str]) -> 
     index = command_indexes[0]
     indent = _leading_whitespace(lines[index])
     generated = indent + ".\\scripts\\release-gate.ps1 " + " ".join(f"-{flag}" for flag in strict_flags)
+    changed = lines[index] != generated
+    lines[index] = generated
+    return ("\n".join(lines) + ("\n" if ci_text.endswith("\n") else "")), changed
+
+
+def _update_registry_sync_command_line(ci_text: str, registry_sync_report_path: str) -> tuple[str, bool]:
+    lines = ci_text.splitlines()
+    command_indexes = [idx for idx, line in enumerate(lines) if "python .\\scripts\\release-gate-registry-sync.py" in line]
+    _expect(command_indexes, "Unable to find release-gate registry sync command in CI workflow.")
+    _expect(
+        len(command_indexes) == 1,
+        f"Expected exactly one registry sync command in CI workflow, found {len(command_indexes)}.",
+    )
+
+    index = command_indexes[0]
+    indent = _leading_whitespace(lines[index])
+    generated = (
+        indent
+        + f'python .\\scripts\\release-gate-registry-sync.py --output-file "{registry_sync_report_path}"'
+    )
     changed = lines[index] != generated
     lines[index] = generated
     return ("\n".join(lines) + ("\n" if ci_text.endswith("\n") else "")), changed
@@ -448,10 +497,71 @@ def synchronize_ci_workflow(
     *,
     strict_flags: list[str],
     artifact_paths: list[str],
+    registry_sync_report_path: str,
 ) -> tuple[str, bool]:
-    updated_text, changed_command = _update_release_gate_command_line(ci_text, strict_flags)
+    updated_text, changed_registry_sync = _update_registry_sync_command_line(ci_text, registry_sync_report_path)
+    updated_text, changed_command = _update_release_gate_command_line(updated_text, strict_flags)
     updated_text, changed_paths = _update_release_evidence_paths(updated_text, artifact_paths)
-    return updated_text, bool(changed_command or changed_paths)
+    return updated_text, bool(changed_registry_sync or changed_command or changed_paths)
+
+
+def _build_sync_report_payload(
+    *,
+    mode: str,
+    changed: bool,
+    lock_changed: bool,
+    registry: dict[str, Any],
+    registry_file: Path,
+    lock_file: Path,
+    ci_workflow_file: Path,
+    release_gate_file: Path,
+    schema_wrapper_file: Path,
+    bundle_wrapper_file: Path,
+    wiring_metrics: dict[str, int],
+) -> dict[str, Any]:
+    return {
+        "success": True,
+        "mode": mode,
+        "changed": bool(changed),
+        "lock_changed": bool(lock_changed),
+        "registry_file": str(registry_file),
+        "lock_file": str(lock_file),
+        "ci_workflow_file": str(ci_workflow_file),
+        "release_gate_file": str(release_gate_file),
+        "schema_wrapper_file": str(schema_wrapper_file),
+        "bundle_wrapper_file": str(bundle_wrapper_file),
+        "strict_flags_total": len(registry["strict_flags"]),
+        "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
+        "registry_sync_report_path": registry["registry_sync_report_path"],
+        "p0_schema_required_top_level_keys_total": len(registry["p0_report_schema_contract"]["required_top_level_keys"]),
+        "p0_schema_required_decision_keys_total": len(registry["p0_report_schema_contract"]["required_decision_keys"]),
+        "p0_bundle_required_files_total": len(registry["p0_release_evidence_bundle"]["required_files"]),
+        "ci_artifact_paths_checked_total": registry["cross_contract_metrics"]["ci_artifact_paths_checked_total"],
+        "schema_required_files_checked_total": registry["cross_contract_metrics"]["schema_required_files_checked_total"],
+        "bundle_required_files_checked_total": registry["cross_contract_metrics"]["bundle_required_files_checked_total"],
+        "registry_sync_report_path_covered_total": registry["cross_contract_metrics"][
+            "registry_sync_report_path_covered_total"
+        ],
+        "release_gate_registry_argument_occurrences": wiring_metrics["release_gate_registry_argument_occurrences"],
+        "schema_wrapper_registry_argument_occurrences": wiring_metrics["schema_wrapper_registry_argument_occurrences"],
+        "bundle_wrapper_registry_argument_occurrences": wiring_metrics["bundle_wrapper_registry_argument_occurrences"],
+    }
+
+
+def _resolve_output_file(project_root: Path, output_file_arg: str | None) -> Path | None:
+    if output_file_arg is None:
+        return None
+    candidate = Path(output_file_arg).expanduser()
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    return candidate.resolve()
+
+
+def _write_optional_output_file(output_file: Path | None, payload: dict[str, Any]) -> None:
+    if output_file is None:
+        return
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(_render_json_file(payload), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -468,6 +578,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
     parser.add_argument("--schema-wrapper-file", default="scripts/run-p0-report-schema-contract-check.ps1")
     parser.add_argument("--bundle-wrapper-file", default="scripts/run-p0-release-evidence-bundle.ps1")
+    parser.add_argument("--output-file")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
 
@@ -483,6 +594,7 @@ def main(argv: list[str] | None = None) -> int:
     release_gate_file = (project_root / str(args.release_gate_file)).resolve()
     schema_wrapper_file = (project_root / str(args.schema_wrapper_file)).resolve()
     bundle_wrapper_file = (project_root / str(args.bundle_wrapper_file)).resolve()
+    output_file = _resolve_output_file(project_root, args.output_file)
 
     try:
         registry = load_registry(registry_file)
@@ -503,6 +615,7 @@ def main(argv: list[str] | None = None) -> int:
             original_ci,
             strict_flags=registry["strict_flags"],
             artifact_paths=registry["release_evidence_artifact_paths"],
+            registry_sync_report_path=registry["registry_sync_report_path"],
         )
     except Exception as exc:
         print(f"[release-gate-registry-sync] ERROR: {exc}", file=sys.stderr)
@@ -514,49 +627,23 @@ def main(argv: list[str] | None = None) -> int:
         if lock_changed:
             lock_file.parent.mkdir(parents=True, exist_ok=True)
             lock_file.write_text(generated_lock_text, encoding="utf-8")
+        payload = _build_sync_report_payload(
+            mode="write",
+            changed=bool(changed),
+            lock_changed=bool(lock_changed),
+            registry=registry,
+            registry_file=registry_file,
+            lock_file=lock_file,
+            ci_workflow_file=ci_workflow_file,
+            release_gate_file=release_gate_file,
+            schema_wrapper_file=schema_wrapper_file,
+            bundle_wrapper_file=bundle_wrapper_file,
+            wiring_metrics=wiring_metrics,
+        )
+        _write_optional_output_file(output_file, payload)
         print(
             json.dumps(
-                {
-                    "success": True,
-                    "mode": "write",
-                    "changed": bool(changed),
-                    "lock_changed": bool(lock_changed),
-                    "registry_file": str(registry_file),
-                    "lock_file": str(lock_file),
-                    "ci_workflow_file": str(ci_workflow_file),
-                    "release_gate_file": str(release_gate_file),
-                    "schema_wrapper_file": str(schema_wrapper_file),
-                    "bundle_wrapper_file": str(bundle_wrapper_file),
-                    "strict_flags_total": len(registry["strict_flags"]),
-                    "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
-                    "p0_schema_required_top_level_keys_total": len(
-                        registry["p0_report_schema_contract"]["required_top_level_keys"]
-                    ),
-                    "p0_schema_required_decision_keys_total": len(
-                        registry["p0_report_schema_contract"]["required_decision_keys"]
-                    ),
-                    "p0_bundle_required_files_total": len(
-                        registry["p0_release_evidence_bundle"]["required_files"]
-                    ),
-                    "ci_artifact_paths_checked_total": registry["cross_contract_metrics"][
-                        "ci_artifact_paths_checked_total"
-                    ],
-                    "schema_required_files_checked_total": registry["cross_contract_metrics"][
-                        "schema_required_files_checked_total"
-                    ],
-                    "bundle_required_files_checked_total": registry["cross_contract_metrics"][
-                        "bundle_required_files_checked_total"
-                    ],
-                    "release_gate_registry_argument_occurrences": wiring_metrics[
-                        "release_gate_registry_argument_occurrences"
-                    ],
-                    "schema_wrapper_registry_argument_occurrences": wiring_metrics[
-                        "schema_wrapper_registry_argument_occurrences"
-                    ],
-                    "bundle_wrapper_registry_argument_occurrences": wiring_metrics[
-                        "bundle_wrapper_registry_argument_occurrences"
-                    ],
-                },
+                payload,
                 ensure_ascii=True,
                 sort_keys=True,
             )
@@ -579,49 +666,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    payload = _build_sync_report_payload(
+        mode="check",
+        changed=False,
+        lock_changed=False,
+        registry=registry,
+        registry_file=registry_file,
+        lock_file=lock_file,
+        ci_workflow_file=ci_workflow_file,
+        release_gate_file=release_gate_file,
+        schema_wrapper_file=schema_wrapper_file,
+        bundle_wrapper_file=bundle_wrapper_file,
+        wiring_metrics=wiring_metrics,
+    )
+    _write_optional_output_file(output_file, payload)
     print(
         json.dumps(
-            {
-                "success": True,
-                "mode": "check",
-                "changed": False,
-                "lock_changed": False,
-                "registry_file": str(registry_file),
-                "lock_file": str(lock_file),
-                "ci_workflow_file": str(ci_workflow_file),
-                "release_gate_file": str(release_gate_file),
-                "schema_wrapper_file": str(schema_wrapper_file),
-                "bundle_wrapper_file": str(bundle_wrapper_file),
-                "strict_flags_total": len(registry["strict_flags"]),
-                "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
-                "p0_schema_required_top_level_keys_total": len(
-                    registry["p0_report_schema_contract"]["required_top_level_keys"]
-                ),
-                "p0_schema_required_decision_keys_total": len(
-                    registry["p0_report_schema_contract"]["required_decision_keys"]
-                ),
-                "p0_bundle_required_files_total": len(
-                    registry["p0_release_evidence_bundle"]["required_files"]
-                ),
-                "ci_artifact_paths_checked_total": registry["cross_contract_metrics"][
-                    "ci_artifact_paths_checked_total"
-                ],
-                "schema_required_files_checked_total": registry["cross_contract_metrics"][
-                    "schema_required_files_checked_total"
-                ],
-                "bundle_required_files_checked_total": registry["cross_contract_metrics"][
-                    "bundle_required_files_checked_total"
-                ],
-                "release_gate_registry_argument_occurrences": wiring_metrics[
-                    "release_gate_registry_argument_occurrences"
-                ],
-                "schema_wrapper_registry_argument_occurrences": wiring_metrics[
-                    "schema_wrapper_registry_argument_occurrences"
-                ],
-                "bundle_wrapper_registry_argument_occurrences": wiring_metrics[
-                    "bundle_wrapper_registry_argument_occurrences"
-                ],
-            },
+            payload,
             ensure_ascii=True,
             sort_keys=True,
         )

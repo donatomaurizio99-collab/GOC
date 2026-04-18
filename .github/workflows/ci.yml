@@ -38,7 +38,7 @@ jobs:
       - name: Verify release-gate registry sync
         shell: pwsh
         run: |
-          python .\scripts\release-gate-registry-sync.py
+          python .\scripts\release-gate-registry-sync.py --output-file "artifacts/release-gate-registry-sync-ci.json"
 
       - name: Run release gate
         shell: pwsh
@@ -93,6 +93,7 @@ jobs:
             artifacts/release-gate-steady-state-certification-release-gate.json
             artifacts/release-gate-post-release-continuity-release-gate.json
             artifacts/release-gate-production-sustainability-certification-release-gate.json
+            artifacts/release-gate-registry-sync-ci.json
             artifacts/security-config-hardening-release-gate.json
             artifacts/audit-trail-hardening-release-gate.json
             artifacts/security-ci-lane-release-gate.json
