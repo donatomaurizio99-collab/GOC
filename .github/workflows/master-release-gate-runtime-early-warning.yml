@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   runtime-early-warning:
@@ -66,10 +67,33 @@ jobs:
           }
           .\scripts\run-release-gate-runtime-early-warning.ps1 @arguments
 
+      - name: Upsert runtime warning issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "release-gate-runtime-early-warning" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\release-gate-runtime-early-warning.json" `
+            -RunUrl "$env:RUN_URL" `
+            -OutputFile "artifacts\release-gate-runtime-early-warning-issue-upsert.json"
+
       - name: Upload runtime early warning report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-runtime-early-warning
           path: artifacts/release-gate-runtime-early-warning.json
+          if-no-files-found: error
+
+      - name: Upload runtime warning issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-runtime-early-warning-issue-upsert
+          path: artifacts/release-gate-runtime-early-warning-issue-upsert.json
           if-no-files-found: error
