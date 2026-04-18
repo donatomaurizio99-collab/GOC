@@ -5447,6 +5447,9 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     closure_wrapper = (project_root / "scripts" / "run-p0-closure-report.ps1").read_text(encoding="utf-8")
     runbook_contract_script = (project_root / "scripts" / "p0-runbook-contract-check.py").read_text(encoding="utf-8")
     runbook_contract_wrapper = (project_root / "scripts" / "run-p0-runbook-contract-check.ps1").read_text(encoding="utf-8")
+    registry_sync_script = (project_root / "scripts" / "release-gate-registry-sync.py").read_text(encoding="utf-8")
+    registry_sync_wrapper = (project_root / "scripts" / "run-release-gate-registry-sync.ps1").read_text(encoding="utf-8")
+    registry = json.loads((project_root / "docs" / "release-gate-registry.json").read_text(encoding="utf-8"))
 
     required_artifact_paths = [
         "artifacts/safe-mode-ux-degradation-release-gate.json",
@@ -5486,6 +5489,25 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
+
+    assert "Verify release-gate registry sync" in ci_workflow
+    assert "python .\\scripts\\release-gate-registry-sync.py" in ci_workflow
+    assert "release_gate_ci" in registry
+    assert "p0_runbook_contract" in registry
+    assert "StrictReleaseGatePostReleaseContinuityCheck" in registry["release_gate_ci"]["strict_flags"]
+    assert "StrictReleaseGateProductionSustainabilityCertificationCheck" in registry["release_gate_ci"]["strict_flags"]
+    assert (
+        "artifacts/release-gate-post-release-continuity-release-gate.json"
+        in registry["release_gate_ci"]["release_evidence_artifact_paths"]
+    )
+    assert (
+        "artifacts/release-gate-production-sustainability-certification-release-gate.json"
+        in registry["release_gate_ci"]["release_evidence_artifact_paths"]
+    )
+    assert "required_runbook_scripts" in registry["p0_runbook_contract"]
+    assert "required_release_gate_tokens" in registry["p0_runbook_contract"]
+    assert "required_ci_artifact_paths" in registry["p0_runbook_contract"]
+    assert "required_runbook_tokens" in registry["p0_runbook_contract"]
 
     assert '"--required-top-level-keys", "label,success"' in release_gate
     assert '"--required-decision-keys", "release_blocked"' not in release_gate
@@ -5723,6 +5745,14 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "metrics.production_sustainability_production_final_signal_failed=0" in runbook_contract_script
     assert "metrics.production_sustainability_burnin_threshold_failed=0" in runbook_contract_script
     assert "metrics.production_sustainability_closure_signal_failed=0" in runbook_contract_script
+    assert 'DEFAULT_REGISTRY_FILE = "docs/release-gate-registry.json"' in runbook_contract_script
+    assert 'parser.add_argument("--registry-file", default=DEFAULT_REGISTRY_FILE)' in runbook_contract_script
+    assert "p0_runbook_contract" in runbook_contract_script
+    assert "release-gate-registry-sync.py" in registry_sync_script
+    assert "release_evidence_artifact_paths" in registry_sync_script
+    assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in runbook_contract_wrapper
+    assert '"--registry-file", $RegistryFile' in runbook_contract_wrapper
+    assert "release-gate-registry-sync.py" in registry_sync_wrapper
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -9561,3 +9591,27 @@ def test_200_release_gate_production_sustainability_certification_check_succeeds
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_201_release_gate_registry_sync_check_reports_success():
+    project_root = Path(__file__).resolve().parents[1]
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["mode"] == "check"
+    assert payload["changed"] is False
+    assert payload["strict_flags_total"] >= 1
+    assert payload["artifact_paths_total"] >= 1

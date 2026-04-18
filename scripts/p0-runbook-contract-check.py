@@ -258,6 +258,8 @@ DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.production_sustainability_closure_signal_failed=0",
 ]
 
+DEFAULT_REGISTRY_FILE = "docs/release-gate-registry.json"
+
 
 def _expect(condition: bool, message: str) -> None:
     if not condition:
@@ -281,6 +283,66 @@ def _read_json_object(path: Path) -> dict[str, Any]:
         raise RuntimeError(f"Failed to parse JSON file {path}: {exc}") from exc
     _expect(isinstance(payload, dict), f"JSON file must contain an object: {path}")
     return payload
+
+
+def _normalize_registry_string_list(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    context: str,
+) -> list[str]:
+    raw = payload.get(key)
+    _expect(isinstance(raw, list), f"Registry key '{key}' must be a list in {context}.")
+
+    normalized: list[str] = []
+    duplicates: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw:
+        _expect(isinstance(item, str), f"Registry key '{key}' must contain only strings in {context}.")
+        token = item.strip()
+        _expect(token, f"Registry key '{key}' contains an empty token in {context}.")
+        if token in seen:
+            duplicates.append(token)
+            continue
+        seen.add(token)
+        normalized.append(token)
+
+    _expect(not duplicates, f"Registry key '{key}' contains duplicate tokens in {context}: {duplicates}")
+    _expect(normalized, f"Registry key '{key}' must contain at least one token in {context}.")
+    return normalized
+
+
+def _load_registry_defaults(registry_file: Path) -> dict[str, list[str]]:
+    payload = _read_json_object(registry_file)
+    p0_contract = payload.get("p0_runbook_contract")
+    _expect(isinstance(p0_contract, dict), "Registry key 'p0_runbook_contract' must be an object.")
+
+    keys = [
+        "required_runbook_scripts",
+        "required_canary_drills",
+        "required_release_gate_tokens",
+        "required_ci_artifact_paths",
+        "required_runbook_tokens",
+    ]
+    return {
+        key: _normalize_registry_string_list(p0_contract, key, context="p0_runbook_contract")
+        for key in keys
+    }
+
+
+def _resolve_required_list(
+    override_csv: str,
+    *,
+    registry_values: list[str],
+    fallback_values: list[str],
+) -> list[str]:
+    parsed_override = _parse_csv_list(override_csv)
+    if parsed_override:
+        return parsed_override
+    if registry_values:
+        return list(registry_values)
+    return list(fallback_values)
 
 
 def _resolve_path(project_root: Path, value: str) -> Path:
@@ -426,7 +488,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Verify P0 release-gate strict-flag and runbook command contract consistency "
-            "across release-gate.ps1, CI workflow, production runbook, and stability canary baseline."
+            "across release-gate.ps1, CI workflow, production runbook, stability canary baseline, "
+            "and release-gate registry defaults."
         )
     )
     parser.add_argument("--label", default="p0-runbook-contract-check")
@@ -435,12 +498,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
     parser.add_argument("--ci-workflow-file", default=".github/workflows/ci.yml")
     parser.add_argument("--stability-canary-baseline-file", default="docs/stability-canary-baseline.json")
-    parser.add_argument("--required-runbook-scripts", default=",".join(DEFAULT_REQUIRED_RUNBOOK_SCRIPTS))
+    parser.add_argument("--registry-file", default=DEFAULT_REGISTRY_FILE)
+    parser.add_argument("--required-runbook-scripts", default="")
     parser.add_argument("--required-strict-flags", default="")
-    parser.add_argument("--required-canary-drills", default=",".join(DEFAULT_REQUIRED_CANARY_DRILLS))
-    parser.add_argument("--required-release-gate-tokens", default=",".join(DEFAULT_REQUIRED_RELEASE_GATE_TOKENS))
-    parser.add_argument("--required-ci-artifact-paths", default=",".join(DEFAULT_REQUIRED_CI_ARTIFACT_PATHS))
-    parser.add_argument("--required-runbook-tokens", default=",".join(DEFAULT_REQUIRED_RUNBOOK_TOKENS))
+    parser.add_argument("--required-canary-drills", default="")
+    parser.add_argument("--required-release-gate-tokens", default="")
+    parser.add_argument("--required-ci-artifact-paths", default="")
+    parser.add_argument("--required-runbook-tokens", default="")
     parser.add_argument("--output-file")
     args = parser.parse_args(argv)
 
@@ -450,17 +514,58 @@ def main(argv: list[str] | None = None) -> int:
     release_gate_file = _resolve_path(project_root, args.release_gate_file)
     ci_workflow_file = _resolve_path(project_root, args.ci_workflow_file)
     stability_canary_baseline_file = _resolve_path(project_root, args.stability_canary_baseline_file)
+    registry_file = _resolve_path(project_root, args.registry_file)
     output_file = _resolve_path(project_root, args.output_file) if args.output_file else None
 
-    required_runbook_scripts = _parse_csv_list(args.required_runbook_scripts)
+    registry_defaults: dict[str, list[str]] = {}
+    if registry_file.exists():
+        registry_defaults = _load_registry_defaults(registry_file)
+    else:
+        no_explicit_contract_overrides = not any(
+            [
+                _parse_csv_list(args.required_runbook_scripts),
+                _parse_csv_list(args.required_canary_drills),
+                _parse_csv_list(args.required_release_gate_tokens),
+                _parse_csv_list(args.required_ci_artifact_paths),
+                _parse_csv_list(args.required_runbook_tokens),
+            ]
+        )
+        if no_explicit_contract_overrides:
+            print(
+                f"[p0-runbook-contract-check] ERROR: registry file not found: {registry_file}",
+                file=sys.stderr,
+            )
+            return 2
+
+    required_runbook_scripts = _resolve_required_list(
+        args.required_runbook_scripts,
+        registry_values=registry_defaults.get("required_runbook_scripts", []),
+        fallback_values=DEFAULT_REQUIRED_RUNBOOK_SCRIPTS,
+    )
     if not required_runbook_scripts:
         print("[p0-runbook-contract-check] ERROR: at least one required runbook script is required.", file=sys.stderr)
         return 2
     required_strict_flags = _parse_csv_list(args.required_strict_flags)
-    required_canary_drills = _parse_csv_list(args.required_canary_drills)
-    required_release_gate_tokens = _parse_csv_list(args.required_release_gate_tokens)
-    required_ci_artifact_paths = _parse_csv_list(args.required_ci_artifact_paths)
-    required_runbook_tokens = _parse_csv_list(args.required_runbook_tokens)
+    required_canary_drills = _resolve_required_list(
+        args.required_canary_drills,
+        registry_values=registry_defaults.get("required_canary_drills", []),
+        fallback_values=DEFAULT_REQUIRED_CANARY_DRILLS,
+    )
+    required_release_gate_tokens = _resolve_required_list(
+        args.required_release_gate_tokens,
+        registry_values=registry_defaults.get("required_release_gate_tokens", []),
+        fallback_values=DEFAULT_REQUIRED_RELEASE_GATE_TOKENS,
+    )
+    required_ci_artifact_paths = _resolve_required_list(
+        args.required_ci_artifact_paths,
+        registry_values=registry_defaults.get("required_ci_artifact_paths", []),
+        fallback_values=DEFAULT_REQUIRED_CI_ARTIFACT_PATHS,
+    )
+    required_runbook_tokens = _resolve_required_list(
+        args.required_runbook_tokens,
+        registry_values=registry_defaults.get("required_runbook_tokens", []),
+        fallback_values=DEFAULT_REQUIRED_RUNBOOK_TOKENS,
+    )
     if not required_canary_drills:
         print("[p0-runbook-contract-check] ERROR: at least one required canary drill is required.", file=sys.stderr)
         return 2

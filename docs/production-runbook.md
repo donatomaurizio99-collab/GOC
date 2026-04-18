@@ -13,6 +13,7 @@ Run in repo root:
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
+CI strict-flag invocation + release evidence artifact upload paths are synchronized from `docs\release-gate-registry.json` via `scripts\release-gate-registry-sync.py`.
 
 This gate covers:
 - full `pytest` suite
@@ -505,6 +506,12 @@ Manual P0 burn-in consecutive-green monitor invocation:
 
 ```powershell
 .\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
+```
+
+Manual release-gate registry sync check invocation:
+
+```powershell
+.\scripts\run-release-gate-registry-sync.ps1
 ```
 
 Manual P0 runbook contract check invocation:
