@@ -132,6 +132,10 @@ param(
     [switch]$StrictReleaseGateRollbackTriggerIntegrityCheck,
     [switch]$SkipReleaseGatePostCutoverFinalizationCheck,
     [switch]$StrictReleaseGatePostCutoverFinalizationCheck,
+    [switch]$SkipReleaseGatePostReleaseWatchCheck,
+    [switch]$StrictReleaseGatePostReleaseWatchCheck,
+    [switch]$SkipReleaseGateSteadyStateCertificationCheck,
+    [switch]$StrictReleaseGateSteadyStateCertificationCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -2094,6 +2098,61 @@ if (-not $SkipReleaseGatePostCutoverFinalizationCheck) {
             }
             Write-Warning (
                 "Release-gate post-cutover finalization check failed but StrictReleaseGatePostCutoverFinalizationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGatePostReleaseWatchCheck) {
+    Invoke-GateStep -Name "Release-gate post-release watch check (Stage AG post-release watch gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-post-release-watch-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-post-release-watch-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-post-release-watch-policy.json",
+                "--required-reports", "artifacts/release-gate-post-cutover-finalization-release-gate.json,artifacts/release-gate-slo-burn-rate-v2-release-gate.json,artifacts/release-gate-chaos-matrix-continuous-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json",
+                "--finalization-report-file", "artifacts/release-gate-post-cutover-finalization-release-gate.json",
+                "--burn-rate-report-file", "artifacts/release-gate-slo-burn-rate-v2-release-gate.json",
+                "--chaos-report-file", "artifacts/release-gate-chaos-matrix-continuous-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePostReleaseWatchCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate post-release watch check failed but StrictReleaseGatePostReleaseWatchCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateSteadyStateCertificationCheck) {
+    Invoke-GateStep -Name "Release-gate steady-state certification check (Stage AH steady-state production certificate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-steady-state-certification-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-steady-state-certification-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-steady-state-certification-policy.json",
+                "--required-reports", "artifacts/release-gate-post-release-watch-release-gate.json,artifacts/release-gate-post-cutover-finalization-release-gate.json,artifacts/p0-burnin-consecutive-green-release-gate.json,artifacts/p0-closure-report-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json",
+                "--post-release-watch-report-file", "artifacts/release-gate-post-release-watch-release-gate.json",
+                "--post-cutover-finalization-report-file", "artifacts/release-gate-post-cutover-finalization-release-gate.json",
+                "--burnin-report-file", "artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--closure-report-file", "artifacts/p0-closure-report-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateSteadyStateCertificationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate steady-state certification check failed but StrictReleaseGateSteadyStateCertificationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

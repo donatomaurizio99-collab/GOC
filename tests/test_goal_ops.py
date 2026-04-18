@@ -5479,6 +5479,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-hypercare-activation-release-gate.json",
         "artifacts/release-gate-rollback-trigger-integrity-release-gate.json",
         "artifacts/release-gate-post-cutover-finalization-release-gate.json",
+        "artifacts/release-gate-post-release-watch-release-gate.json",
+        "artifacts/release-gate-steady-state-certification-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5513,6 +5515,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "Release-gate hypercare activation check (Stage AD hypercare activation gate)" in release_gate
     assert "Release-gate rollback trigger integrity check (Stage AE rollback integrity gate)" in release_gate
     assert "Release-gate post-cutover finalization check (Stage AF production finalization gate)" in release_gate
+    assert "Release-gate post-release watch check (Stage AG post-release watch gate)" in release_gate
+    assert "Release-gate steady-state certification check (Stage AH steady-state production certificate)" in release_gate
     assert "release-gate-evidence-lineage-check.py" in release_gate
     assert "release-gate-production-readiness-certification.py" in release_gate
     assert "release-gate-slo-burn-rate-v2-check.py" in release_gate
@@ -5527,6 +5531,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-hypercare-activation-check.py" in release_gate
     assert "release-gate-rollback-trigger-integrity-check.py" in release_gate
     assert "release-gate-post-cutover-finalization-check.py" in release_gate
+    assert "release-gate-post-release-watch-check.py" in release_gate
+    assert "release-gate-steady-state-certification-check.py" in release_gate
     assert "--step-timings-file" in release_gate
     assert "release-gate-performance-budget-policy.json" in release_gate
     assert "release-gate-evidence-freshness-policy.json" in release_gate
@@ -5542,6 +5548,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-hypercare-policy.json" in release_gate
     assert "release-gate-rollback-trigger-integrity-policy.json" in release_gate
     assert "release-gate-post-cutover-finalization-policy.json" in release_gate
+    assert "release-gate-post-release-watch-policy.json" in release_gate
+    assert "release-gate-steady-state-certification-policy.json" in release_gate
     assert "artifacts\\release-gate-step-timings-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-freshness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-hash-manifest-release-gate.json" in release_gate
@@ -5565,6 +5573,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-hypercare-activation-release-gate.json" in release_gate
     assert "artifacts\\release-gate-rollback-trigger-integrity-release-gate.json" in release_gate
     assert "artifacts\\release-gate-post-cutover-finalization-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-post-release-watch-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-steady-state-certification-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5602,6 +5612,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-hypercare-activation-check.ps1" in runbook_contract_script
     assert "run-release-gate-rollback-trigger-integrity-check.ps1" in runbook_contract_script
     assert "run-release-gate-post-cutover-finalization-check.ps1" in runbook_contract_script
+    assert "run-release-gate-post-release-watch-check.ps1" in runbook_contract_script
+    assert "run-release-gate-steady-state-certification-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert "artifacts/incident-rollback-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
@@ -5624,6 +5636,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts/release-gate-hypercare-activation-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-rollback-trigger-integrity-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-post-cutover-finalization-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-post-release-watch-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-steady-state-certification-release-gate.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
@@ -5672,6 +5686,16 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "metrics.post_cutover_reports_non_green=0" in runbook_contract_script
     assert "metrics.post_cutover_release_block_signals=0" in runbook_contract_script
     assert "metrics.post_cutover_final_signal_failed=0" in runbook_contract_script
+    assert "metrics.post_release_watch_reports_non_green=0" in runbook_contract_script
+    assert "metrics.post_release_watch_release_block_signals=0" in runbook_contract_script
+    assert "metrics.post_release_watch_non_ok_window_violations=0" in runbook_contract_script
+    assert "metrics.post_release_watch_chaos_regression_violations=0" in runbook_contract_script
+    assert "metrics.post_release_watch_finalization_signal_failed=0" in runbook_contract_script
+    assert "metrics.steady_state_reports_non_green=0" in runbook_contract_script
+    assert "metrics.steady_state_release_block_signals=0" in runbook_contract_script
+    assert "metrics.steady_state_watch_signal_failed=0" in runbook_contract_script
+    assert "metrics.steady_state_burnin_threshold_failed=0" in runbook_contract_script
+    assert "metrics.steady_state_closure_signal_failed=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -8938,6 +8962,265 @@ def test_196_release_gate_post_cutover_finalization_check_succeeds_for_green_cha
     assert payload["metrics"]["post_cutover_release_block_signals"] == 0
     assert payload["metrics"]["post_cutover_final_signal_failed"] == 0
     assert payload["decision"]["recommended_action"] == "production_ready_finalized"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_197_release_gate_post_release_watch_check_fails_when_non_ok_window_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-release-gate-post-release-watch-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    post_cutover_report = artifacts_dir / "release-gate-post-cutover-finalization-release-gate.json"
+    burn_rate_report = artifacts_dir / "release-gate-slo-burn-rate-v2-release-gate.json"
+    chaos_report = artifacts_dir / "release-gate-chaos-matrix-continuous-release-gate.json"
+    handoff_report = artifacts_dir / "release-gate-operations-handoff-readiness-release-gate.json"
+    policy_file = workspace / "release-gate-post-release-watch-policy.json"
+    output_file = artifacts_dir / "release-gate-post-release-watch-release-gate.json"
+
+    post_cutover_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "production_ready_finalized"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burn_rate_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"non_ok_window_violations": 2},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    chaos_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"chaos_regression_violations": 0},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    handoff_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_watch_windows": ["h_plus_24", "h_plus_72", "h_plus_168"],
+                "max_non_ok_window_violations": 0,
+                "max_chaos_regression_violations": 0,
+                "min_required_green_reports": 4,
+                "runbook_section": "3.49 Post-release watch gate",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-post-release-watch-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [post_cutover_report, burn_rate_report, chaos_report, handoff_report]
+        ),
+        "--finalization-report-file",
+        str(post_cutover_report.resolve()),
+        "--burn-rate-report-file",
+        str(burn_rate_report.resolve()),
+        "--chaos-report-file",
+        str(chaos_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-post-release-watch-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate post-release watch check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["post_release_watch_non_ok_window_violations"] == 1
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_198_release_gate_steady_state_certification_check_succeeds_for_green_chain():
+    workspace = _local_test_dir("pytest-release-gate-steady-state-certification-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    post_release_watch_report = artifacts_dir / "release-gate-post-release-watch-release-gate.json"
+    post_cutover_report = artifacts_dir / "release-gate-post-cutover-finalization-release-gate.json"
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    handoff_report = artifacts_dir / "release-gate-operations-handoff-readiness-release-gate.json"
+    policy_file = workspace / "release-gate-steady-state-certification-policy.json"
+    output_file = artifacts_dir / "release-gate-steady-state-certification-release-gate.json"
+
+    post_release_watch_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ah"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    post_cutover_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "production_ready_finalized"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burnin_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"consecutive_green": 12, "required_consecutive": 10},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    closure_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    handoff_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_certification_signals": [
+                    "post_release_watch",
+                    "post_cutover_finalization",
+                    "burnin_consecutive_green",
+                    "p0_closure_go_no_go",
+                ],
+                "min_required_green_reports": 5,
+                "runbook_section": "3.50 Steady-state certification",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-steady-state-certification-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [post_release_watch_report, post_cutover_report, burnin_report, closure_report, handoff_report]
+        ),
+        "--post-release-watch-report-file",
+        str(post_release_watch_report.resolve()),
+        "--post-cutover-finalization-report-file",
+        str(post_cutover_report.resolve()),
+        "--burnin-report-file",
+        str(burnin_report.resolve()),
+        "--closure-report-file",
+        str(closure_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["steady_state_reports_non_green"] == 0
+    assert payload["metrics"]["steady_state_release_block_signals"] == 0
+    assert payload["metrics"]["steady_state_watch_signal_failed"] == 0
+    assert payload["metrics"]["steady_state_burnin_threshold_failed"] == 0
+    assert payload["metrics"]["steady_state_closure_signal_failed"] == 0
+    assert payload["decision"]["recommended_action"] == "production_ready_steady_state"
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "required_certification_signals": [
+    "post_release_watch",
+    "post_cutover_finalization",
+    "burnin_consecutive_green",
+    "p0_closure_go_no_go"
+  ],
+  "min_required_green_reports": 5,
+  "runbook_section": "3.50 Steady-state certification"
+}
