@@ -54,6 +54,8 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-release-gate-post-cutover-finalization-check.ps1",
     "run-release-gate-post-release-watch-check.ps1",
     "run-release-gate-steady-state-certification-check.ps1",
+    "run-release-gate-post-release-continuity-check.ps1",
+    "run-release-gate-production-sustainability-certification-check.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -108,6 +110,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "Release-gate post-cutover finalization check (Stage AF production finalization gate)",
     "Release-gate post-release watch check (Stage AG post-release watch gate)",
     "Release-gate steady-state certification check (Stage AH steady-state production certificate)",
+    "Release-gate post-release continuity check (Stage AI continuity gate)",
+    "Release-gate production sustainability certification check (Stage AJ sustained production certificate)",
     "release-gate-evidence-lineage-check.py",
     "release-gate-production-readiness-certification.py",
     "release-gate-slo-burn-rate-v2-check.py",
@@ -124,6 +128,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "release-gate-post-cutover-finalization-check.py",
     "release-gate-post-release-watch-check.py",
     "release-gate-steady-state-certification-check.py",
+    "release-gate-post-release-continuity-check.py",
+    "release-gate-production-sustainability-certification-check.py",
     "release-candidate-rollout-policy.json",
     "release-gate-slo-burn-rate-v2-policy.json",
     "release-gate-deploy-rehearsal-policy.json",
@@ -136,6 +142,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "release-gate-post-cutover-finalization-policy.json",
     "release-gate-post-release-watch-policy.json",
     "release-gate-steady-state-certification-policy.json",
+    "release-gate-post-release-continuity-policy.json",
+    "release-gate-production-sustainability-certification-policy.json",
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
@@ -169,6 +177,8 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/release-gate-post-cutover-finalization-release-gate.json",
     "artifacts/release-gate-post-release-watch-release-gate.json",
     "artifacts/release-gate-steady-state-certification-release-gate.json",
+    "artifacts/release-gate-post-release-continuity-release-gate.json",
+    "artifacts/release-gate-production-sustainability-certification-release-gate.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
@@ -233,6 +243,19 @@ DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.steady_state_watch_signal_failed=0",
     "metrics.steady_state_burnin_threshold_failed=0",
     "metrics.steady_state_closure_signal_failed=0",
+    "metrics.post_release_continuity_reports_non_green=0",
+    "metrics.post_release_continuity_release_block_signals=0",
+    "metrics.post_release_continuity_watch_signal_failed=0",
+    "metrics.post_release_continuity_steady_state_signal_failed=0",
+    "metrics.post_release_continuity_freshness_budget_violations=0",
+    "metrics.post_release_continuity_attestation_budget_violations=0",
+    "metrics.production_sustainability_reports_non_green=0",
+    "metrics.production_sustainability_release_block_signals=0",
+    "metrics.production_sustainability_continuity_signal_failed=0",
+    "metrics.production_sustainability_steady_state_signal_failed=0",
+    "metrics.production_sustainability_production_final_signal_failed=0",
+    "metrics.production_sustainability_burnin_threshold_failed=0",
+    "metrics.production_sustainability_closure_signal_failed=0",
 ]
 
 

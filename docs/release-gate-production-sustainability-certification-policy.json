@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "required_sustainability_signals": [
+    "post_release_continuity",
+    "steady_state_certification",
+    "production_final_attestation",
+    "burnin_consecutive_green",
+    "p0_closure_go_no_go"
+  ],
+  "min_required_green_reports": 6,
+  "runbook_section": "3.52 Production sustainability certification"
+}
