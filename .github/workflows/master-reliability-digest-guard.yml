@@ -57,16 +57,20 @@ jobs:
           PER_PAGE: ${{ github.event.inputs.per_page || '20' }}
           ALLOW_BREACH: ${{ github.event.inputs.allow_breach || 'false' }}
         run: |
-          $arguments = @(
-            "-Repo", "$env:REPO_FULL",
-            "-MaxAgeHours", "$env:MAX_AGE_HOURS",
-            "-PerPage", "$env:PER_PAGE",
-            "-OutputFile", "artifacts\\master-reliability-digest-guard.json"
-          )
           if ($env:ALLOW_BREACH -eq "true") {
-            $arguments += "-AllowBreach"
+            .\scripts\run-master-reliability-digest-guard.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -MaxAgeHours "$env:MAX_AGE_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -OutputFile "artifacts\master-reliability-digest-guard.json" `
+              -AllowBreach
+          } else {
+            .\scripts\run-master-reliability-digest-guard.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -MaxAgeHours "$env:MAX_AGE_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -OutputFile "artifacts\master-reliability-digest-guard.json"
           }
-          .\scripts\run-master-reliability-digest-guard.ps1 @arguments
 
       - name: Upsert reliability-digest guard issue
         if: always()

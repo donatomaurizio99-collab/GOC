@@ -78,21 +78,30 @@ jobs:
           WARNING_SUSTAINED_RUNS: ${{ github.event.inputs.warning_sustained_runs || '3' }}
           FAIL_ON_WARNING: ${{ github.event.inputs.fail_on_warning || 'false' }}
         run: |
-          $arguments = @(
-            "-Repo", "$env:REPO_FULL",
-            "-CiPerPage", "$env:CI_PER_PAGE",
-            "-GuardPerPage", "$env:GUARD_PER_PAGE",
-            "-TrendRuns", "$env:TREND_RUNS",
-            "-GuardTrendRuns", "$env:GUARD_TREND_RUNS",
-            "-ReleaseGateWarningSeconds", "$env:RELEASE_GATE_WARNING_SECONDS",
-            "-WarningSustainedRuns", "$env:WARNING_SUSTAINED_RUNS",
-            "-OutputFile", "artifacts\master-reliability-digest.json",
-            "-MarkdownOutputFile", "artifacts\master-reliability-digest.md"
-          )
           if ($env:FAIL_ON_WARNING -eq "true") {
-            $arguments += "-FailOnWarning"
+            .\scripts\run-master-reliability-digest.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -CiPerPage "$env:CI_PER_PAGE" `
+              -GuardPerPage "$env:GUARD_PER_PAGE" `
+              -TrendRuns "$env:TREND_RUNS" `
+              -GuardTrendRuns "$env:GUARD_TREND_RUNS" `
+              -ReleaseGateWarningSeconds "$env:RELEASE_GATE_WARNING_SECONDS" `
+              -WarningSustainedRuns "$env:WARNING_SUSTAINED_RUNS" `
+              -OutputFile "artifacts\master-reliability-digest.json" `
+              -MarkdownOutputFile "artifacts\master-reliability-digest.md" `
+              -FailOnWarning
+          } else {
+            .\scripts\run-master-reliability-digest.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -CiPerPage "$env:CI_PER_PAGE" `
+              -GuardPerPage "$env:GUARD_PER_PAGE" `
+              -TrendRuns "$env:TREND_RUNS" `
+              -GuardTrendRuns "$env:GUARD_TREND_RUNS" `
+              -ReleaseGateWarningSeconds "$env:RELEASE_GATE_WARNING_SECONDS" `
+              -WarningSustainedRuns "$env:WARNING_SUSTAINED_RUNS" `
+              -OutputFile "artifacts\master-reliability-digest.json" `
+              -MarkdownOutputFile "artifacts\master-reliability-digest.md"
           }
-          .\scripts\run-master-reliability-digest.ps1 @arguments
 
       - name: Publish digest summary
         if: always()
