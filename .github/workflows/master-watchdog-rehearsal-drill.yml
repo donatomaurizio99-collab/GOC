@@ -1,0 +1,68 @@
+name: Master Watchdog Rehearsal Drill
+
+on:
+  schedule:
+    - cron: "45 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch label for the injected watchdog rehearsal"
+        required: false
+        default: "master"
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog-rehearsal-drill:
+    name: Watchdog Rehearsal Drill
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run watchdog rehearsal drill
+        shell: pwsh
+        env:
+          REPO_FULL: ${{ github.repository }}
+          BRANCH_NAME: ${{ github.event.inputs.branch || 'master' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          .\scripts\run-master-watchdog-rehearsal-drill.ps1 `
+            -Repo "$env:REPO_FULL" `
+            -Branch "$env:BRANCH_NAME" `
+            -RunUrl "$env:RUN_URL" `
+            -CheckReportFile "artifacts\master-guard-workflow-health-rehearsal-check.json" `
+            -IssueUpsertReportFile "artifacts\master-guard-workflow-health-rehearsal-issue-upsert.json" `
+            -OutputFile "artifacts\master-guard-workflow-health-rehearsal-drill.json"
+
+      - name: Upload watchdog rehearsal check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-rehearsal-check
+          path: artifacts/master-guard-workflow-health-rehearsal-check.json
+          if-no-files-found: error
+
+      - name: Upload watchdog rehearsal issue-upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-rehearsal-issue-upsert
+          path: artifacts/master-guard-workflow-health-rehearsal-issue-upsert.json
+          if-no-files-found: error
+
+      - name: Upload watchdog rehearsal drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-workflow-health-rehearsal-drill
+          path: artifacts/master-guard-workflow-health-rehearsal-drill.json
+          if-no-files-found: error

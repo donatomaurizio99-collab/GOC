@@ -12554,3 +12554,84 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
     assert payload["decision"]["guard_workflow_coverage_contract_ok"] is False
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_244_master_watchdog_rehearsal_drill_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-watchdog-rehearsal-drill.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-watchdog-rehearsal-drill.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Watchdog Rehearsal Drill" in workflow
+    assert 'cron: "45 4 * * 1"' in workflow
+    assert ".\\scripts\\run-master-watchdog-rehearsal-drill.ps1" in workflow
+    assert "master-guard-workflow-health-rehearsal-check.json" in workflow
+    assert "master-guard-workflow-health-rehearsal-issue-upsert.json" in workflow
+    assert "master-guard-workflow-health-rehearsal-drill.json" in workflow
+
+    assert "master-watchdog-rehearsal-drill.py" in wrapper
+    assert "IssueUpsertReportFile" in wrapper
+    assert "CheckReportFile" in wrapper
+    assert "--issue-upsert-report-file" in wrapper
+    assert "--check-report-file" in wrapper
+
+    assert "master-watchdog-rehearsal-drill.yml" in readme
+    assert "injected-failure drill for the watchdog chain" in readme
+
+
+def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-drill").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    check_report_file = workspace / "master-guard-workflow-health-rehearsal-check.json"
+    issue_upsert_report_file = workspace / "master-guard-workflow-health-rehearsal-issue-upsert.json"
+    output_file = workspace / "master-guard-workflow-health-rehearsal-drill.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-drill.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-drill",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--run-url",
+        "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9990001",
+        "--check-report-file",
+        str(check_report_file.resolve()),
+        "--issue-upsert-report-file",
+        str(issue_upsert_report_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["injected_failure_detected"] is True
+    assert payload["decision"]["alert_chain_verified"] is True
+    assert output_file.exists()
+    assert check_report_file.exists()
+    assert issue_upsert_report_file.exists()
+
+    check_payload = json.loads(check_report_file.read_text(encoding="utf-8"))
+    assert check_payload["decision"]["guard_workflow_health_degraded"] is True
+    assert "Master Branch Protection Drift Guard" in check_payload["degraded_workflow_names"]
+
+    issue_upsert_payload = json.loads(issue_upsert_report_file.read_text(encoding="utf-8"))
+    assert issue_upsert_payload["decision"]["alert_triggered"] is True
+    assert issue_upsert_payload["decision"]["issue_action"] == "created"
+    assert any(
+        "Degraded detail:" in str(action.get("body") or "")
+        for action in issue_upsert_payload["actions"]
+        if isinstance(action, dict)
+    )
+
+    shutil.rmtree(workspace, ignore_errors=True)
