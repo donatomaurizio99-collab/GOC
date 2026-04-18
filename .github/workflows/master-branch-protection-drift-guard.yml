@@ -42,13 +42,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ALLOW_DRIFT: ${{ github.event.inputs.allow_drift || 'false' }}
         run: |
-          $arguments = @(
-            "-OutputFile", "artifacts\\master-branch-protection-drift-guard.json"
-          )
           if ($env:ALLOW_DRIFT -eq "true") {
-            $arguments += "-AllowDrift"
+            .\scripts\run-master-branch-protection-drift-guard.ps1 `
+              -OutputFile "artifacts\master-branch-protection-drift-guard.json" `
+              -AllowDrift
+          } else {
+            .\scripts\run-master-branch-protection-drift-guard.ps1 `
+              -OutputFile "artifacts\master-branch-protection-drift-guard.json"
           }
-          .\scripts\run-master-branch-protection-drift-guard.ps1 @arguments
 
       - name: Upsert drift alert issue
         if: always()

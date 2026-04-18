@@ -66,17 +66,22 @@ jobs:
           SUSTAINED_RUNS: ${{ github.event.inputs.sustained_runs || '3' }}
           FAIL_ON_WARNING: ${{ github.event.inputs.fail_on_warning || 'false' }}
         run: |
-          $arguments = @(
-            "-LookbackHours", "$env:LOOKBACK_HOURS",
-            "-PerPage", "$env:PER_PAGE",
-            "-ThresholdSeconds", "$env:THRESHOLD_SECONDS",
-            "-SustainedRuns", "$env:SUSTAINED_RUNS",
-            "-OutputFile", "artifacts\\release-gate-runtime-early-warning.json"
-          )
           if ($env:FAIL_ON_WARNING -eq "true") {
-            $arguments += "-FailOnWarning"
+            .\scripts\run-release-gate-runtime-early-warning.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -ThresholdSeconds "$env:THRESHOLD_SECONDS" `
+              -SustainedRuns "$env:SUSTAINED_RUNS" `
+              -OutputFile "artifacts\release-gate-runtime-early-warning.json" `
+              -FailOnWarning
+          } else {
+            .\scripts\run-release-gate-runtime-early-warning.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -ThresholdSeconds "$env:THRESHOLD_SECONDS" `
+              -SustainedRuns "$env:SUSTAINED_RUNS" `
+              -OutputFile "artifacts\release-gate-runtime-early-warning.json"
           }
-          .\scripts\run-release-gate-runtime-early-warning.ps1 @arguments
 
       - name: Upsert runtime warning issue
         if: always()

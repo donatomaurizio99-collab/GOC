@@ -14024,3 +14024,23 @@ def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded()
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_260_master_workflow_wrapper_invocations_use_named_parameters():
+    project_root = Path(__file__).resolve().parents[1]
+    workflows = [
+        project_root / ".github" / "workflows" / "master-required-checks-24h.yml",
+        project_root / ".github" / "workflows" / "master-branch-protection-drift-guard.yml",
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml",
+        project_root / ".github" / "workflows" / "master-guard-workflow-health.yml",
+        project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml",
+        project_root / ".github" / "workflows" / "master-reliability-digest.yml",
+        project_root / ".github" / "workflows" / "master-reliability-digest-guard.yml",
+        project_root / ".github" / "workflows" / "master-guard-burnin-check.yml",
+        project_root / ".github" / "workflows" / "master-production-readiness-gate.yml",
+    ]
+
+    for path in workflows:
+        text = path.read_text(encoding="utf-8")
+        assert "$arguments = @(" not in text
+        assert "@arguments" not in text

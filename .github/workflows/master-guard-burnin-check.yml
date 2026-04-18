@@ -59,18 +59,24 @@ jobs:
           DRILL_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.drill_required_successful_runs || '1' }}
           ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
         run: |
-          $arguments = @(
-            "-Repo", "$env:REPO_FULL",
-            "-PerPage", "$env:PER_PAGE",
-            "-RequiredSuccessfulRuns", "$env:REQUIRED_SUCCESSFUL_RUNS",
-            "-DigestRequiredSuccessfulRuns", "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS",
-            "-DrillRequiredSuccessfulRuns", "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS",
-            "-OutputFile", "artifacts\master-guard-burnin-check.json"
-          )
           if ($env:ALLOW_DEGRADED -eq "true") {
-            $arguments += "-AllowDegraded"
+            .\scripts\run-master-guard-burnin-check.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -PerPage "$env:PER_PAGE" `
+              -RequiredSuccessfulRuns "$env:REQUIRED_SUCCESSFUL_RUNS" `
+              -DigestRequiredSuccessfulRuns "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS" `
+              -DrillRequiredSuccessfulRuns "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS" `
+              -OutputFile "artifacts\master-guard-burnin-check.json" `
+              -AllowDegraded
+          } else {
+            .\scripts\run-master-guard-burnin-check.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -PerPage "$env:PER_PAGE" `
+              -RequiredSuccessfulRuns "$env:REQUIRED_SUCCESSFUL_RUNS" `
+              -DigestRequiredSuccessfulRuns "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS" `
+              -DrillRequiredSuccessfulRuns "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS" `
+              -OutputFile "artifacts\master-guard-burnin-check.json"
           }
-          .\scripts\run-master-guard-burnin-check.ps1 @arguments
 
       - name: Upload guard burn-in report
         if: always()

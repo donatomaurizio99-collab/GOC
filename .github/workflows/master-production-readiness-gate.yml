@@ -126,17 +126,22 @@ jobs:
         env:
           ALLOW_NOT_READY: ${{ github.event.inputs.allow_not_ready || 'false' }}
         run: |
-          $arguments = @(
-            "-RequiredChecksReportFile", "artifacts\master-required-checks-24h-report-readiness.json",
-            "-BranchProtectionReportFile", "artifacts\master-branch-protection-drift-guard-readiness.json",
-            "-GuardHealthReportFile", "artifacts\master-guard-workflow-health-check-readiness.json",
-            "-GuardBurninReportFile", "artifacts\master-guard-burnin-check-readiness.json",
-            "-OutputFile", "artifacts\master-production-readiness-gate.json"
-          )
           if ($env:ALLOW_NOT_READY -eq "true") {
-            $arguments += "-AllowNotReady"
+            .\scripts\run-master-production-readiness-gate.ps1 `
+              -RequiredChecksReportFile "artifacts\master-required-checks-24h-report-readiness.json" `
+              -BranchProtectionReportFile "artifacts\master-branch-protection-drift-guard-readiness.json" `
+              -GuardHealthReportFile "artifacts\master-guard-workflow-health-check-readiness.json" `
+              -GuardBurninReportFile "artifacts\master-guard-burnin-check-readiness.json" `
+              -OutputFile "artifacts\master-production-readiness-gate.json" `
+              -AllowNotReady
+          } else {
+            .\scripts\run-master-production-readiness-gate.ps1 `
+              -RequiredChecksReportFile "artifacts\master-required-checks-24h-report-readiness.json" `
+              -BranchProtectionReportFile "artifacts\master-branch-protection-drift-guard-readiness.json" `
+              -GuardHealthReportFile "artifacts\master-guard-workflow-health-check-readiness.json" `
+              -GuardBurninReportFile "artifacts\master-guard-burnin-check-readiness.json" `
+              -OutputFile "artifacts\master-production-readiness-gate.json"
           }
-          .\scripts\run-master-production-readiness-gate.ps1 @arguments
 
       - name: Publish production readiness summary
         if: always()

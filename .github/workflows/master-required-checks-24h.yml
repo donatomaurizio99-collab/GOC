@@ -52,16 +52,20 @@ jobs:
           MAX_NON_GREEN_RUNS: ${{ github.event.inputs.max_non_green_runs || '0' }}
           ALLOW_NON_GREEN: ${{ github.event.inputs.allow_non_green || 'false' }}
         run: |
-          $arguments = @(
-            "-LookbackHours", "$env:LOOKBACK_HOURS",
-            "-PerPage", "$env:PER_PAGE",
-            "-MaxNonGreenRuns", "$env:MAX_NON_GREEN_RUNS",
-            "-OutputFile", "artifacts\\master-required-checks-24h-report.json"
-          )
           if ($env:ALLOW_NON_GREEN -eq "true") {
-            $arguments += "-AllowNonGreen"
+            .\scripts\run-master-required-checks-24h-report.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -MaxNonGreenRuns "$env:MAX_NON_GREEN_RUNS" `
+              -OutputFile "artifacts\master-required-checks-24h-report.json" `
+              -AllowNonGreen
+          } else {
+            .\scripts\run-master-required-checks-24h-report.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -MaxNonGreenRuns "$env:MAX_NON_GREEN_RUNS" `
+              -OutputFile "artifacts\master-required-checks-24h-report.json"
           }
-          .\scripts\run-master-required-checks-24h-report.ps1 @arguments
 
       - name: Upload 24h required checks report
         if: always()

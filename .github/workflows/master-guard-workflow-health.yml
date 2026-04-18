@@ -56,15 +56,18 @@ jobs:
           PER_PAGE: ${{ github.event.inputs.per_page || '50' }}
           ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
         run: |
-          $arguments = @(
-            "-LookbackHours", "$env:LOOKBACK_HOURS",
-            "-PerPage", "$env:PER_PAGE",
-            "-OutputFile", "artifacts\\master-guard-workflow-health-check.json"
-          )
           if ($env:ALLOW_DEGRADED -eq "true") {
-            $arguments += "-AllowDegraded"
+            .\scripts\run-master-guard-workflow-health-check.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -OutputFile "artifacts\master-guard-workflow-health-check.json" `
+              -AllowDegraded
+          } else {
+            .\scripts\run-master-guard-workflow-health-check.ps1 `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -OutputFile "artifacts\master-guard-workflow-health-check.json"
           }
-          .\scripts\run-master-guard-workflow-health-check.ps1 @arguments
 
       - name: Upsert guard-health alert issue
         if: always()
