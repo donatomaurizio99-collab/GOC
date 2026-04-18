@@ -566,6 +566,7 @@ Manual P0 closure report invocation:
 Verify before release:
 - CI checks green:
   - `Release Gate (Windows)`
+  - `Security CI Lane`
   - `Pytest (Python 3.11)`
   - `Pytest (Python 3.12)`
   - `Desktop Smoke (Windows)`

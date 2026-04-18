@@ -43,7 +43,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --branch master \
             --workflow-name "CI" \
-            --required-jobs "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)" \
+            --required-jobs "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)" \
             --required-consecutive "$REQUIRED_CONSECUTIVE" \
             --per-page 50 \
             --output-file ./artifacts/p0-burnin-consecutive-green-report.json \

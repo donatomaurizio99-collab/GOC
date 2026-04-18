@@ -3,7 +3,7 @@ param(
     [string]$Repo = "donatomaurizio99-collab/GOC",
     [string]$Branch = "master",
     [string]$WorkflowName = "CI",
-    [string]$RequiredJobs = "Release Gate (Windows),Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+    [string]$RequiredJobs = "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
     [int]$RequiredConsecutive = 10,
     [int]$PerPage = 50,
     [string]$OutputFile = "artifacts\\p0-burnin-consecutive-green-report.json",

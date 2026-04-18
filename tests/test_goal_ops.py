@@ -10369,3 +10369,201 @@ def test_215_release_gate_registry_attestation_gate_fails_when_sync_report_decla
     assert "report_changed_false" in payload["failed_checks"]
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_216_p0_burnin_consecutive_green_dedupes_required_jobs_input():
+    workspace = _local_test_dir("pytest-p0-burnin-required-jobs-dedupe").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    output_file = workspace / "p0-burnin-report.json"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = 6101
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-6101",
+                        "updated_at": "2026-04-18T14:00:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.11)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.12)", "conclusion": "success"},
+                    {"name": "Desktop Smoke (Windows)", "conclusion": "success"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--required-jobs",
+        (
+            "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),"
+            "Pytest (Python 3.12),Desktop Smoke (Windows),Security CI Lane,Pytest (Python 3.12)"
+        ),
+        "--required-consecutive",
+        "1",
+        "--per-page",
+        "5",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["config"]["required_jobs"] == [
+        "Release Gate (Windows)",
+        "Security CI Lane",
+        "Pytest (Python 3.11)",
+        "Pytest (Python 3.12)",
+        "Desktop Smoke (Windows)",
+    ]
+    assert payload["metrics"]["required_jobs_duplicates_removed_total"] == 2
+    assert payload["metrics"]["duplicate_job_name_observations"] == 0
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_217_p0_burnin_consecutive_green_hardens_duplicate_job_entries():
+    workspace = _local_test_dir("pytest-p0-burnin-duplicate-job-hardening").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = 6201
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-6201",
+                        "updated_at": "2026-04-18T14:10:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "failure"},
+                    {"name": "Pytest (Python 3.11)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.12)", "conclusion": "success"},
+                    {"name": "Desktop Smoke (Windows)", "conclusion": "success"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "p0-burnin-consecutive-green.py"),
+        "--label",
+        "pytest-drill",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--required-jobs",
+        "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)",
+        "--required-consecutive",
+        "1",
+        "--per-page",
+        "5",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "P0 burn-in consecutive-green check not met: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["duplicate_job_name_observations"] == 1
+    assert payload["first_non_green"]["job_dedupe"]["duplicate_job_name_total"] == 1
+    failing_job_names = [item["name"] for item in payload["first_non_green"]["failing_jobs"]]
+    assert "Security CI Lane" in failing_job_names
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_218_required_checks_hardened_in_burnin_workflows_and_branch_protection_docs():
+    project_root = Path(__file__).resolve().parents[1]
+    burnin_workflow = (project_root / ".github" / "workflows" / "p0-burnin-monitor.yml").read_text(encoding="utf-8")
+    master_burnin_workflow = (
+        project_root / ".github" / "workflows" / "master-release-gate-burnin.yml"
+    ).read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    expected_checks = "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)"
+
+    assert expected_checks in burnin_workflow
+    assert expected_checks in master_burnin_workflow
+    assert "Select required check: `Security CI Lane`." in readme
+
+    required_jobs_marker = '--required-jobs "'
+    burnin_jobs_start = burnin_workflow.find(required_jobs_marker)
+    master_jobs_start = master_burnin_workflow.find(required_jobs_marker)
+    assert burnin_jobs_start >= 0
+    assert master_jobs_start >= 0
+
+    burnin_jobs_fragment = burnin_workflow[burnin_jobs_start + len(required_jobs_marker) :]
+    master_jobs_fragment = master_burnin_workflow[master_jobs_start + len(required_jobs_marker) :]
+    burnin_jobs_csv = burnin_jobs_fragment.split('"', 1)[0]
+    master_jobs_csv = master_jobs_fragment.split('"', 1)[0]
+    burnin_jobs = [item.strip() for item in burnin_jobs_csv.split(",") if item.strip()]
+    master_jobs = [item.strip() for item in master_jobs_csv.split(",") if item.strip()]
+    assert len(burnin_jobs) == len(set(burnin_jobs))
+    assert len(master_jobs) == len(set(master_jobs))
