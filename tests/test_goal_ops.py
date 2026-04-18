@@ -12235,6 +12235,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             "updated_at": "2026-04-18T03:20:00Z",
                         }
                     ],
+                    "Master Guard Workflow Health": [
+                        {
+                            "id": 9104,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:35:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9101": {
@@ -12252,6 +12260,12 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             {"name": "release-gate-runtime-early-warning", "expired": False},
                             {"name": "release-gate-runtime-early-warning-issue-upsert", "expired": False},
                             {"name": "release-gate-runtime-alert-age-slo-issue-upsert", "expired": False},
+                        ]
+                    },
+                    "9104": {
+                        "artifacts": [
+                            {"name": "master-guard-workflow-health-check", "expired": False},
+                            {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
                         ]
                     },
                 },
@@ -12288,10 +12302,12 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
     payload_text = completed.stderr.split(marker, 1)[1].strip()
     payload = json.loads(payload_text)
     assert payload["success"] is False
-    assert payload["metrics"]["guard_workflows_total"] == 3
+    assert payload["metrics"]["guard_workflows_total"] == 4
     assert payload["metrics"]["guard_workflows_degraded_total"] == 2
     assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
     assert payload["metrics"]["guard_workflows_non_success_total"] == 1
+    assert payload["metrics"]["coverage_contract_uncovered_files_total"] == 0
+    assert payload["metrics"]["coverage_contract_name_mismatches_total"] == 0
     assert "Master Branch Protection Drift Guard" in payload["degraded_workflow_names"]
     assert "Master Release Gate Runtime Early Warning" in payload["degraded_workflow_names"]
     assert output_file.exists()
@@ -12320,10 +12336,12 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert "--per-page" in wrapper
     assert "--allow-degraded" in wrapper
     assert "--fixtures-file" in wrapper
+    assert "--contract-workflow-files" in wrapper
     assert "master-guard-workflow-health-check.py" in wrapper
 
     assert "[master-guard-workflow-health.yml]" in readme
     assert "guard-workflow health watchdog" in readme
+    assert "coverage contract" in readme
     assert "run-master-guard-workflow-health-check.ps1" in readme
 
 
@@ -12398,5 +12416,116 @@ def test_242_ci_alert_issue_upsert_creates_issue_for_guard_workflow_health():
     assert len(issue_oplog["actions"]) == 1
     assert issue_oplog["actions"][0]["action"] == "create_issue"
     assert issue_oplog["actions"][0]["labels"] == ["ci-drift", "guard-workflow-health"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_file():
+    workspace = _local_test_dir("pytest-master-guard-workflow-health-contract-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_file = workspace / "fixtures.json"
+
+    fixtures_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": {
+                    "Master Required Checks 24h": [
+                        {
+                            "id": 9301,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T02:50:00Z",
+                        }
+                    ],
+                    "Master Branch Protection Drift Guard": [
+                        {
+                            "id": 9302,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T02:30:00Z",
+                        }
+                    ],
+                    "Master Release Gate Runtime Early Warning": [
+                        {
+                            "id": 9303,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:20:00Z",
+                        }
+                    ],
+                    "Master Guard Workflow Health": [
+                        {
+                            "id": 9304,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:35:00Z",
+                        }
+                    ],
+                },
+                "run_artifacts": {
+                    "9301": {
+                        "artifacts": [
+                            {"name": "master-required-checks-24h-report", "expired": False},
+                        ]
+                    },
+                    "9302": {
+                        "artifacts": [
+                            {"name": "master-branch-protection-drift-guard", "expired": False},
+                            {"name": "master-branch-protection-drift-issue-upsert", "expired": False},
+                        ]
+                    },
+                    "9303": {
+                        "artifacts": [
+                            {"name": "release-gate-runtime-early-warning", "expired": False},
+                            {"name": "release-gate-runtime-early-warning-issue-upsert", "expired": False},
+                            {"name": "release-gate-runtime-alert-age-slo-issue-upsert", "expired": False},
+                        ]
+                    },
+                    "9304": {
+                        "artifacts": [
+                            {"name": "master-guard-workflow-health-check", "expired": False},
+                            {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
+                        ]
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-workflow-health-check.py"),
+        "--label",
+        "pytest-master-guard-workflow-health-contract",
+        "--fixtures-file",
+        str(fixtures_file.resolve()),
+        "--lookback-hours",
+        "30",
+        "--now-utc",
+        "2026-04-18T04:00:00Z",
+        "--contract-workflow-files",
+        (
+            "master-required-checks-24h.yml,master-branch-protection-drift-guard.yml,"
+            "master-release-gate-runtime-early-warning.yml,master-guard-workflow-health.yml,"
+            "master-extra-guard-contract-probe.yml"
+        ),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master guard-workflow health check failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["coverage_contract_uncovered_files_total"] == 1
+    assert "master-extra-guard-contract-probe.yml" in payload["coverage_contract"]["uncovered_guard_workflow_files"]
+    assert payload["decision"]["guard_workflow_coverage_contract_ok"] is False
 
     shutil.rmtree(workspace, ignore_errors=True)
