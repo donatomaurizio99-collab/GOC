@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   branch-protection-drift-guard:
@@ -42,10 +43,33 @@ jobs:
           }
           .\scripts\run-master-branch-protection-drift-guard.ps1 @arguments
 
+      - name: Upsert drift alert issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "master-branch-protection-drift" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\master-branch-protection-drift-guard.json" `
+            -RunUrl "$env:RUN_URL" `
+            -OutputFile "artifacts\master-branch-protection-drift-issue-upsert.json"
+
       - name: Upload branch-protection drift report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: master-branch-protection-drift-guard
           path: artifacts/master-branch-protection-drift-guard.json
+          if-no-files-found: error
+
+      - name: Upload branch-protection drift issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-branch-protection-drift-issue-upsert
+          path: artifacts/master-branch-protection-drift-issue-upsert.json
           if-no-files-found: error

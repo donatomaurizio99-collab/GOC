@@ -11170,3 +11170,210 @@ def test_228_release_gate_runtime_early_warning_workflow_wrapper_and_docs_wiring
 
     assert "[master-release-gate-runtime-early-warning.yml]" in readme
     assert "3 consecutive runs >= 540s" in readme
+
+
+def test_229_ci_alert_issue_upsert_creates_issue_for_branch_protection_drift():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-create").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-branch-protection-drift-guard.json"
+    open_issues_file = workspace / "open-issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-drift",
+                "config": {"branch": "master"},
+                "decision": {
+                    "branch_protection_drift_detected": True,
+                    "recommended_action": "branch_protection_drift_detected",
+                },
+                "drift": {
+                    "missing_required_checks": ["Desktop Smoke (Windows)"],
+                    "unexpected_required_checks": ["Unexpected Check"],
+                },
+                "generated_at_utc": "2026-04-18T20:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    open_issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-create",
+        "--signal-id",
+        "master-branch-protection-drift",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--open-issues-file",
+        str(open_issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--run-url",
+        "https://example.invalid/actions/runs/1001",
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert payload["decision"]["issue_deduped"] is False
+    assert "ci-drift" in payload["issue"]["labels"]
+    assert "branch-protection" in payload["issue"]["labels"]
+    assert "ci-alert-key:master-branch-protection-drift:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "create_issue"
+    assert issue_oplog["actions"][0]["labels"] == ["ci-drift", "branch-protection"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-dedupe").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    open_issues_file = workspace / "open-issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-runtime-warning",
+                "config": {
+                    "branch": "master",
+                    "threshold_seconds": 540,
+                    "sustained_runs": 3,
+                },
+                "metrics": {
+                    "consecutive_runs_over_threshold": 3,
+                },
+                "decision": {
+                    "warning_triggered": True,
+                    "recommended_action": "investigate_release_gate_runtime_regression",
+                },
+                "warning_message": (
+                    "Release Gate runtime early warning: 3 consecutive master CI runs "
+                    "at or above 540s for 'Release Gate (Windows)'."
+                ),
+                "generated_at_utc": "2026-04-18T20:20:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    open_issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 42,
+                    "title": "[Release Gate Runtime] sustained runtime warning on master",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/42",
+                    "body": (
+                        "managed issue\\n"
+                        "<!-- ci-alert-key:release-gate-runtime-early-warning:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-dedupe",
+        "--signal-id",
+        "release-gate-runtime-early-warning",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--open-issues-file",
+        str(open_issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--run-url",
+        "https://example.invalid/actions/runs/1002",
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "commented"
+    assert payload["decision"]["issue_deduped"] is True
+    assert payload["issue"]["number"] == 42
+    assert payload["issue"]["url"] == "https://github.com/donatomaurizio99-collab/GOC/issues/42"
+    assert "release-gate-runtime" in payload["issue"]["labels"]
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "add_comment"
+    assert issue_oplog["actions"][0]["issue_number"] == 42
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    branch_workflow = (
+        project_root / ".github" / "workflows" / "master-branch-protection-drift-guard.yml"
+    ).read_text(encoding="utf-8")
+    runtime_workflow = (
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml"
+    ).read_text(encoding="utf-8")
+    wrapper = (project_root / "scripts" / "run-ci-alert-issue-upsert.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "ci-alert-issue-upsert.py" in wrapper
+    assert "--signal-id" in wrapper
+    assert "--report-file" in wrapper
+    assert "--dry-run" in wrapper
+    assert "master-branch-protection-drift" in wrapper
+    assert "release-gate-runtime-early-warning" in wrapper
+
+    assert "issues: write" in branch_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
+    assert "master-branch-protection-drift-issue-upsert.json" in branch_workflow
+
+    assert "issues: write" in runtime_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in runtime_workflow
+    assert "release-gate-runtime-early-warning-issue-upsert.json" in runtime_workflow
+
+    assert "run-ci-alert-issue-upsert.ps1" in readme
+    assert "labels: `ci-drift` + signal label" in readme
