@@ -10630,3 +10630,167 @@ def test_221_release_gate_refreshes_manifest_before_stage_s_lineage_check():
     assert "artifacts\\release-gate-stability-final-readiness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-staging-soak-readiness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-rc-canary-rollout-release-gate.json" in release_gate
+
+
+def test_222_master_required_checks_24h_report_hard_fails_on_non_green_runs():
+    workspace = _local_test_dir("pytest-master-required-checks-24h-report-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    jobs_dir = workspace / "jobs"
+    output_file = workspace / "master-required-checks-24h-report.json"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    recent_green_run_id = 7101
+    recent_non_green_run_id = 7102
+    older_run_id = 6901
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": recent_non_green_run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-7102",
+                        "updated_at": "2026-04-18T14:40:00Z",
+                    },
+                    {
+                        "id": recent_green_run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "sha-7101",
+                        "updated_at": "2026-04-18T12:00:00Z",
+                    },
+                    {
+                        "id": older_run_id,
+                        "name": "CI",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "head_sha": "sha-6901",
+                        "updated_at": "2026-04-16T10:00:00Z",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{recent_non_green_run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "failure"},
+                    {"name": "Pytest (Python 3.11)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.12)", "conclusion": "success"},
+                    {"name": "Desktop Smoke (Windows)", "conclusion": "success"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{recent_green_run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "success"},
+                    {"name": "Security CI Lane", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.11)", "conclusion": "success"},
+                    {"name": "Pytest (Python 3.12)", "conclusion": "success"},
+                    {"name": "Desktop Smoke (Windows)", "conclusion": "success"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (jobs_dir / f"{older_run_id}.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {"name": "Release Gate (Windows)", "conclusion": "failure"},
+                    {"name": "Security CI Lane", "conclusion": "failure"},
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-required-checks-24h-report.py"),
+        "--label",
+        "pytest-master-required-checks",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--jobs-dir",
+        str(jobs_dir.resolve()),
+        "--required-jobs",
+        (
+            "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),"
+            "Desktop Smoke (Windows),Security CI Lane"
+        ),
+        "--lookback-hours",
+        "24",
+        "--now-utc",
+        "2026-04-18T15:00:00Z",
+        "--max-non-green-runs",
+        "0",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master required-checks 24h report failed: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["evaluated_runs_total"] == 2
+    assert payload["metrics"]["runs_outside_window_ignored_total"] == 1
+    assert payload["metrics"]["non_green_runs_total"] == 1
+    assert payload["metrics"]["required_jobs_duplicates_removed_total"] == 1
+    assert payload["metrics"]["duplicate_job_name_observations"] == 1
+    assert payload["non_green_unique_required_jobs"] == ["Security CI Lane"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_223_master_required_checks_24h_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-required-checks-24h.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-required-checks-24h-report.ps1").read_text(
+        encoding="utf-8"
+    )
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    expected_checks = "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)"
+
+    assert 'name: Master Required Checks 24h' in workflow
+    assert 'cron: "45 2 * * *"' in workflow
+    assert '.\\scripts\\run-master-required-checks-24h-report.ps1' in workflow
+    assert "master-required-checks-24h-report.json" in workflow
+
+    assert expected_checks in wrapper
+    assert "--max-non-green-runs" in wrapper
+    assert "--allow-non-green" in wrapper
+    assert "master-required-checks-24h-report.py" in wrapper
+
+    assert "[master-required-checks-24h.yml]" in readme
+    assert "required-check list deduped to these exact 5 checks" in readme

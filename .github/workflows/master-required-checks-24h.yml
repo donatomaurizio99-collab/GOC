@@ -1,0 +1,69 @@
+name: Master Required Checks 24h
+
+on:
+  schedule:
+    - cron: "45 2 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Hours of master CI history to inspect"
+        required: false
+        default: "24"
+      per_page:
+        description: "Maximum completed CI runs to fetch"
+        required: false
+        default: "100"
+      max_non_green_runs:
+        description: "Allowed non-green runs inside the lookback window"
+        required: false
+        default: "0"
+      allow_non_green:
+        description: "Do not fail workflow when non-green runs are present"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  required-checks-window:
+    name: Master Required Checks 24h Report
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run 24h required checks report
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '24' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '100' }}
+          MAX_NON_GREEN_RUNS: ${{ github.event.inputs.max_non_green_runs || '0' }}
+          ALLOW_NON_GREEN: ${{ github.event.inputs.allow_non_green || 'false' }}
+        run: |
+          $arguments = @(
+            "-LookbackHours", "$env:LOOKBACK_HOURS",
+            "-PerPage", "$env:PER_PAGE",
+            "-MaxNonGreenRuns", "$env:MAX_NON_GREEN_RUNS",
+            "-OutputFile", "artifacts\\master-required-checks-24h-report.json"
+          )
+          if ($env:ALLOW_NON_GREEN -eq "true") {
+            $arguments += "-AllowNonGreen"
+          }
+          .\scripts\run-master-required-checks-24h-report.ps1 @arguments
+
+      - name: Upload 24h required checks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-required-checks-24h-report
+          path: artifacts/master-required-checks-24h-report.json
+          if-no-files-found: error
