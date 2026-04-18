@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -28,6 +29,10 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
         "title": "[Release Gate Runtime] alert issue age SLO breached on master",
         "labels": ["ci-drift", "release-gate-runtime", "alert-age-slo"],
     },
+    "master-watchdog-rehearsal-drill-slo": {
+        "title": "[CI Drift] watchdog rehearsal drill SLO breached on master",
+        "labels": ["ci-drift", "watchdog-rehearsal"],
+    },
 }
 
 LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
@@ -51,11 +56,17 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
         "color": "FBCA04",
         "description": "Runtime warning alert-issue age exceeds SLO threshold",
     },
+    "watchdog-rehearsal": {
+        "color": "5319E7",
+        "description": "Watchdog rehearsal drill freshness/health SLO breached",
+    },
 }
 
 RECOVERY_STREAK_PATTERN = re.compile(r"<!--\s*ci-alert-recovery-streak:(\d+)\s*-->")
 PARENT_RUNTIME_ISSUE_MARKER_PATTERN = re.compile(r"<!--\s*ci-alert-parent-runtime-warning-issue:(\d+)\s*-->")
 PARENT_RUNTIME_ISSUE_LINE_PATTERN = re.compile(r"^- Parent runtime warning issue: #\d+.*$", re.MULTILINE)
+ACTIVE_ALERT_STREAK_PATTERN = re.compile(r"<!--\s*ci-alert-active-alert-streak:(\d+)\s*-->")
+ACTIVE_ALERT_SUMMARY_SHA_PATTERN = re.compile(r"<!--\s*ci-alert-active-alert-summary-sha:([0-9a-f]{64})\s*-->")
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -233,6 +244,82 @@ def _format_guard_workflow_degraded_detail_lines(
     return detail_lines
 
 
+def _format_guard_workflow_latest_run_reference(
+    *,
+    repo: str,
+    workflow_name: str,
+    latest_run: dict[str, Any],
+) -> str:
+    run_id = int(latest_run.get("run_id") or 0)
+    run_url = _resolve_guard_workflow_run_url(repo=repo, latest_run=latest_run)
+    if run_id > 0 and run_url:
+        return f"{workflow_name}: #{run_id} ({run_url})"
+    if run_id > 0:
+        return f"{workflow_name}: #{run_id}"
+    if run_url:
+        return f"{workflow_name}: {run_url}"
+    return f"{workflow_name}: none"
+
+
+def _build_summary_fingerprint(summary_lines: list[str]) -> str:
+    normalized = "\n".join([str(item or "").strip() for item in summary_lines]).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _build_active_alert_streak_marker(streak: int) -> str:
+    return f"<!-- ci-alert-active-alert-streak:{max(0, int(streak))} -->"
+
+
+def _build_active_alert_summary_sha_marker(summary_sha: str) -> str:
+    token = str(summary_sha or "").strip().lower()
+    return f"<!-- ci-alert-active-alert-summary-sha:{token} -->"
+
+
+def _extract_active_alert_streak(body: str) -> int:
+    match = ACTIVE_ALERT_STREAK_PATTERN.search(str(body or ""))
+    if not match:
+        return 0
+    try:
+        return max(0, int(match.group(1)))
+    except ValueError:
+        return 0
+
+
+def _extract_active_alert_summary_sha(body: str) -> str:
+    match = ACTIVE_ALERT_SUMMARY_SHA_PATTERN.search(str(body or ""))
+    if not match:
+        return ""
+    return str(match.group(1) or "").strip().lower()
+
+
+def _apply_active_alert_state_markers(*, body: str, streak: int, summary_sha: str) -> str:
+    text = str(body or "")
+    streak_marker = _build_active_alert_streak_marker(streak)
+    summary_marker = _build_active_alert_summary_sha_marker(summary_sha)
+
+    if ACTIVE_ALERT_STREAK_PATTERN.search(text):
+        text = ACTIVE_ALERT_STREAK_PATTERN.sub(streak_marker, text)
+    elif text.strip():
+        text = text.rstrip() + "\n" + streak_marker
+    else:
+        text = streak_marker
+
+    if ACTIVE_ALERT_SUMMARY_SHA_PATTERN.search(text):
+        text = ACTIVE_ALERT_SUMMARY_SHA_PATTERN.sub(summary_marker, text)
+    elif text.strip():
+        text = text.rstrip() + "\n" + summary_marker
+    else:
+        text = summary_marker
+    return text
+
+
+def _clear_active_alert_state_markers(*, body: str) -> str:
+    text = str(body or "")
+    text = ACTIVE_ALERT_STREAK_PATTERN.sub("", text)
+    text = ACTIVE_ALERT_SUMMARY_SHA_PATTERN.sub("", text)
+    return "\n".join([line for line in text.splitlines() if line.strip()]).strip()
+
+
 def _load_issues(*, repo: str, state: str, issues_file: Path | None, dry_run: bool) -> list[dict[str, Any]]:
     resolved_state = str(state or "open").strip().lower()
     _expect(resolved_state in {"open", "all"}, f"Unsupported issue state: {state}")
@@ -305,6 +392,44 @@ def _signal_alert_state(
             f"- Missing required artifacts total: {missing_required_artifacts_total}",
             *degraded_detail_lines,
             f"- Recommended action: {decision.get('recommended_action') or 'guard_workflow_health_green'}",
+        ]
+        return alert_triggered, summary, branch, {}
+
+    if signal_id == "master-watchdog-rehearsal-drill-slo":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        latest_run = report.get("latest_run") if isinstance(report.get("latest_run"), dict) else {}
+
+        latest_run_id = int(latest_run.get("run_id") or 0)
+        latest_run_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
+        latest_run_status = str(latest_run.get("status") or "")
+        latest_run_conclusion = str(latest_run.get("conclusion") or "")
+        latest_run_age_hours = metrics.get("latest_run_age_hours")
+        max_age_hours = metrics.get("max_age_hours")
+        breach_reason = str(decision.get("breach_reason") or "none")
+        alert_triggered = bool(decision.get("watchdog_rehearsal_slo_breached"))
+
+        if latest_run_id > 0 and latest_run_url:
+            latest_run_text = f"#{latest_run_id} ({latest_run_url})"
+        elif latest_run_id > 0:
+            latest_run_text = f"#{latest_run_id}"
+        elif latest_run_url:
+            latest_run_text = latest_run_url
+        else:
+            latest_run_text = "none"
+        age_text = (
+            f"{float(latest_run_age_hours):.2f}h"
+            if latest_run_age_hours is not None
+            else "unknown"
+        )
+
+        summary = [
+            f"- Rehearsal drill SLO breached: {'yes' if alert_triggered else 'no'}",
+            f"- Breach reason: {breach_reason}",
+            f"- Latest rehearsal run: {latest_run_text}",
+            f"- Latest rehearsal run status: {latest_run_status or 'unknown'} / {latest_run_conclusion or 'unknown'}",
+            f"- Latest rehearsal run age: {age_text} (threshold={max_age_hours}h)",
+            f"- Recommended action: {decision.get('recommended_action') or 'watchdog_rehearsal_slo_healthy'}",
         ]
         return alert_triggered, summary, branch, {}
 
@@ -500,6 +625,52 @@ def _matching_issues(*, issues: list[dict[str, Any]], marker: str, title: str) -
     return matched
 
 
+def _signal_immediate_actions(
+    *,
+    signal_id: str,
+    report: dict[str, Any],
+    repo: str,
+    branch: str,
+) -> list[str]:
+    if signal_id != "master-guard-workflow-health":
+        return []
+
+    degraded_workflow_details = (
+        report.get("degraded_workflows") if isinstance(report.get("degraded_workflows"), list) else []
+    )
+    degraded_items = [item for item in degraded_workflow_details if isinstance(item, dict)]
+
+    latest_run_references: list[str] = []
+    missing_required_artifacts: list[str] = []
+    for item in degraded_items:
+        workflow_name = str(item.get("workflow_name") or "").strip() or "unknown_workflow"
+        latest_run = item.get("latest_run") if isinstance(item.get("latest_run"), dict) else {}
+        latest_run_references.append(
+            _format_guard_workflow_latest_run_reference(
+                repo=repo,
+                workflow_name=workflow_name,
+                latest_run=latest_run,
+            )
+        )
+        for artifact_name in _coerce_string_list(item.get("missing_required_artifacts")):
+            if artifact_name not in missing_required_artifacts:
+                missing_required_artifacts.append(artifact_name)
+
+    run_references_text = ", ".join(latest_run_references) if latest_run_references else "none"
+    missing_artifacts_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
+
+    return [
+        f"- Open degraded guard workflow run(s) immediately: {run_references_text}",
+        f"- Verify and restore missing required artifacts: {missing_artifacts_text}",
+        (
+            "- Re-run watchdog check locally for confirmation: "
+            "`.\\scripts\\run-master-guard-workflow-health-check.ps1 "
+            "-LookbackHours 30 -PerPage 50 "
+            "-OutputFile artifacts\\master-guard-workflow-health-check.json`"
+        ),
+    ]
+
+
 def _build_issue_body(
     *,
     marker: str,
@@ -508,6 +679,7 @@ def _build_issue_body(
     report_file: Path,
     report: dict[str, Any],
     summary_lines: list[str],
+    immediate_action_lines: list[str],
     run_url: str | None,
 ) -> str:
     generated_at = str(report.get("generated_at_utc") or _utc_now_text())
@@ -525,6 +697,12 @@ def _build_issue_body(
     ]
     if run_url:
         lines.append(f"- Workflow run: {run_url}")
+    if immediate_action_lines:
+        lines += [
+            "",
+            "## Immediate Actions",
+            *immediate_action_lines,
+        ]
     lines += [
         "",
         "## Expected Action",
@@ -540,6 +718,7 @@ def _build_active_alert_comment(
     signal_id: str,
     branch: str,
     summary_lines: list[str],
+    immediate_action_lines: list[str],
     report_file: Path,
     run_url: str | None,
 ) -> str:
@@ -554,6 +733,12 @@ def _build_active_alert_comment(
     ]
     if run_url:
         lines.append(f"- Workflow run: {run_url}")
+    if immediate_action_lines:
+        lines += [
+            "",
+            "## Immediate Actions",
+            *immediate_action_lines,
+        ]
     return "\n".join(lines)
 
 
@@ -617,12 +802,14 @@ def run_issue_upsert(
     dry_run: bool,
     recovery_threshold: int,
     alert_age_hours: float,
+    active_comment_cooldown: int,
     output_file: Path,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     _expect(signal_id in SIGNAL_SPECS, f"Unsupported --signal-id: {signal_id}")
     _expect(int(recovery_threshold) > 0, "recovery_threshold must be > 0")
     _expect(float(alert_age_hours) > 0, "alert_age_hours must be > 0")
+    _expect(int(active_comment_cooldown) > 0, "active_comment_cooldown must be > 0")
 
     report_payload = _load_json_file(report_file)
     _expect(isinstance(report_payload, dict), f"Expected JSON object in report file: {report_file}")
@@ -634,6 +821,10 @@ def run_issue_upsert(
     issue_url: str | None = None
     recovery_streak = 0
     actions: list[dict[str, Any]] = []
+    active_alert_streak = 0
+    active_alert_summary_sha = ""
+    active_comment_suppressed = False
+    active_alert_state_changed = False
 
     all_issues = _load_issues(repo=repo, state="all", issues_file=issues_file, dry_run=dry_run)
     alert_triggered, summary_lines, branch, signal_context = _signal_alert_state(
@@ -642,6 +833,12 @@ def run_issue_upsert(
         repo=repo,
         issues=all_issues,
         alert_age_hours=float(alert_age_hours),
+    )
+    immediate_action_lines = _signal_immediate_actions(
+        signal_id=signal_id,
+        report=report_payload,
+        repo=repo,
+        branch=branch,
     )
     signal_spec = SIGNAL_SPECS[signal_id]
     title = str(signal_spec["title"])
@@ -676,13 +873,28 @@ def run_issue_upsert(
     closed_issue = closed_matches[0] if closed_matches else None
 
     if alert_triggered:
+        active_alert_summary_sha = _build_summary_fingerprint(summary_lines)
         if open_issue is not None:
             issue_deduped = True
-            issue_action = "commented"
             issue_number = int(open_issue.get("number") or 0)
             issue_url = str(open_issue.get("html_url") or "") or None
+            existing_body = str(open_issue.get("body") or "")
+            previous_active_alert_streak = _extract_active_alert_streak(existing_body)
+            previous_active_alert_summary_sha = _extract_active_alert_summary_sha(existing_body)
+            active_alert_state_changed = previous_active_alert_summary_sha != active_alert_summary_sha
+            active_alert_streak = (
+                1
+                if active_alert_state_changed or previous_active_alert_streak <= 0
+                else previous_active_alert_streak + 1
+            )
 
-            updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=0)
+            updated_body = _clear_active_alert_state_markers(body=existing_body)
+            updated_body = _apply_recovery_marker(body=updated_body, streak=0)
+            updated_body = _apply_active_alert_state_markers(
+                body=updated_body,
+                streak=active_alert_streak,
+                summary_sha=active_alert_summary_sha,
+            )
             if parent_runtime_issue_number is not None:
                 updated_body = _apply_parent_runtime_issue_reference(
                     body=updated_body,
@@ -704,34 +916,54 @@ def run_issue_upsert(
                     payload={"body": updated_body},
                 )
 
-            comment_body = _build_active_alert_comment(
-                signal_id=signal_id,
-                branch=branch,
-                summary_lines=summary_lines,
-                report_file=report_file,
-                run_url=run_url,
+            should_comment = bool(
+                active_alert_state_changed
+                or int(active_alert_streak) % int(active_comment_cooldown) == 0
             )
-            actions.append(
-                {
-                    "action": "add_comment",
-                    "issue_number": issue_number,
-                    "issue_url": issue_url,
-                    "body": comment_body,
-                }
-            )
-            if not dry_run:
-                _run_gh_api(
-                    f"repos/{repo}/issues/{issue_number}/comments",
-                    method="POST",
-                    payload={"body": comment_body},
+
+            if should_comment:
+                issue_action = "commented"
+                comment_body = _build_active_alert_comment(
+                    signal_id=signal_id,
+                    branch=branch,
+                    summary_lines=summary_lines,
+                    immediate_action_lines=immediate_action_lines,
+                    report_file=report_file,
+                    run_url=run_url,
                 )
+                actions.append(
+                    {
+                        "action": "add_comment",
+                        "issue_number": issue_number,
+                        "issue_url": issue_url,
+                        "body": comment_body,
+                    }
+                )
+                if not dry_run:
+                    _run_gh_api(
+                        f"repos/{repo}/issues/{issue_number}/comments",
+                        method="POST",
+                        payload={"body": comment_body},
+                    )
+            else:
+                issue_action = "comment_suppressed_cooldown"
+                active_comment_suppressed = True
         elif closed_issue is not None:
             issue_deduped = True
             issue_action = "reopened"
             issue_number = int(closed_issue.get("number") or 0)
             issue_url = str(closed_issue.get("html_url") or "") or None
 
-            updated_body = _apply_recovery_marker(body=str(closed_issue.get("body") or ""), streak=0)
+            existing_body = str(closed_issue.get("body") or "")
+            active_alert_streak = 1
+            active_alert_state_changed = True
+            updated_body = _clear_active_alert_state_markers(body=existing_body)
+            updated_body = _apply_recovery_marker(body=updated_body, streak=0)
+            updated_body = _apply_active_alert_state_markers(
+                body=updated_body,
+                streak=active_alert_streak,
+                summary_sha=active_alert_summary_sha,
+            )
             if parent_runtime_issue_number is not None:
                 updated_body = _apply_parent_runtime_issue_reference(
                     body=updated_body,
@@ -757,6 +989,7 @@ def run_issue_upsert(
                 signal_id=signal_id,
                 branch=branch,
                 summary_lines=summary_lines,
+                immediate_action_lines=immediate_action_lines,
                 report_file=report_file,
                 run_url=run_url,
             )
@@ -776,6 +1009,8 @@ def run_issue_upsert(
                 )
         else:
             issue_action = "created"
+            active_alert_streak = 1
+            active_alert_state_changed = True
             issue_body = _build_issue_body(
                 marker=marker,
                 signal_id=signal_id,
@@ -783,7 +1018,13 @@ def run_issue_upsert(
                 report_file=report_file,
                 report=report_payload,
                 summary_lines=summary_lines,
+                immediate_action_lines=immediate_action_lines,
                 run_url=run_url,
+            )
+            issue_body = _apply_active_alert_state_markers(
+                body=issue_body,
+                streak=active_alert_streak,
+                summary_sha=active_alert_summary_sha,
             )
             if parent_runtime_issue_number is not None:
                 issue_body = _apply_parent_runtime_issue_reference(
@@ -832,7 +1073,8 @@ def run_issue_upsert(
                 issue_closed = True
                 recovery_streak = 0
 
-                updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=0)
+                updated_body = _clear_active_alert_state_markers(body=str(open_issue.get("body") or ""))
+                updated_body = _apply_recovery_marker(body=updated_body, streak=0)
                 if parent_runtime_issue_number is not None:
                     updated_body = _apply_parent_runtime_issue_reference(
                         body=updated_body,
@@ -892,7 +1134,8 @@ def run_issue_upsert(
                 recovery_streak = previous_streak + 1
                 will_close = recovery_streak >= int(recovery_threshold)
 
-                updated_body = _apply_recovery_marker(body=str(open_issue.get("body") or ""), streak=recovery_streak)
+                updated_body = _clear_active_alert_state_markers(body=str(open_issue.get("body") or ""))
+                updated_body = _apply_recovery_marker(body=updated_body, streak=recovery_streak)
                 actions.append(
                     {
                         "action": "update_issue_body",
@@ -971,6 +1214,7 @@ def run_issue_upsert(
             "dry_run": bool(dry_run),
             "recovery_threshold": int(recovery_threshold),
             "alert_age_hours": float(alert_age_hours),
+            "active_comment_cooldown": int(active_comment_cooldown),
             "open_issue_invariant_max": 1,
             "output_file": str(output_file),
         },
@@ -979,6 +1223,9 @@ def run_issue_upsert(
             "matching_closed_issues_total": int(len(closed_matches)),
             "matching_issues_total": int(len(open_matches) + len(closed_matches)),
             "runtime_parent_issue_number": int(parent_runtime_issue_number or 0),
+            "immediate_action_lines_total": int(len(immediate_action_lines)),
+            "active_alert_streak": int(active_alert_streak),
+            "active_comment_suppressed_total": int(1 if active_comment_suppressed else 0),
         },
         "decision": {
             "alert_triggered": bool(alert_triggered),
@@ -986,6 +1233,10 @@ def run_issue_upsert(
             "issue_deduped": bool(issue_deduped),
             "issue_closed": bool(issue_closed),
             "recovery_streak": int(recovery_streak),
+            "active_alert_streak": int(active_alert_streak),
+            "active_alert_summary_sha": active_alert_summary_sha or None,
+            "active_alert_state_changed": bool(active_alert_state_changed),
+            "active_comment_suppressed": bool(active_comment_suppressed),
             "invariant_max_open_issues_ok": True,
             "immediate_close_mode": bool(signal_id == "release-gate-runtime-alert-age-slo"),
         },
@@ -1023,11 +1274,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery-threshold", type=int, default=2)
     parser.add_argument("--alert-age-hours", type=float, default=72.0)
+    parser.add_argument("--active-comment-cooldown", type=int, default=3)
     parser.add_argument("--output-file", default="artifacts/ci-alert-issue-upsert.json")
     args = parser.parse_args(argv)
 
     if float(args.alert_age_hours) <= 0:
         print("[ci-alert-issue-upsert] ERROR: --alert-age-hours must be > 0.", file=sys.stderr)
+        return 2
+    if int(args.active_comment_cooldown) <= 0:
+        print("[ci-alert-issue-upsert] ERROR: --active-comment-cooldown must be > 0.", file=sys.stderr)
         return 2
 
     try:
@@ -1042,6 +1297,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=bool(args.dry_run),
             recovery_threshold=int(args.recovery_threshold),
             alert_age_hours=float(args.alert_age_hours),
+            active_comment_cooldown=int(args.active_comment_cooldown),
             output_file=Path(str(args.output_file)).expanduser(),
         )
     except Exception as exc:

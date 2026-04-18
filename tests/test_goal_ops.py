@@ -11350,6 +11350,114 @@ def test_230_ci_alert_issue_upsert_dedupes_to_comment_for_runtime_warning():
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_230b_ci_alert_issue_upsert_cooldown_suppresses_unchanged_active_comment():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-cooldown").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-runtime-warning-cooldown",
+                "config": {
+                    "branch": "master",
+                    "threshold_seconds": 540,
+                    "sustained_runs": 3,
+                },
+                "metrics": {
+                    "consecutive_runs_over_threshold": 3,
+                },
+                "decision": {
+                    "warning_triggered": True,
+                    "recommended_action": "investigate_release_gate_runtime_regression",
+                },
+                "warning_message": "Release Gate runtime early warning triggered",
+                "generated_at_utc": "2026-04-18T20:30:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    def run_case(case_label: str, issue_body: str) -> tuple[dict, dict]:
+        issues_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "number": 420,
+                        "state": "open",
+                        "title": "[Release Gate Runtime] sustained runtime warning on master",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/420",
+                        "body": issue_body,
+                    }
+                ],
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        command = [
+            sys.executable,
+            str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+            "--label",
+            case_label,
+            "--signal-id",
+            "release-gate-runtime-early-warning",
+            "--repo",
+            "donatomaurizio99-collab/GOC",
+            "--report-file",
+            str(report_file.resolve()),
+            "--issues-file",
+            str(issues_file.resolve()),
+            "--issue-oplog-file",
+            str(issue_oplog_file.resolve()),
+            "--active-comment-cooldown",
+            "3",
+            "--dry-run",
+            "--output-file",
+            str(output_file.resolve()),
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+        oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+        return payload, oplog
+
+    initial_body = (
+        "managed issue\n"
+        "<!-- ci-alert-key:release-gate-runtime-early-warning:donatomaurizio99-collab/GOC:master -->\n"
+        "<!-- ci-alert-recovery-streak:0 -->"
+    )
+    payload1, oplog1 = run_case("pytest-runtime-cooldown-run1", initial_body)
+    assert payload1["decision"]["issue_action"] == "commented"
+    assert payload1["decision"]["active_alert_streak"] == 1
+    assert [item["action"] for item in oplog1["actions"]] == ["update_issue_body", "add_comment"]
+
+    run2_issue_body = str(oplog1["actions"][0]["body"])
+    payload2, oplog2 = run_case("pytest-runtime-cooldown-run2", run2_issue_body)
+    assert payload2["decision"]["issue_action"] == "comment_suppressed_cooldown"
+    assert payload2["decision"]["active_comment_suppressed"] is True
+    assert payload2["decision"]["active_alert_streak"] == 2
+    assert [item["action"] for item in oplog2["actions"]] == ["update_issue_body"]
+
+    run3_issue_body = str(oplog2["actions"][0]["body"])
+    payload3, oplog3 = run_case("pytest-runtime-cooldown-run3", run3_issue_body)
+    assert payload3["decision"]["issue_action"] == "commented"
+    assert payload3["decision"]["active_alert_streak"] == 3
+    assert [item["action"] for item in oplog3["actions"]] == ["update_issue_body", "add_comment"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
 def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     project_root = Path(__file__).resolve().parents[1]
     branch_workflow = (
@@ -11361,6 +11469,9 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     runtime_workflow = (
         project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml"
     ).read_text(encoding="utf-8")
+    rehearsal_slo_workflow = (
+        project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml"
+    ).read_text(encoding="utf-8")
     wrapper = (project_root / "scripts" / "run-ci-alert-issue-upsert.ps1").read_text(encoding="utf-8")
     readme = (project_root / "README.md").read_text(encoding="utf-8")
 
@@ -11369,11 +11480,13 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "--report-file" in wrapper
     assert "--recovery-threshold" in wrapper
     assert "--alert-age-hours" in wrapper
+    assert "--active-comment-cooldown" in wrapper
     assert "--dry-run" in wrapper
     assert "master-branch-protection-drift" in wrapper
     assert "master-guard-workflow-health" in wrapper
     assert "release-gate-runtime-early-warning" in wrapper
     assert "release-gate-runtime-alert-age-slo" in wrapper
+    assert "master-watchdog-rehearsal-drill-slo" in wrapper
 
     assert "issues: write" in branch_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
@@ -11392,12 +11505,22 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "recovery_threshold" in runtime_workflow
     assert "alert_age_hours" in runtime_workflow
 
+    assert "issues: write" in rehearsal_slo_workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in rehearsal_slo_workflow
+    assert "master-watchdog-rehearsal-drill-slo" in rehearsal_slo_workflow
+    assert "master-watchdog-rehearsal-slo-guard-issue-upsert.json" in rehearsal_slo_workflow
+    assert "active_comment_cooldown" in rehearsal_slo_workflow
+
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
     assert "[master-guard-workflow-health.yml]" in readme
     assert "guard-workflow health watchdog" in readme
+    assert "Immediate Actions" in readme
+    assert "master-watchdog-rehearsal-slo-guard.yml" in readme
+    assert "stale`/`failed` reason" in readme
     assert "auto-close recovered issues after 2 healthy nightly runs" in readme
     assert "at most one open issue per signal" in readme
+    assert "cooldown-throttled for unchanged failure states" in readme
     assert "stays open beyond the alert-age SLO" in readme
     assert "release-gate-runtime-alert-age-slo" in readme
     assert "mandatory parent runtime-warning reference" in readme
@@ -12243,6 +12366,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             "updated_at": "2026-04-18T03:35:00Z",
                         }
                     ],
+                    "Master Watchdog Rehearsal SLO Guard": [
+                        {
+                            "id": 9105,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:50:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9101": {
@@ -12266,6 +12397,12 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                         "artifacts": [
                             {"name": "master-guard-workflow-health-check", "expired": False},
                             {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
+                        ]
+                    },
+                    "9105": {
+                        "artifacts": [
+                            {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
+                            {"name": "master-watchdog-rehearsal-slo-guard-issue-upsert", "expired": False},
                         ]
                     },
                 },
@@ -12302,7 +12439,7 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
     payload_text = completed.stderr.split(marker, 1)[1].strip()
     payload = json.loads(payload_text)
     assert payload["success"] is False
-    assert payload["metrics"]["guard_workflows_total"] == 4
+    assert payload["metrics"]["guard_workflows_total"] == 5
     assert payload["metrics"]["guard_workflows_degraded_total"] == 2
     assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
     assert payload["metrics"]["guard_workflows_non_success_total"] == 1
@@ -12343,6 +12480,7 @@ def test_241_master_guard_workflow_health_workflow_wrapper_and_docs_wiring():
     assert "guard-workflow health watchdog" in readme
     assert "coverage contract" in readme
     assert "per-degraded-workflow diagnostics" in readme
+    assert "master-watchdog-rehearsal-slo-guard.yml" in readme
     assert "run-master-guard-workflow-health-check.ps1" in readme
 
 
@@ -12441,6 +12579,91 @@ def test_242_ci_alert_issue_upsert_creates_issue_for_guard_workflow_health():
         "master-branch-protection-drift-issue-upsert, master-branch-protection-drift-guard"
     ) in created_body
     assert "latest_run=#9302 (https://github.com/donatomaurizio99-collab/GOC/actions/runs/9302)" in created_body
+    assert "## Immediate Actions" in created_body
+    assert ".\\scripts\\run-master-guard-workflow-health-check.ps1" in created_body
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_242b_ci_alert_issue_upsert_creates_issue_for_watchdog_rehearsal_slo():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-watchdog-rehearsal-slo").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-watchdog-rehearsal-slo-guard.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-watchdog-rehearsal-slo",
+                "config": {
+                    "branch": "master",
+                    "max_age_hours": 192.0,
+                },
+                "metrics": {
+                    "latest_run_age_hours": 204.0,
+                    "max_age_hours": 192.0,
+                },
+                "latest_run": {
+                    "run_id": 778899,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/778899",
+                },
+                "decision": {
+                    "watchdog_rehearsal_slo_breached": True,
+                    "breach_reason": "stale",
+                    "recommended_action": "watchdog_rehearsal_slo_stale",
+                },
+                "generated_at_utc": "2026-04-18T05:25:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-watchdog-rehearsal-slo-create",
+        "--signal-id",
+        "master-watchdog-rehearsal-drill-slo",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert "watchdog-rehearsal" in payload["issue"]["labels"]
+    assert "ci-alert-key:master-watchdog-rehearsal-drill-slo:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "create_issue"
+    created_body = str(issue_oplog["actions"][0]["body"])
+    assert "Breach reason: stale" in created_body
+    assert "Latest rehearsal run: #778899 (https://github.com/donatomaurizio99-collab/GOC/actions/runs/778899)" in created_body
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -12486,6 +12709,14 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             "updated_at": "2026-04-18T03:35:00Z",
                         }
                     ],
+                    "Master Watchdog Rehearsal SLO Guard": [
+                        {
+                            "id": 9305,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:50:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9301": {
@@ -12512,6 +12743,12 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
                         ]
                     },
+                    "9305": {
+                        "artifacts": [
+                            {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
+                            {"name": "master-watchdog-rehearsal-slo-guard-issue-upsert", "expired": False},
+                        ]
+                    },
                 },
             },
             ensure_ascii=True,
@@ -12535,6 +12772,7 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
         (
             "master-required-checks-24h.yml,master-branch-protection-drift-guard.yml,"
             "master-release-gate-runtime-early-warning.yml,master-guard-workflow-health.yml,"
+            "master-watchdog-rehearsal-slo-guard.yml,"
             "master-extra-guard-contract-probe.yml"
         ),
     ]
@@ -12633,5 +12871,151 @@ def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
         for action in issue_upsert_payload["actions"]
         if isinstance(action, dict)
     )
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_246_master_watchdog_rehearsal_slo_guard_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-watchdog-rehearsal-slo-guard.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Watchdog Rehearsal SLO Guard" in workflow
+    assert 'cron: "25 5 * * *"' in workflow
+    assert ".\\scripts\\run-master-watchdog-rehearsal-slo-guard.ps1" in workflow
+    assert "master-watchdog-rehearsal-slo-guard.json" in workflow
+    assert "master-watchdog-rehearsal-slo-guard-issue-upsert.json" in workflow
+    assert "master-watchdog-rehearsal-drill-slo" in workflow
+
+    assert "master-watchdog-rehearsal-slo-guard.py" in wrapper
+    assert "--max-age-hours" in wrapper
+    assert "--per-page" in wrapper
+    assert "--allow-breach" in wrapper
+    assert "MaxAgeHours" in wrapper
+    assert "AllowBreach" in wrapper
+
+    assert "master-watchdog-rehearsal-slo-guard.yml" in readme
+    assert "stale`/`failed` reason" in readme
+
+
+def test_247_master_watchdog_rehearsal_slo_guard_detects_stale_breach():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-slo-guard-stale").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 771001,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "updated_at": "2026-04-08T04:00:00Z",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771001",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-slo-guard.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-slo-guard-stale",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Watchdog Rehearsal Drill",
+        "--max-age-hours",
+        "192",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--now-utc",
+        "2026-04-18T12:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master watchdog rehearsal SLO guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["watchdog_rehearsal_slo_breached"] is True
+    assert payload["decision"]["breach_reason"] == "stale"
+    assert payload["latest_run"]["run_id"] == 771001
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_248_master_watchdog_rehearsal_slo_guard_detects_failed_breach():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-slo-guard-failed").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 771002,
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "updated_at": "2026-04-18T08:30:00Z",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771002",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-slo-guard.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-slo-guard-failed",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Watchdog Rehearsal Drill",
+        "--max-age-hours",
+        "192",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--now-utc",
+        "2026-04-18T12:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master watchdog rehearsal SLO guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["watchdog_rehearsal_slo_breached"] is True
+    assert payload["decision"]["breach_reason"] == "failed"
+    assert payload["latest_run"]["run_id"] == 771002
 
     shutil.rmtree(workspace, ignore_errors=True)
