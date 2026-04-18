@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,10 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
     "release-gate-runtime-early-warning": {
         "title": "[Release Gate Runtime] sustained runtime warning on master",
         "labels": ["ci-drift", "release-gate-runtime"],
+    },
+    "release-gate-runtime-alert-age-slo": {
+        "title": "[Release Gate Runtime] alert issue age SLO breached on master",
+        "labels": ["ci-drift", "release-gate-runtime", "alert-age-slo"],
     },
 }
 
@@ -34,6 +39,10 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
         "color": "0E8A16",
         "description": "Sustained Release Gate runtime warning on master CI",
     },
+    "alert-age-slo": {
+        "color": "FBCA04",
+        "description": "Runtime warning alert-issue age exceeds SLO threshold",
+    },
 }
 
 RECOVERY_STREAK_PATTERN = re.compile(r"<!--\s*ci-alert-recovery-streak:(\d+)\s*-->")
@@ -46,6 +55,26 @@ def _expect(condition: bool, message: str) -> None:
 
 def _utc_now_text() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _parse_utc_timestamp(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _hours_between(started_at: datetime | None, ended_at: datetime | None) -> float | None:
+    if started_at is None or ended_at is None:
+        return None
+    return max(0.0, float((ended_at - started_at).total_seconds()) / 3600.0)
 
 
 def _load_json_file(path: Path) -> Any:
@@ -153,7 +182,14 @@ def _load_issues(*, repo: str, state: str, issues_file: Path | None, dry_run: bo
     return issues
 
 
-def _signal_alert_state(*, signal_id: str, report: dict[str, Any]) -> tuple[bool, list[str], str]:
+def _signal_alert_state(
+    *,
+    signal_id: str,
+    report: dict[str, Any],
+    repo: str,
+    issues: list[dict[str, Any]],
+    alert_age_hours: float,
+) -> tuple[bool, list[str], str]:
     config = report.get("config") if isinstance(report.get("config"), dict) else {}
     branch = str(config.get("branch") or "master")
 
@@ -191,6 +227,67 @@ def _signal_alert_state(*, signal_id: str, report: dict[str, Any]) -> tuple[bool
                 f"(threshold={threshold_seconds}s, sustained_runs={sustained_runs})"
             ),
             f"- Recommended action: {decision.get('recommended_action') or 'runtime_within_warning_budget'}",
+        ]
+        return alert_triggered, summary, branch
+
+    if signal_id == "release-gate-runtime-alert-age-slo":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        warning_triggered = bool(decision.get("warning_triggered"))
+        evaluation_now = _parse_utc_timestamp(str(report.get("generated_at_utc") or "")) or datetime.now(timezone.utc)
+
+        runtime_signal_id = "release-gate-runtime-early-warning"
+        runtime_signal_spec = SIGNAL_SPECS[runtime_signal_id]
+        runtime_title = str(runtime_signal_spec["title"])
+        runtime_marker = _build_issue_marker(signal_id=runtime_signal_id, repo=repo, branch=branch)
+        runtime_open_matches = _matching_issues(
+            issues=[item for item in issues if _issue_state(item) == "open"],
+            marker=runtime_marker,
+            title=runtime_title,
+        )
+        if len(runtime_open_matches) > 1:
+            runtime_open_numbers = [int(item.get("number") or 0) for item in runtime_open_matches]
+            raise RuntimeError(
+                "Runtime warning issue invariant violated for alert-age SLO evaluation on branch "
+                f"'{branch}': expected at most 1 open runtime warning issue, "
+                f"found {len(runtime_open_matches)} ({runtime_open_numbers})"
+            )
+        runtime_open_issue = runtime_open_matches[0] if runtime_open_matches else None
+        runtime_issue_number = int(runtime_open_issue.get("number") or 0) if runtime_open_issue else None
+        runtime_issue_created_at = (
+            _parse_utc_timestamp(str(runtime_open_issue.get("created_at") or "")) if runtime_open_issue else None
+        )
+        runtime_issue_age_hours = _hours_between(runtime_issue_created_at, evaluation_now)
+        age_known = runtime_issue_age_hours is not None
+
+        alert_triggered = bool(
+            warning_triggered
+            and runtime_open_issue is not None
+            and age_known
+            and float(runtime_issue_age_hours or 0.0) >= float(alert_age_hours)
+        )
+
+        if alert_triggered:
+            recommended_action = "runtime_alert_issue_age_slo_breached"
+        elif not warning_triggered:
+            recommended_action = "runtime_warning_not_active"
+        elif runtime_open_issue is None:
+            recommended_action = "runtime_warning_issue_not_open"
+        elif not age_known:
+            recommended_action = "runtime_warning_issue_age_unavailable"
+        else:
+            recommended_action = "runtime_alert_issue_age_within_slo"
+
+        runtime_issue_text = "none"
+        if runtime_open_issue is not None:
+            age_text = f"{float(runtime_issue_age_hours):.2f}h" if age_known else "unknown"
+            runtime_issue_text = (
+                f"#{runtime_issue_number} (age={age_text}, threshold={float(alert_age_hours):.2f}h)"
+            )
+
+        summary = [
+            f"- Runtime warning currently active: {'yes' if warning_triggered else 'no'}",
+            f"- Runtime warning open issue: {runtime_issue_text}",
+            f"- Recommended action: {recommended_action}",
         ]
         return alert_triggered, summary, branch
 
@@ -345,20 +442,16 @@ def run_issue_upsert(
     issue_oplog_file: Path | None,
     dry_run: bool,
     recovery_threshold: int,
+    alert_age_hours: float,
     output_file: Path,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     _expect(signal_id in SIGNAL_SPECS, f"Unsupported --signal-id: {signal_id}")
     _expect(int(recovery_threshold) > 0, "recovery_threshold must be > 0")
+    _expect(float(alert_age_hours) > 0, "alert_age_hours must be > 0")
 
     report_payload = _load_json_file(report_file)
     _expect(isinstance(report_payload, dict), f"Expected JSON object in report file: {report_file}")
-
-    alert_triggered, summary_lines, branch = _signal_alert_state(signal_id=signal_id, report=report_payload)
-    signal_spec = SIGNAL_SPECS[signal_id]
-    title = str(signal_spec["title"])
-    labels = [str(item) for item in signal_spec["labels"]]
-    marker = _build_issue_marker(signal_id=signal_id, repo=repo, branch=branch)
 
     issue_action = "none"
     issue_deduped = False
@@ -369,6 +462,17 @@ def run_issue_upsert(
     actions: list[dict[str, Any]] = []
 
     all_issues = _load_issues(repo=repo, state="all", issues_file=issues_file, dry_run=dry_run)
+    alert_triggered, summary_lines, branch = _signal_alert_state(
+        signal_id=signal_id,
+        report=report_payload,
+        repo=repo,
+        issues=all_issues,
+        alert_age_hours=float(alert_age_hours),
+    )
+    signal_spec = SIGNAL_SPECS[signal_id]
+    title = str(signal_spec["title"])
+    labels = [str(item) for item in signal_spec["labels"]]
+    marker = _build_issue_marker(signal_id=signal_id, repo=repo, branch=branch)
     open_matches = _matching_issues(
         issues=[item for item in all_issues if _issue_state(item) == "open"],
         marker=marker,
@@ -604,6 +708,7 @@ def run_issue_upsert(
             "issue_oplog_file": str(issue_oplog_file) if issue_oplog_file is not None else None,
             "dry_run": bool(dry_run),
             "recovery_threshold": int(recovery_threshold),
+            "alert_age_hours": float(alert_age_hours),
             "open_issue_invariant_max": 1,
             "output_file": str(output_file),
         },
@@ -653,8 +758,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--issue-oplog-file")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery-threshold", type=int, default=2)
+    parser.add_argument("--alert-age-hours", type=float, default=72.0)
     parser.add_argument("--output-file", default="artifacts/ci-alert-issue-upsert.json")
     args = parser.parse_args(argv)
+
+    if float(args.alert_age_hours) <= 0:
+        print("[ci-alert-issue-upsert] ERROR: --alert-age-hours must be > 0.", file=sys.stderr)
+        return 2
 
     try:
         report = run_issue_upsert(
@@ -667,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
             issue_oplog_file=Path(str(args.issue_oplog_file)).expanduser() if args.issue_oplog_file else None,
             dry_run=bool(args.dry_run),
             recovery_threshold=int(args.recovery_threshold),
+            alert_age_hours=float(args.alert_age_hours),
             output_file=Path(str(args.output_file)).expanduser(),
         )
     except Exception as exc:

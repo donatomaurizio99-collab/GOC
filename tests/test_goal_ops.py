@@ -11365,9 +11365,11 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "--signal-id" in wrapper
     assert "--report-file" in wrapper
     assert "--recovery-threshold" in wrapper
+    assert "--alert-age-hours" in wrapper
     assert "--dry-run" in wrapper
     assert "master-branch-protection-drift" in wrapper
     assert "release-gate-runtime-early-warning" in wrapper
+    assert "release-gate-runtime-alert-age-slo" in wrapper
 
     assert "issues: write" in branch_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in branch_workflow
@@ -11377,12 +11379,16 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "issues: write" in runtime_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in runtime_workflow
     assert "release-gate-runtime-early-warning-issue-upsert.json" in runtime_workflow
+    assert "release-gate-runtime-alert-age-slo-issue-upsert.json" in runtime_workflow
     assert "recovery_threshold" in runtime_workflow
+    assert "alert_age_hours" in runtime_workflow
 
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
     assert "auto-close recovered issues after 2 healthy nightly runs" in readme
     assert "at most one open issue per signal" in readme
+    assert "stays open beyond the alert-age SLO" in readme
+    assert "release-gate-runtime-alert-age-slo" in readme
 
 
 def test_232_ci_alert_issue_upsert_auto_closes_after_recovery_threshold():
@@ -11805,5 +11811,217 @@ def test_235_ci_alert_issue_invariant_fails_with_multiple_open_issues():
     assert completed.returncode != 0
     assert "Issue state invariant violated" in completed.stderr
     assert "expected at most 1 open issue" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_236_ci_alert_issue_upsert_alert_age_slo_breach_creates_escalation_issue():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-alert-age-slo-breach").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-runtime-warning-active",
+                "config": {
+                    "branch": "master",
+                    "threshold_seconds": 540,
+                    "sustained_runs": 3,
+                },
+                "decision": {
+                    "warning_triggered": True,
+                    "recommended_action": "investigate_release_gate_runtime_regression",
+                },
+                "generated_at_utc": "2026-04-18T12:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 321,
+                    "state": "open",
+                    "title": "[Release Gate Runtime] sustained runtime warning on master",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/321",
+                    "created_at": "2026-04-14T00:00:00Z",
+                    "body": (
+                        "managed issue\\n"
+                        "<!-- ci-alert-key:release-gate-runtime-early-warning:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-age-slo-breach",
+        "--signal-id",
+        "release-gate-runtime-alert-age-slo",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--alert-age-hours",
+        "72",
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert payload["decision"]["issue_deduped"] is False
+    assert "alert-age-slo" in payload["issue"]["labels"]
+    assert "ci-alert-key:release-gate-runtime-alert-age-slo:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert len(issue_oplog["actions"]) == 1
+    assert issue_oplog["actions"][0]["action"] == "create_issue"
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_237_ci_alert_issue_upsert_alert_age_slo_no_breach_keeps_idle():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-alert-age-slo-idle").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-runtime-warning-active",
+                "config": {
+                    "branch": "master",
+                    "threshold_seconds": 540,
+                    "sustained_runs": 3,
+                },
+                "decision": {
+                    "warning_triggered": True,
+                    "recommended_action": "investigate_release_gate_runtime_regression",
+                },
+                "generated_at_utc": "2026-04-18T12:00:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 322,
+                    "state": "open",
+                    "title": "[Release Gate Runtime] sustained runtime warning on master",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/322",
+                    "created_at": "2026-04-18T10:30:00Z",
+                    "body": (
+                        "managed issue\\n"
+                        "<!-- ci-alert-key:release-gate-runtime-early-warning:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-alert-age-slo-idle",
+        "--signal-id",
+        "release-gate-runtime-alert-age-slo",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--alert-age-hours",
+        "72",
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is False
+    assert payload["decision"]["issue_action"] == "none"
+    assert payload["decision"]["issue_deduped"] is False
+    assert payload["issue"]["number"] is None
+    assert output_file.exists()
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    assert issue_oplog["actions"] == []
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_238_ci_alert_issue_upsert_rejects_non_positive_alert_age_hours():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-alert-age-slo-invalid-hours").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--signal-id",
+        "master-branch-protection-drift",
+        "--report-file",
+        str((workspace / "unused-report.json").resolve()),
+        "--alert-age-hours",
+        "0",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 2
+    assert "--alert-age-hours must be > 0." in completed.stderr
 
     shutil.rmtree(workspace, ignore_errors=True)
