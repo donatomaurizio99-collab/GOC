@@ -1,20 +1,20 @@
 {
   "counts": {
     "p0_bundle_required_files_total": 0,
-    "p0_runbook_required_ci_artifact_paths_total": 33,
-    "p0_runbook_required_scripts_total": 51,
+    "p0_runbook_required_ci_artifact_paths_total": 34,
+    "p0_runbook_required_scripts_total": 52,
     "p0_schema_required_decision_keys_total": 0,
     "p0_schema_required_files_total": 0,
     "p0_schema_required_top_level_keys_total": 2,
-    "release_evidence_artifact_paths_total": 52,
+    "release_evidence_artifact_paths_total": 53,
     "strict_flags_total": 73
   },
   "hashes": {
     "p0_release_evidence_bundle_sha256": "3eea6098363eafa59ab92c92e0debd01af30fe02258dc3222b9fc389b261d87c",
     "p0_report_schema_contract_sha256": "eb8c8d6ca0f983b9ffdb3c663791eeacd93fd85f7390c7a52d365b39a5c86c2e",
-    "p0_runbook_contract_sha256": "3bc6f8ec473575a8779c0601afd1b713084d1246e0986ee9344fc5f6e1162643",
-    "registry_core_sha256": "7de9932fc508f1a2650b60d4575b225bdf386cfbcaf953cedee5a81c0c300995",
-    "release_evidence_artifact_paths_sha256": "c916b0139bad2eafd496a9c55814537302a1a7156920d9823aecd06024a9a1ec",
+    "p0_runbook_contract_sha256": "df86e1ef3f1bf5c9abd0d60e73f3a9d450e1f846d160b6a8bc43651c6838cd75",
+    "registry_core_sha256": "cbcf46c46392f12d8e1dd8db384c4b5c367f54f758dfef4298bff4097d2a2899",
+    "release_evidence_artifact_paths_sha256": "fcd64b65cd29145dc36eb7db184bdfa204bda472f6ce1dbd3a7b758e7604401e",
     "strict_flags_sha256": "36b5a0c874e33f08b1ced6936cd64703c85de4a5f87a7d26ff0a6ef88aff45db"
   },
   "registry_version": "1.0.0",
