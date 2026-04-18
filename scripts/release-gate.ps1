@@ -1454,8 +1454,7 @@ if (-not $SkipP0ReportSchemaContractCheck) {
             "--label", "release-gate",
             "--artifacts-dir", "artifacts",
             "--include-glob", "*-release-gate.json",
-            "--required-top-level-keys", "label,success",
-            "--required-label", "release-gate",
+            "--registry-file", "docs/release-gate-registry.json",
             "--output-file", $reportPath
         )
         if ($requiredReportPaths.Count -gt 0) {
@@ -1486,7 +1485,7 @@ if (-not $SkipP0ReleaseEvidenceBundle) {
             "--label", "release-gate",
             "--artifacts-dir", "artifacts",
             "--include-glob", "*-release-gate.json",
-            "--required-label", "release-gate",
+            "--registry-file", "docs/release-gate-registry.json",
             "--output-file", $bundleOutputPath,
             "--bundle-dir", $bundleDir
         )

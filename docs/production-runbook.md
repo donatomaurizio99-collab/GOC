@@ -13,6 +13,8 @@ Run in repo root:
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
+CI strict-flag invocation + release evidence artifact upload paths are synchronized from `docs\release-gate-registry.json` via `scripts\release-gate-registry-sync.py`.
+P0 report schema contract defaults and P0 release evidence bundle defaults are sourced from the same registry file.
 
 This gate covers:
 - full `pytest` suite
@@ -507,6 +509,14 @@ Manual P0 burn-in consecutive-green monitor invocation:
 .\scripts\run-p0-burnin-consecutive-green.ps1 -RequiredConsecutive 10
 ```
 
+Manual release-gate registry sync check invocation:
+
+```powershell
+.\scripts\run-release-gate-registry-sync.ps1
+```
+(Also verifies registry wiring in `scripts\release-gate.ps1`, `run-p0-report-schema-contract-check.ps1`, and `run-p0-release-evidence-bundle.ps1`.)
+(Also enforces registry cross-contract consistency for P0 required labels and CI artifact coverage.)
+
 Manual P0 runbook contract check invocation:
 
 ```powershell
@@ -518,12 +528,14 @@ Manual P0 report schema contract check invocation:
 ```powershell
 .\scripts\run-p0-report-schema-contract-check.ps1
 ```
+(`required_top_level_keys`, `required_decision_keys`, `required_label` default to registry values unless explicitly overridden.)
 
 Manual P0 release evidence bundle invocation:
 
 ```powershell
 .\scripts\run-p0-release-evidence-bundle.ps1
 ```
+(`required_label` defaults to registry value unless explicitly overridden.)
 
 Manual P0 closure report invocation:
 
