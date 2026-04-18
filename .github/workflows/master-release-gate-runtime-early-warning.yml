@@ -1,0 +1,75 @@
+name: Master Release Gate Runtime Early Warning
+
+on:
+  schedule:
+    - cron: "10 3 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Hours of master CI history to inspect"
+        required: false
+        default: "72"
+      per_page:
+        description: "Maximum completed CI runs to fetch"
+        required: false
+        default: "80"
+      threshold_seconds:
+        description: "Warn threshold for Release Gate runtime in seconds"
+        required: false
+        default: "540"
+      sustained_runs:
+        description: "Consecutive runs over threshold needed to trigger warning"
+        required: false
+        default: "3"
+      fail_on_warning:
+        description: "Fail workflow when warning is triggered"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-early-warning:
+    name: Release Gate Runtime Early Warning
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run release-gate runtime early warning
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '72' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '80' }}
+          THRESHOLD_SECONDS: ${{ github.event.inputs.threshold_seconds || '540' }}
+          SUSTAINED_RUNS: ${{ github.event.inputs.sustained_runs || '3' }}
+          FAIL_ON_WARNING: ${{ github.event.inputs.fail_on_warning || 'false' }}
+        run: |
+          $arguments = @(
+            "-LookbackHours", "$env:LOOKBACK_HOURS",
+            "-PerPage", "$env:PER_PAGE",
+            "-ThresholdSeconds", "$env:THRESHOLD_SECONDS",
+            "-SustainedRuns", "$env:SUSTAINED_RUNS",
+            "-OutputFile", "artifacts\\release-gate-runtime-early-warning.json"
+          )
+          if ($env:FAIL_ON_WARNING -eq "true") {
+            $arguments += "-FailOnWarning"
+          }
+          .\scripts\run-release-gate-runtime-early-warning.ps1 @arguments
+
+      - name: Upload runtime early warning report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-runtime-early-warning
+          path: artifacts/release-gate-runtime-early-warning.json
+          if-no-files-found: error
