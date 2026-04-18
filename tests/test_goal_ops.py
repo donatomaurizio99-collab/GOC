@@ -9629,6 +9629,9 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["p0_schema_required_top_level_keys_total"] >= 1
     assert payload["p0_schema_required_decision_keys_total"] >= 0
     assert payload["p0_bundle_required_files_total"] >= 0
+    assert payload["release_gate_registry_argument_occurrences"] >= 2
+    assert payload["schema_wrapper_registry_argument_occurrences"] >= 1
+    assert payload["bundle_wrapper_registry_argument_occurrences"] >= 1
 
 
 def test_202_p0_report_schema_contract_uses_registry_required_label_default():

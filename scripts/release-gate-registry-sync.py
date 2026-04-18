@@ -223,6 +223,60 @@ def _update_release_evidence_paths(ci_text: str, artifact_paths: list[str]) -> t
     return ("\n".join(updated_lines) + ("\n" if ci_text.endswith("\n") else "")), changed
 
 
+def validate_registry_wiring(
+    *,
+    release_gate_text: str,
+    schema_wrapper_text: str,
+    bundle_wrapper_text: str,
+) -> dict[str, int]:
+    release_gate_registry_arg = '"--registry-file", "docs/release-gate-registry.json"'
+    release_gate_registry_arg_count = release_gate_text.count(release_gate_registry_arg)
+    _expect(
+        release_gate_registry_arg_count >= 2,
+        (
+            "Release-gate script must pass "
+            "'--registry-file\", \"docs/release-gate-registry.json\"' to both "
+            "P0 schema and bundle checks."
+        ),
+    )
+
+    _expect(
+        '".\\scripts\\p0-report-schema-contract-check.py"' in release_gate_text,
+        "Unable to find P0 report schema contract step in release-gate script.",
+    )
+    _expect(
+        '".\\scripts\\p0-release-evidence-bundle.py"' in release_gate_text,
+        "Unable to find P0 release evidence bundle step in release-gate script.",
+    )
+
+    schema_wrapper_registry_default = '[string]$RegistryFile = "docs\\\\release-gate-registry.json"'
+    bundle_wrapper_registry_default = '[string]$RegistryFile = "docs\\\\release-gate-registry.json"'
+    wrapper_registry_arg = '"--registry-file", $RegistryFile'
+
+    _expect(
+        schema_wrapper_registry_default in schema_wrapper_text,
+        "P0 schema wrapper must define RegistryFile default to docs\\\\release-gate-registry.json.",
+    )
+    _expect(
+        wrapper_registry_arg in schema_wrapper_text,
+        "P0 schema wrapper must pass --registry-file to the Python checker.",
+    )
+    _expect(
+        bundle_wrapper_registry_default in bundle_wrapper_text,
+        "P0 bundle wrapper must define RegistryFile default to docs\\\\release-gate-registry.json.",
+    )
+    _expect(
+        wrapper_registry_arg in bundle_wrapper_text,
+        "P0 bundle wrapper must pass --registry-file to the Python checker.",
+    )
+
+    return {
+        "release_gate_registry_argument_occurrences": release_gate_registry_arg_count,
+        "schema_wrapper_registry_argument_occurrences": schema_wrapper_text.count(wrapper_registry_arg),
+        "bundle_wrapper_registry_argument_occurrences": bundle_wrapper_text.count(wrapper_registry_arg),
+    }
+
+
 def synchronize_ci_workflow(
     ci_text: str,
     *,
@@ -244,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-root")
     parser.add_argument("--registry-file", default="docs/release-gate-registry.json")
     parser.add_argument("--ci-workflow-file", default=".github/workflows/ci.yml")
+    parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
+    parser.add_argument("--schema-wrapper-file", default="scripts/run-p0-report-schema-contract-check.ps1")
+    parser.add_argument("--bundle-wrapper-file", default="scripts/run-p0-release-evidence-bundle.ps1")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
 
@@ -255,10 +312,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     registry_file = (project_root / str(args.registry_file)).resolve()
     ci_workflow_file = (project_root / str(args.ci_workflow_file)).resolve()
+    release_gate_file = (project_root / str(args.release_gate_file)).resolve()
+    schema_wrapper_file = (project_root / str(args.schema_wrapper_file)).resolve()
+    bundle_wrapper_file = (project_root / str(args.bundle_wrapper_file)).resolve()
 
     try:
         registry = load_registry(registry_file)
         original_ci = _read_text(ci_workflow_file)
+        release_gate_text = _read_text(release_gate_file)
+        schema_wrapper_text = _read_text(schema_wrapper_file)
+        bundle_wrapper_text = _read_text(bundle_wrapper_file)
+        wiring_metrics = validate_registry_wiring(
+            release_gate_text=release_gate_text,
+            schema_wrapper_text=schema_wrapper_text,
+            bundle_wrapper_text=bundle_wrapper_text,
+        )
         synchronized_ci, changed = synchronize_ci_workflow(
             original_ci,
             strict_flags=registry["strict_flags"],
@@ -279,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
                     "changed": bool(changed),
                     "registry_file": str(registry_file),
                     "ci_workflow_file": str(ci_workflow_file),
+                    "release_gate_file": str(release_gate_file),
+                    "schema_wrapper_file": str(schema_wrapper_file),
+                    "bundle_wrapper_file": str(bundle_wrapper_file),
                     "strict_flags_total": len(registry["strict_flags"]),
                     "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
                     "p0_schema_required_top_level_keys_total": len(
@@ -290,6 +361,15 @@ def main(argv: list[str] | None = None) -> int:
                     "p0_bundle_required_files_total": len(
                         registry["p0_release_evidence_bundle"]["required_files"]
                     ),
+                    "release_gate_registry_argument_occurrences": wiring_metrics[
+                        "release_gate_registry_argument_occurrences"
+                    ],
+                    "schema_wrapper_registry_argument_occurrences": wiring_metrics[
+                        "schema_wrapper_registry_argument_occurrences"
+                    ],
+                    "bundle_wrapper_registry_argument_occurrences": wiring_metrics[
+                        "bundle_wrapper_registry_argument_occurrences"
+                    ],
                 },
                 ensure_ascii=True,
                 sort_keys=True,
@@ -313,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
                 "changed": False,
                 "registry_file": str(registry_file),
                 "ci_workflow_file": str(ci_workflow_file),
+                "release_gate_file": str(release_gate_file),
+                "schema_wrapper_file": str(schema_wrapper_file),
+                "bundle_wrapper_file": str(bundle_wrapper_file),
                 "strict_flags_total": len(registry["strict_flags"]),
                 "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
                 "p0_schema_required_top_level_keys_total": len(
@@ -324,6 +407,15 @@ def main(argv: list[str] | None = None) -> int:
                 "p0_bundle_required_files_total": len(
                     registry["p0_release_evidence_bundle"]["required_files"]
                 ),
+                "release_gate_registry_argument_occurrences": wiring_metrics[
+                    "release_gate_registry_argument_occurrences"
+                ],
+                "schema_wrapper_registry_argument_occurrences": wiring_metrics[
+                    "schema_wrapper_registry_argument_occurrences"
+                ],
+                "bundle_wrapper_registry_argument_occurrences": wiring_metrics[
+                    "bundle_wrapper_registry_argument_occurrences"
+                ],
             },
             ensure_ascii=True,
             sort_keys=True,

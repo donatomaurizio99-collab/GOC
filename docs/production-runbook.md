@@ -514,6 +514,7 @@ Manual release-gate registry sync check invocation:
 ```powershell
 .\scripts\run-release-gate-registry-sync.ps1
 ```
+(Also verifies registry wiring in `scripts\release-gate.ps1`, `run-p0-report-schema-contract-check.ps1`, and `run-p0-release-evidence-bundle.ps1`.)
 
 Manual P0 runbook contract check invocation:
 
