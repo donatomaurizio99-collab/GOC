@@ -1,0 +1,81 @@
+name: Master Guard Burn-in Check
+
+on:
+  schedule:
+    - cron: "40 5 * * *"
+  workflow_dispatch:
+    inputs:
+      per_page:
+        description: "Maximum completed runs fetched per guarded workflow"
+        required: false
+        default: "20"
+      required_successful_runs:
+        description: "Required successful completed runs for nightly guard workflows"
+        required: false
+        default: "3"
+      digest_required_successful_runs:
+        description: "Required successful completed runs for weekly reliability digest workflow"
+        required: false
+        default: "1"
+      drill_required_successful_runs:
+        description: "Required successful completed runs for weekly watchdog rehearsal drill workflow"
+        required: false
+        default: "1"
+      allow_degraded:
+        description: "Do not fail workflow when guard burn-in requirements are not met"
+        required: false
+        default: "false"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  guard-burnin-check:
+    name: Guard Burn-in Check
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run guard burn-in check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '20' }}
+          REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.required_successful_runs || '3' }}
+          DIGEST_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.digest_required_successful_runs || '1' }}
+          DRILL_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.drill_required_successful_runs || '1' }}
+          ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
+        run: |
+          $arguments = @(
+            "-Repo", "$env:REPO_FULL",
+            "-PerPage", "$env:PER_PAGE",
+            "-RequiredSuccessfulRuns", "$env:REQUIRED_SUCCESSFUL_RUNS",
+            "-DigestRequiredSuccessfulRuns", "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS",
+            "-DrillRequiredSuccessfulRuns", "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS",
+            "-OutputFile", "artifacts\master-guard-burnin-check.json"
+          )
+          if ($env:ALLOW_DEGRADED -eq "true") {
+            $arguments += "-AllowDegraded"
+          }
+          .\scripts\run-master-guard-burnin-check.ps1 @arguments
+
+      - name: Upload guard burn-in report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-guard-burnin-check
+          path: artifacts/master-guard-burnin-check.json
+          if-no-files-found: error

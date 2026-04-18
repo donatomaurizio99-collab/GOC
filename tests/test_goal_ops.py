@@ -12404,6 +12404,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             "updated_at": "2026-04-18T03:55:00Z",
                         }
                     ],
+                    "Master Guard Burn-in Check": [
+                        {
+                            "id": 9107,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:57:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9101": {
@@ -12443,6 +12451,11 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             {"name": "master-reliability-digest-guard-selftest", "expired": False},
                         ]
                     },
+                    "9107": {
+                        "artifacts": [
+                            {"name": "master-guard-burnin-check", "expired": False},
+                        ]
+                    },
                 },
             },
             ensure_ascii=True,
@@ -12477,7 +12490,7 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
     payload_text = completed.stderr.split(marker, 1)[1].strip()
     payload = json.loads(payload_text)
     assert payload["success"] is False
-    assert payload["metrics"]["guard_workflows_total"] == 6
+    assert payload["metrics"]["guard_workflows_total"] == 7
     assert payload["metrics"]["guard_workflows_degraded_total"] == 2
     assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
     assert payload["metrics"]["guard_workflows_non_success_total"] == 1
@@ -12773,6 +12786,14 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             "updated_at": "2026-04-18T03:55:00Z",
                         }
                     ],
+                    "Master Guard Burn-in Check": [
+                        {
+                            "id": 9307,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:58:00Z",
+                        }
+                    ],
                 },
                 "run_artifacts": {
                     "9301": {
@@ -12813,6 +12834,11 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             {"name": "master-reliability-digest-guard-selftest", "expired": False},
                         ]
                     },
+                    "9307": {
+                        "artifacts": [
+                            {"name": "master-guard-burnin-check", "expired": False},
+                        ]
+                    },
                 },
             },
             ensure_ascii=True,
@@ -12837,6 +12863,7 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
             "master-required-checks-24h.yml,master-branch-protection-drift-guard.yml,"
             "master-release-gate-runtime-early-warning.yml,master-guard-workflow-health.yml,"
             "master-watchdog-rehearsal-slo-guard.yml,master-reliability-digest-guard.yml,"
+            "master-guard-burnin-check.yml,"
             "master-extra-guard-contract-probe.yml"
         ),
     ]
@@ -13739,6 +13766,261 @@ def test_255_master_guard_chain_selftest_supports_reliability_digest_guard_signa
     assert payload["decision"]["expected_alert_triggered"] is True
     assert payload["decision"]["issue_alert_triggered"] is True
     assert payload["decision"]["issue_action"] == "created"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_256_master_guard_burnin_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-guard-burnin-check.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-guard-burnin-check.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Guard Burn-in Check" in workflow
+    assert 'cron: "40 5 * * *"' in workflow
+    assert ".\\scripts\\run-master-guard-burnin-check.ps1" in workflow
+    assert "master-guard-burnin-check.json" in workflow
+    assert "master-guard-burnin-check" in workflow
+    assert "required_successful_runs" in workflow
+    assert "digest_required_successful_runs" in workflow
+    assert "drill_required_successful_runs" in workflow
+    assert "allow_degraded" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
+
+    assert "master-guard-burnin-check.py" in wrapper
+    assert "--required-successful-runs" in wrapper
+    assert "--digest-required-successful-runs" in wrapper
+    assert "--drill-required-successful-runs" in wrapper
+    assert "--workflow-specs-file" in wrapper
+    assert "--allow-degraded" in wrapper
+
+    assert "master-guard-burnin-check.yml" in readme
+    assert "run-master-guard-burnin-check.ps1" in readme
+    assert "burn-in health for master guard/digest workflows" in readme
+
+
+def test_257_master_guard_burnin_check_detects_insufficient_runs():
+    workspace = _local_test_dir("pytest-master-guard-burnin-check-insufficient-runs").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_file = workspace / "fixtures.json"
+    workflow_specs_file = workspace / "workflow-specs.json"
+
+    workflow_specs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "workflow_name": "Master Guard Burn-in Probe",
+                    "workflow_file": "master-guard-burnin-probe.yml",
+                    "required_artifacts": ["master-guard-burnin-probe-artifact"],
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    fixtures_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": {
+                    "Master Guard Burn-in Probe": [
+                        {
+                            "id": 981001,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T05:00:00Z",
+                        },
+                        {
+                            "id": 981002,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T04:00:00Z",
+                        },
+                    ]
+                },
+                "run_artifacts": {
+                    "981001": {
+                        "artifacts": [
+                            {"name": "master-guard-burnin-probe-artifact", "expired": False},
+                        ]
+                    },
+                    "981002": {
+                        "artifacts": [
+                            {"name": "master-guard-burnin-probe-artifact", "expired": False},
+                        ]
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-burnin-check.py"),
+        "--label",
+        "pytest-master-guard-burnin-insufficient-runs",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--fixtures-file",
+        str(fixtures_file.resolve()),
+        "--workflow-specs-file",
+        str(workflow_specs_file.resolve()),
+        "--required-successful-runs",
+        "3",
+        "--now-utc",
+        "2026-04-18T06:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master guard burn-in check failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["metrics"]["workflows_total"] == 1
+    assert payload["metrics"]["workflows_below_burnin_total"] == 1
+    assert payload["decision"]["guard_burnin_degraded"] is True
+    assert payload["degraded_workflow_names"] == ["Master Guard Burn-in Probe"]
+    assert payload["evaluations"][0]["has_sufficient_runs"] is False
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_258_master_production_readiness_gate_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-production-readiness-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-production-readiness-gate.ps1").read_text(encoding="utf-8")
+    script = (project_root / "scripts" / "master-production-readiness-gate.py").read_text(encoding="utf-8")
+    ci_workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Production Readiness Gate" in workflow
+    assert 'cron: "55 5 * * *"' in workflow
+    assert ".\\scripts\\run-master-required-checks-24h-report.ps1" in workflow
+    assert ".\\scripts\\run-master-branch-protection-drift-guard.ps1" in workflow
+    assert ".\\scripts\\run-master-guard-workflow-health-check.ps1" in workflow
+    assert ".\\scripts\\run-master-guard-burnin-check.ps1" in workflow
+    assert ".\\scripts\\run-master-production-readiness-gate.ps1" in workflow
+    assert "master-production-readiness-gate.json" in workflow
+    assert "allow_not_ready" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
+
+    assert "master-production-readiness-gate.py" in wrapper
+    assert "--required-checks-report-file" in wrapper
+    assert "--branch-protection-report-file" in wrapper
+    assert "--guard-health-report-file" in wrapper
+    assert "--guard-burnin-report-file" in wrapper
+    assert "--allow-not-ready" in wrapper
+
+    assert "production_ready" in script
+    assert "guard_burnin_integrity" in script
+    assert "guard_workflow_health_integrity" in script
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in ci_workflow
+
+    assert "master-production-readiness-gate.yml" in readme
+    assert "run-master-production-readiness-gate.ps1" in readme
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true" in readme
+
+
+def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded():
+    workspace = _local_test_dir("pytest-master-production-readiness-gate-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    required_checks_file = workspace / "required-checks.json"
+    branch_protection_file = workspace / "branch-protection.json"
+    guard_health_file = workspace / "guard-health.json"
+    guard_burnin_file = workspace / "guard-burnin.json"
+    output_file = workspace / "master-production-readiness-gate.json"
+
+    required_checks_file.write_text(
+        json.dumps(
+            {
+                "metrics": {"non_green_runs_total": 0},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    branch_protection_file.write_text(
+        json.dumps(
+            {
+                "decision": {"branch_protection_drift_detected": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    guard_health_file.write_text(
+        json.dumps(
+            {
+                "decision": {
+                    "guard_workflow_health_degraded": False,
+                    "guard_workflow_coverage_contract_ok": True,
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    guard_burnin_file.write_text(
+        json.dumps(
+            {
+                "metrics": {"workflows_degraded_total": 1},
+                "decision": {"guard_burnin_degraded": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-production-readiness-gate.py"),
+        "--label",
+        "pytest-master-production-readiness-gate-failure",
+        "--required-checks-report-file",
+        str(required_checks_file.resolve()),
+        "--branch-protection-report-file",
+        str(branch_protection_file.resolve()),
+        "--guard-health-report-file",
+        str(guard_health_file.resolve()),
+        "--guard-burnin-report-file",
+        str(guard_burnin_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master production readiness gate failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["production_ready"] is False
+    assert payload["metrics"]["guard_burnin_degraded"] is True
+    assert "guard_burnin_integrity" in [item["name"] for item in payload["failed_criteria"]]
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)

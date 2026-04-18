@@ -1,0 +1,159 @@
+name: Master Production Readiness Gate
+
+on:
+  schedule:
+    - cron: "55 5 * * *"
+  workflow_dispatch:
+    inputs:
+      required_checks_lookback_hours:
+        description: "Lookback window (hours) for required-check integrity report"
+        required: false
+        default: "24"
+      required_checks_per_page:
+        description: "Maximum completed CI runs fetched for required-check integrity report"
+        required: false
+        default: "100"
+      guard_health_lookback_hours:
+        description: "Lookback window (hours) for guard-workflow health report"
+        required: false
+        default: "30"
+      guard_health_per_page:
+        description: "Maximum completed runs fetched per guard workflow"
+        required: false
+        default: "50"
+      burnin_per_page:
+        description: "Maximum completed runs fetched per burn-in workflow"
+        required: false
+        default: "20"
+      burnin_required_successful_runs:
+        description: "Required successful completed runs for nightly guard workflows"
+        required: false
+        default: "3"
+      burnin_digest_required_successful_runs:
+        description: "Required successful completed runs for weekly reliability digest workflow"
+        required: false
+        default: "1"
+      burnin_drill_required_successful_runs:
+        description: "Required successful completed runs for weekly watchdog rehearsal drill workflow"
+        required: false
+        default: "1"
+      allow_not_ready:
+        description: "Do not fail workflow when production-readiness criteria are not met"
+        required: false
+        default: "false"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  production-readiness-gate:
+    name: Production Readiness Gate
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build required-check integrity report
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_CHECKS_LOOKBACK_HOURS: ${{ github.event.inputs.required_checks_lookback_hours || '24' }}
+          REQUIRED_CHECKS_PER_PAGE: ${{ github.event.inputs.required_checks_per_page || '100' }}
+        run: |
+          .\scripts\run-master-required-checks-24h-report.ps1 `
+            -LookbackHours "$env:REQUIRED_CHECKS_LOOKBACK_HOURS" `
+            -PerPage "$env:REQUIRED_CHECKS_PER_PAGE" `
+            -AllowNonGreen `
+            -OutputFile "artifacts\master-required-checks-24h-report-readiness.json"
+
+      - name: Build branch-protection integrity report
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .\scripts\run-master-branch-protection-drift-guard.ps1 `
+            -AllowDrift `
+            -OutputFile "artifacts\master-branch-protection-drift-guard-readiness.json"
+
+      - name: Build guard-workflow health report
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GUARD_HEALTH_LOOKBACK_HOURS: ${{ github.event.inputs.guard_health_lookback_hours || '30' }}
+          GUARD_HEALTH_PER_PAGE: ${{ github.event.inputs.guard_health_per_page || '50' }}
+        run: |
+          .\scripts\run-master-guard-workflow-health-check.ps1 `
+            -LookbackHours "$env:GUARD_HEALTH_LOOKBACK_HOURS" `
+            -PerPage "$env:GUARD_HEALTH_PER_PAGE" `
+            -AllowDegraded `
+            -OutputFile "artifacts\master-guard-workflow-health-check-readiness.json"
+
+      - name: Build guard burn-in report
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BURNIN_PER_PAGE: ${{ github.event.inputs.burnin_per_page || '20' }}
+          BURNIN_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.burnin_required_successful_runs || '3' }}
+          BURNIN_DIGEST_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.burnin_digest_required_successful_runs || '1' }}
+          BURNIN_DRILL_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.burnin_drill_required_successful_runs || '1' }}
+        run: |
+          .\scripts\run-master-guard-burnin-check.ps1 `
+            -PerPage "$env:BURNIN_PER_PAGE" `
+            -RequiredSuccessfulRuns "$env:BURNIN_REQUIRED_SUCCESSFUL_RUNS" `
+            -DigestRequiredSuccessfulRuns "$env:BURNIN_DIGEST_REQUIRED_SUCCESSFUL_RUNS" `
+            -DrillRequiredSuccessfulRuns "$env:BURNIN_DRILL_REQUIRED_SUCCESSFUL_RUNS" `
+            -AllowDegraded `
+            -OutputFile "artifacts\master-guard-burnin-check-readiness.json"
+
+      - name: Evaluate production readiness gate
+        if: always()
+        shell: pwsh
+        env:
+          ALLOW_NOT_READY: ${{ github.event.inputs.allow_not_ready || 'false' }}
+        run: |
+          $arguments = @(
+            "-RequiredChecksReportFile", "artifacts\master-required-checks-24h-report-readiness.json",
+            "-BranchProtectionReportFile", "artifacts\master-branch-protection-drift-guard-readiness.json",
+            "-GuardHealthReportFile", "artifacts\master-guard-workflow-health-check-readiness.json",
+            "-GuardBurninReportFile", "artifacts\master-guard-burnin-check-readiness.json",
+            "-OutputFile", "artifacts\master-production-readiness-gate.json"
+          )
+          if ($env:ALLOW_NOT_READY -eq "true") {
+            $arguments += "-AllowNotReady"
+          }
+          .\scripts\run-master-production-readiness-gate.ps1 @arguments
+
+      - name: Publish production readiness summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "artifacts\master-production-readiness-gate.json") {
+            $payload = Get-Content "artifacts\master-production-readiness-gate.json" -Raw | ConvertFrom-Json
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Master Production Readiness Gate"
+            foreach ($line in $payload.summary_lines) {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- $line"
+            }
+          }
+
+      - name: Upload production readiness gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-production-readiness-gate
+          path: artifacts/master-production-readiness-gate.json
+          if-no-files-found: error

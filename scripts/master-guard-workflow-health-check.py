@@ -51,6 +51,13 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
         ],
     },
     {
+        "workflow_file": "master-guard-burnin-check.yml",
+        "workflow_name": "Master Guard Burn-in Check",
+        "required_artifacts": [
+            "master-guard-burnin-check",
+        ],
+    },
+    {
         "workflow_file": "master-reliability-digest-guard.yml",
         "workflow_name": "Master Reliability Digest Guard",
         "required_artifacts": [
