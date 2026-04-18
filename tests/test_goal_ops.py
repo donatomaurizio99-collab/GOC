@@ -5823,8 +5823,10 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert 'parser.add_argument("--output-file")' in registry_sync_script
     assert "_update_registry_sync_command_line" in registry_sync_script
     assert "_extract_release_gate_strict_switches" in registry_sync_script
+    assert "_extract_p0_runbook_default_lists" in registry_sync_script
     assert "strict switches missing from registry strict_flags" in registry_sync_script
     assert "declared strict switches without runtime usage in release-gate" in registry_sync_script
+    assert "default lists in p0-runbook-contract-check.py must match " in registry_sync_script
     assert "build_registry_lock_payload" in registry_sync_script
     assert "registry lock file" in registry_sync_script
     assert '[string]$RegistryFile = "docs\\\\release-gate-registry.json"' in runbook_contract_wrapper
@@ -9717,6 +9719,8 @@ def test_201_release_gate_registry_sync_check_reports_success():
     assert payload["strict_flags_missing_in_release_gate_total"] == 0
     assert payload["strict_switches_missing_in_registry_total"] == 0
     assert payload["declared_strict_switches_without_runtime_usage_total"] == 0
+    assert payload["p0_runbook_default_lists_checked_total"] == 5
+    assert payload["p0_runbook_default_list_mismatch_total"] == 0
 
 
 def test_202_p0_report_schema_contract_uses_registry_required_label_default():
@@ -10182,5 +10186,42 @@ def test_212_release_gate_registry_sync_fails_when_release_gate_strict_switch_ha
     )
     assert completed.returncode != 0
     assert "declared strict switches without runtime usage in release-gate" in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_213_release_gate_registry_sync_fails_when_runbook_default_lists_drift_from_registry():
+    workspace = _local_test_dir("pytest-release-gate-registry-sync-runbook-default-list-drift").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runbook_contract_script_file = workspace / "p0-runbook-contract-check.py"
+    runbook_contract_script_text = (project_root / "scripts" / "p0-runbook-contract-check.py").read_text(
+        encoding="utf-8"
+    )
+    runbook_contract_script_file.write_text(
+        runbook_contract_script_text.replace(
+            "run-security-config-hardening-check.ps1",
+            "run-security-config-hardening-check-typo.ps1",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-registry-sync.py"),
+        "--project-root",
+        str(project_root.resolve()),
+        "--runbook-contract-script-file",
+        str(runbook_contract_script_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "default lists in p0-runbook-contract-check.py must match registry p0_runbook_contract" in completed.stderr
+    assert "required_runbook_scripts" in completed.stderr
 
     shutil.rmtree(workspace, ignore_errors=True)

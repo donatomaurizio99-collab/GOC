@@ -523,6 +523,7 @@ Manual release-gate registry sync check + JSON report artifact:
 (Also enforces registry cross-contract consistency for P0 required labels and CI artifact coverage.)
 (Also enforces strict-flag parity between registry `release_gate_ci.strict_flags` and release-gate `[switch]$Strict*` declarations.)
 (Also enforces that each declared release-gate strict switch has runtime usage beyond its declaration.)
+(Also enforces that `p0_runbook_contract` registry lists stay in lockstep with `DEFAULT_REQUIRED_*` lists in `scripts\p0-runbook-contract-check.py`.)
 
 Manual release-gate registry + lockfile write/sync invocation:
 

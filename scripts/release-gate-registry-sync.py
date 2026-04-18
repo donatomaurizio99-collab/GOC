@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import hashlib
 import json
@@ -461,10 +462,82 @@ def _find_declared_strict_switches_without_runtime_usage(
     return missing_runtime_usage
 
 
+def _extract_p0_runbook_default_lists(runbook_contract_script_text: str) -> dict[str, list[str]]:
+    constant_mapping = {
+        "required_runbook_scripts": "DEFAULT_REQUIRED_RUNBOOK_SCRIPTS",
+        "required_canary_drills": "DEFAULT_REQUIRED_CANARY_DRILLS",
+        "required_release_gate_tokens": "DEFAULT_REQUIRED_RELEASE_GATE_TOKENS",
+        "required_ci_artifact_paths": "DEFAULT_REQUIRED_CI_ARTIFACT_PATHS",
+        "required_runbook_tokens": "DEFAULT_REQUIRED_RUNBOOK_TOKENS",
+    }
+    try:
+        tree = ast.parse(runbook_contract_script_text)
+    except SyntaxError as exc:
+        raise RuntimeError(f"Failed to parse p0-runbook-contract-check.py defaults: {exc}") from exc
+
+    assignments: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name):
+            assignments[target.id] = node.value
+
+    extracted: dict[str, list[str]] = {}
+    for registry_key, constant_name in constant_mapping.items():
+        _expect(
+            constant_name in assignments,
+            (
+                "Unable to find required default list constant "
+                f"'{constant_name}' in scripts/p0-runbook-contract-check.py."
+            ),
+        )
+        try:
+            raw_value = ast.literal_eval(assignments[constant_name])
+        except Exception as exc:  # pragma: no cover - defensive parsing branch
+            raise RuntimeError(
+                (
+                    "Unable to evaluate default list constant "
+                    f"'{constant_name}' in scripts/p0-runbook-contract-check.py: {exc}"
+                )
+            ) from exc
+        _expect(
+            isinstance(raw_value, list),
+            (
+                "Default constant "
+                f"'{constant_name}' in scripts/p0-runbook-contract-check.py must be a list."
+            ),
+        )
+        normalized_values: list[str] = []
+        for item in raw_value:
+            _expect(
+                isinstance(item, str),
+                (
+                    "Default constant "
+                    f"'{constant_name}' in scripts/p0-runbook-contract-check.py must contain only strings."
+                ),
+            )
+            token = item.strip()
+            _expect(
+                token,
+                (
+                    "Default constant "
+                    f"'{constant_name}' in scripts/p0-runbook-contract-check.py contains an empty token."
+                ),
+            )
+            normalized_values.append(token)
+        extracted[registry_key] = normalized_values
+    return extracted
+
+
 def validate_registry_wiring(
     *,
     strict_flags: list[str],
+    p0_contract: dict[str, list[str]],
     release_gate_text: str,
+    runbook_contract_script_text: str,
     schema_wrapper_text: str,
     bundle_wrapper_text: str,
     registry_sync_wrapper_text: str,
@@ -559,6 +632,33 @@ def validate_registry_wiring(
             f"{sorted(strict_switches_without_runtime_usage)}"
         ),
     )
+    p0_runbook_default_lists = _extract_p0_runbook_default_lists(runbook_contract_script_text)
+    p0_default_mismatch_details: list[str] = []
+    mismatched_default_keys: list[str] = []
+    for key, default_values in p0_runbook_default_lists.items():
+        registry_values = list(p0_contract[key])
+        missing_in_script_defaults = [token for token in registry_values if token not in default_values]
+        missing_in_registry = [token for token in default_values if token not in registry_values]
+        order_mismatch = (
+            not missing_in_script_defaults and not missing_in_registry and registry_values != default_values
+        )
+        if missing_in_script_defaults or missing_in_registry or order_mismatch:
+            mismatched_default_keys.append(key)
+            detail_parts: list[str] = []
+            if missing_in_script_defaults:
+                detail_parts.append(f"missing_in_script_defaults={missing_in_script_defaults}")
+            if missing_in_registry:
+                detail_parts.append(f"missing_in_registry={missing_in_registry}")
+            if order_mismatch:
+                detail_parts.append("order_mismatch=True")
+            p0_default_mismatch_details.append(f"{key}: {', '.join(detail_parts)}")
+    _expect(
+        not p0_default_mismatch_details,
+        (
+            "Registry contract mismatch: default lists in p0-runbook-contract-check.py must match "
+            f"registry p0_runbook_contract. Details: {p0_default_mismatch_details}"
+        ),
+    )
 
     return {
         "release_gate_registry_argument_occurrences": release_gate_registry_arg_count,
@@ -572,6 +672,8 @@ def validate_registry_wiring(
         "strict_flags_missing_in_release_gate_total": len(strict_flags_missing_in_release_gate),
         "strict_switches_missing_in_registry_total": len(strict_switches_missing_in_registry),
         "declared_strict_switches_without_runtime_usage_total": len(strict_switches_without_runtime_usage),
+        "p0_runbook_default_lists_checked_total": len(p0_runbook_default_lists),
+        "p0_runbook_default_list_mismatch_total": len(mismatched_default_keys),
     }
 
 
@@ -598,6 +700,7 @@ def _build_sync_report_payload(
     lock_file: Path,
     ci_workflow_file: Path,
     release_gate_file: Path,
+    runbook_contract_script_file: Path,
     schema_wrapper_file: Path,
     bundle_wrapper_file: Path,
     registry_sync_wrapper_file: Path,
@@ -612,6 +715,7 @@ def _build_sync_report_payload(
         "lock_file": str(lock_file),
         "ci_workflow_file": str(ci_workflow_file),
         "release_gate_file": str(release_gate_file),
+        "runbook_contract_script_file": str(runbook_contract_script_file),
         "schema_wrapper_file": str(schema_wrapper_file),
         "bundle_wrapper_file": str(bundle_wrapper_file),
         "registry_sync_wrapper_file": str(registry_sync_wrapper_file),
@@ -640,6 +744,8 @@ def _build_sync_report_payload(
         "declared_strict_switches_without_runtime_usage_total": wiring_metrics[
             "declared_strict_switches_without_runtime_usage_total"
         ],
+        "p0_runbook_default_lists_checked_total": wiring_metrics["p0_runbook_default_lists_checked_total"],
+        "p0_runbook_default_list_mismatch_total": wiring_metrics["p0_runbook_default_list_mismatch_total"],
     }
 
 
@@ -671,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-file", default="docs/release-gate-registry.lock.json")
     parser.add_argument("--ci-workflow-file", default=".github/workflows/ci.yml")
     parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
+    parser.add_argument("--runbook-contract-script-file", default="scripts/p0-runbook-contract-check.py")
     parser.add_argument("--schema-wrapper-file", default="scripts/run-p0-report-schema-contract-check.ps1")
     parser.add_argument("--bundle-wrapper-file", default="scripts/run-p0-release-evidence-bundle.ps1")
     parser.add_argument("--registry-sync-wrapper-file", default="scripts/run-release-gate-registry-sync.ps1")
@@ -688,6 +795,7 @@ def main(argv: list[str] | None = None) -> int:
     lock_file = (project_root / str(args.lock_file)).resolve()
     ci_workflow_file = (project_root / str(args.ci_workflow_file)).resolve()
     release_gate_file = (project_root / str(args.release_gate_file)).resolve()
+    runbook_contract_script_file = (project_root / str(args.runbook_contract_script_file)).resolve()
     schema_wrapper_file = (project_root / str(args.schema_wrapper_file)).resolve()
     bundle_wrapper_file = (project_root / str(args.bundle_wrapper_file)).resolve()
     registry_sync_wrapper_file = (project_root / str(args.registry_sync_wrapper_file)).resolve()
@@ -701,12 +809,15 @@ def main(argv: list[str] | None = None) -> int:
         lock_changed = existing_lock_text != generated_lock_text
         original_ci = _read_text(ci_workflow_file)
         release_gate_text = _read_text(release_gate_file)
+        runbook_contract_script_text = _read_text(runbook_contract_script_file)
         schema_wrapper_text = _read_text(schema_wrapper_file)
         bundle_wrapper_text = _read_text(bundle_wrapper_file)
         registry_sync_wrapper_text = _read_text(registry_sync_wrapper_file)
         wiring_metrics = validate_registry_wiring(
             strict_flags=registry["strict_flags"],
+            p0_contract=registry["p0_contract"],
             release_gate_text=release_gate_text,
+            runbook_contract_script_text=runbook_contract_script_text,
             schema_wrapper_text=schema_wrapper_text,
             bundle_wrapper_text=bundle_wrapper_text,
             registry_sync_wrapper_text=registry_sync_wrapper_text,
@@ -736,6 +847,7 @@ def main(argv: list[str] | None = None) -> int:
             lock_file=lock_file,
             ci_workflow_file=ci_workflow_file,
             release_gate_file=release_gate_file,
+            runbook_contract_script_file=runbook_contract_script_file,
             schema_wrapper_file=schema_wrapper_file,
             bundle_wrapper_file=bundle_wrapper_file,
             registry_sync_wrapper_file=registry_sync_wrapper_file,
@@ -776,6 +888,7 @@ def main(argv: list[str] | None = None) -> int:
         lock_file=lock_file,
         ci_workflow_file=ci_workflow_file,
         release_gate_file=release_gate_file,
+        runbook_contract_script_file=runbook_contract_script_file,
         schema_wrapper_file=schema_wrapper_file,
         bundle_wrapper_file=bundle_wrapper_file,
         registry_sync_wrapper_file=registry_sync_wrapper_file,
