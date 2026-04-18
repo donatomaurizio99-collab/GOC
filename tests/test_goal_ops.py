@@ -10794,3 +10794,93 @@ def test_223_master_required_checks_24h_workflow_wrapper_and_docs_wiring():
 
     assert "[master-required-checks-24h.yml]" in readme
     assert "required-check list deduped to these exact 5 checks" in readme
+
+
+def test_224_master_branch_protection_drift_guard_fails_on_required_check_drift():
+    workspace = _local_test_dir("pytest-master-branch-protection-drift-guard-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    required_status_checks_file = workspace / "required-status-checks.json"
+    output_file = workspace / "master-branch-protection-drift-guard.json"
+
+    required_status_checks_file.write_text(
+        json.dumps(
+            {
+                "strict": True,
+                "contexts": [
+                    "Release Gate (Windows)",
+                    "Security CI Lane",
+                    "Pytest (Python 3.11)",
+                    "Pytest (Python 3.12)",
+                    "Release Gate (Windows)",
+                    "Unexpected Check",
+                ],
+                "checks": [
+                    {"context": "Release Gate (Windows)", "app_id": 15368},
+                    {"context": "Security CI Lane", "app_id": 15368},
+                    {"context": "Pytest (Python 3.11)", "app_id": 15368},
+                    {"context": "Pytest (Python 3.12)", "app_id": 15368},
+                    {"context": "Release Gate (Windows)", "app_id": 15368},
+                    {"context": "Unexpected Check", "app_id": 15368},
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-branch-protection-drift-guard.py"),
+        "--label",
+        "pytest-branch-protection-drift",
+        "--required-status-checks-file",
+        str(required_status_checks_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master branch-protection drift guard failed: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["missing_required_checks_total"] == 1
+    assert payload["metrics"]["unexpected_required_checks_total"] == 1
+    assert payload["metrics"]["contexts_duplicates_total"] == 1
+    assert payload["drift"]["missing_required_checks"] == ["Desktop Smoke (Windows)"]
+    assert payload["drift"]["unexpected_required_checks"] == ["Unexpected Check"]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_225_master_branch_protection_drift_guard_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        project_root / ".github" / "workflows" / "master-branch-protection-drift-guard.yml"
+    ).read_text(encoding="utf-8")
+    wrapper = (project_root / "scripts" / "run-master-branch-protection-drift-guard.ps1").read_text(
+        encoding="utf-8"
+    )
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    expected_checks = "Release Gate (Windows),Security CI Lane,Pytest (Python 3.11),Pytest (Python 3.12),Desktop Smoke (Windows)"
+
+    assert "name: Master Branch Protection Drift Guard" in workflow
+    assert 'cron: "20 2 * * *"' in workflow
+    assert ".\\scripts\\run-master-branch-protection-drift-guard.ps1" in workflow
+    assert "master-branch-protection-drift-guard.json" in workflow
+
+    assert expected_checks in wrapper
+    assert "--required-checks" in wrapper
+    assert "--allow-drift" in wrapper
+    assert "master-branch-protection-drift-guard.py" in wrapper
+
+    assert "[master-branch-protection-drift-guard.yml]" in readme
+    assert "keeps exactly the 5 required checks" in readme
