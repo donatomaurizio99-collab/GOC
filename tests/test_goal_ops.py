@@ -11389,6 +11389,8 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "at most one open issue per signal" in readme
     assert "stays open beyond the alert-age SLO" in readme
     assert "release-gate-runtime-alert-age-slo" in readme
+    assert "mandatory parent runtime-warning reference" in readme
+    assert "closes immediately when parent-coupled escalation criteria are no longer met" in readme
 
 
 def test_232_ci_alert_issue_upsert_auto_closes_after_recovery_threshold():
@@ -11905,6 +11907,8 @@ def test_236_ci_alert_issue_upsert_alert_age_slo_breach_creates_escalation_issue
     issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
     assert len(issue_oplog["actions"]) == 1
     assert issue_oplog["actions"][0]["action"] == "create_issue"
+    assert "<!-- ci-alert-parent-runtime-warning-issue:321 -->" in issue_oplog["actions"][0]["body"]
+    assert "- Parent runtime warning issue: #321" in issue_oplog["actions"][0]["body"]
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -12023,5 +12027,164 @@ def test_238_ci_alert_issue_upsert_rejects_non_positive_alert_age_hours():
     )
     assert completed.returncode == 2
     assert "--alert-age-hours must be > 0." in completed.stderr
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_239_ci_alert_issue_upsert_alert_age_slo_parent_coupling_state_machine():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-alert-age-slo-parent-coupling").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "release-gate-runtime-early-warning.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    signal_id = "release-gate-runtime-alert-age-slo"
+    child_title = "[Release Gate Runtime] alert issue age SLO breached on master"
+    child_marker = "<!-- ci-alert-key:release-gate-runtime-alert-age-slo:donatomaurizio99-collab/GOC:master -->"
+    parent_marker = "<!-- ci-alert-key:release-gate-runtime-early-warning:donatomaurizio99-collab/GOC:master -->"
+
+    parent_issue_open = {
+        "number": 900,
+        "state": "open",
+        "title": "[Release Gate Runtime] sustained runtime warning on master",
+        "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/900",
+        "created_at": "2026-04-14T00:00:00Z",
+        "body": f"runtime warning issue\\n{parent_marker}",
+    }
+
+    alert_report = {
+        "label": "pytest-runtime-warning-active",
+        "config": {"branch": "master", "threshold_seconds": 540, "sustained_runs": 3},
+        "decision": {
+            "warning_triggered": True,
+            "recommended_action": "investigate_release_gate_runtime_regression",
+        },
+        "generated_at_utc": "2026-04-18T12:00:00Z",
+    }
+    healthy_report = {
+        "label": "pytest-runtime-warning-healthy",
+        "config": {"branch": "master", "threshold_seconds": 540, "sustained_runs": 3},
+        "decision": {
+            "warning_triggered": False,
+            "recommended_action": "runtime_within_warning_budget",
+        },
+        "generated_at_utc": "2026-04-18T13:00:00Z",
+    }
+
+    def run_case(*, report_payload: dict, issues_payload: list[dict], case_label: str) -> tuple[dict, list[dict]]:
+        report_file.write_text(
+            json.dumps(report_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+        issues_file.write_text(
+            json.dumps(issues_payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+        command = [
+            sys.executable,
+            str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+            "--label",
+            case_label,
+            "--signal-id",
+            signal_id,
+            "--repo",
+            "donatomaurizio99-collab/GOC",
+            "--report-file",
+            str(report_file.resolve()),
+            "--issues-file",
+            str(issues_file.resolve()),
+            "--issue-oplog-file",
+            str(issue_oplog_file.resolve()),
+            "--recovery-threshold",
+            "5",
+            "--alert-age-hours",
+            "72",
+            "--dry-run",
+            "--output-file",
+            str(output_file.resolve()),
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+        actions = json.loads(issue_oplog_file.read_text(encoding="utf-8"))["actions"]
+        return payload, actions
+
+    payload1, actions1 = run_case(
+        report_payload=alert_report,
+        issues_payload=[parent_issue_open],
+        case_label="pytest-alert-age-slo-create",
+    )
+    assert payload1["decision"]["issue_action"] == "created"
+    assert payload1["decision"]["issue_deduped"] is False
+    assert payload1["metrics"]["runtime_parent_issue_number"] == 900
+    assert len(actions1) == 1
+    assert actions1[0]["action"] == "create_issue"
+    assert "<!-- ci-alert-parent-runtime-warning-issue:900 -->" in actions1[0]["body"]
+    assert "- Parent runtime warning issue: #900" in actions1[0]["body"]
+
+    child_issue_open_without_parent = {
+        "number": 901,
+        "state": "open",
+        "title": child_title,
+        "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/901",
+        "body": f"managed child issue\\n{child_marker}\\n<!-- ci-alert-recovery-streak:0 -->",
+    }
+    payload2, actions2 = run_case(
+        report_payload=alert_report,
+        issues_payload=[parent_issue_open, child_issue_open_without_parent],
+        case_label="pytest-alert-age-slo-active-update-parent-ref",
+    )
+    assert payload2["decision"]["issue_action"] == "commented"
+    assert payload2["decision"]["issue_deduped"] is True
+    assert [item["action"] for item in actions2] == ["update_issue_body", "add_comment"]
+    assert "<!-- ci-alert-parent-runtime-warning-issue:900 -->" in actions2[0]["body"]
+    assert "- Parent runtime warning issue: #900" in actions2[0]["body"]
+
+    child_issue_open_with_parent = {
+        "number": 901,
+        "state": "open",
+        "title": child_title,
+        "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/901",
+        "body": (
+            f"managed child issue\\n{child_marker}\\n"
+            "<!-- ci-alert-parent-runtime-warning-issue:900 -->\\n"
+            "- Parent runtime warning issue: #900\\n"
+            "<!-- ci-alert-recovery-streak:0 -->"
+        ),
+    }
+    payload3, actions3 = run_case(
+        report_payload=healthy_report,
+        issues_payload=[child_issue_open_with_parent],
+        case_label="pytest-alert-age-slo-immediate-close",
+    )
+    assert payload3["decision"]["issue_action"] == "closed"
+    assert payload3["decision"]["issue_closed"] is True
+    assert payload3["decision"]["recovery_streak"] == 0
+    assert [item["action"] for item in actions3] == ["update_issue_body", "add_comment", "close_issue"]
+    assert "parent-coupled escalation criteria are no longer met" in actions3[1]["body"]
+
+    child_issue_closed_without_parent = {
+        "number": 901,
+        "state": "closed",
+        "title": child_title,
+        "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/901",
+        "body": f"managed child issue\\n{child_marker}\\n<!-- ci-alert-recovery-streak:0 -->",
+    }
+    payload4, actions4 = run_case(
+        report_payload=alert_report,
+        issues_payload=[parent_issue_open, child_issue_closed_without_parent],
+        case_label="pytest-alert-age-slo-reopen",
+    )
+    assert payload4["decision"]["issue_action"] == "reopened"
+    assert payload4["decision"]["issue_deduped"] is True
+    assert [item["action"] for item in actions4] == ["reopen_issue", "add_comment"]
+    assert "<!-- ci-alert-parent-runtime-warning-issue:900 -->" in actions4[0]["body"]
+    assert "- Parent runtime warning issue: #900" in actions4[0]["body"]
 
     shutil.rmtree(workspace, ignore_errors=True)
