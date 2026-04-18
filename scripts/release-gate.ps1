@@ -136,6 +136,10 @@ param(
     [switch]$StrictReleaseGatePostReleaseWatchCheck,
     [switch]$SkipReleaseGateSteadyStateCertificationCheck,
     [switch]$StrictReleaseGateSteadyStateCertificationCheck,
+    [switch]$SkipReleaseGatePostReleaseContinuityCheck,
+    [switch]$StrictReleaseGatePostReleaseContinuityCheck,
+    [switch]$SkipReleaseGateProductionSustainabilityCertificationCheck,
+    [switch]$StrictReleaseGateProductionSustainabilityCertificationCheck,
     [switch]$SkipP0BurnInConsecutiveGreen,
     [switch]$StrictP0BurnInConsecutiveGreen,
     [switch]$SkipP0RunbookContractCheck,
@@ -2153,6 +2157,63 @@ if (-not $SkipReleaseGateSteadyStateCertificationCheck) {
             }
             Write-Warning (
                 "Release-gate steady-state certification check failed but StrictReleaseGateSteadyStateCertificationCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGatePostReleaseContinuityCheck) {
+    Invoke-GateStep -Name "Release-gate post-release continuity check (Stage AI continuity gate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-post-release-continuity-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-post-release-continuity-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-post-release-continuity-policy.json",
+                "--required-reports", "artifacts/release-gate-post-release-watch-release-gate.json,artifacts/release-gate-steady-state-certification-release-gate.json,artifacts/release-gate-evidence-freshness-release-gate.json,artifacts/release-gate-evidence-attestation-release-gate.json,artifacts/release-gate-operations-handoff-readiness-release-gate.json",
+                "--post-release-watch-report-file", "artifacts/release-gate-post-release-watch-release-gate.json",
+                "--steady-state-report-file", "artifacts/release-gate-steady-state-certification-release-gate.json",
+                "--freshness-report-file", "artifacts/release-gate-evidence-freshness-release-gate.json",
+                "--attestation-report-file", "artifacts/release-gate-evidence-attestation-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGatePostReleaseContinuityCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate post-release continuity check failed but StrictReleaseGatePostReleaseContinuityCheck is off. " +
+                "Continuing. Error: $($_.Exception.Message)"
+            )
+        }
+    }
+}
+
+if (-not $SkipReleaseGateProductionSustainabilityCertificationCheck) {
+    Invoke-GateStep -Name "Release-gate production sustainability certification check (Stage AJ sustained production certificate)" -Action {
+        $reportPath = Join-Path $ProjectRoot "artifacts\release-gate-production-sustainability-certification-release-gate.json"
+        try {
+            Invoke-NativeCommand -Executable $PythonExe -Arguments @(
+                ".\scripts\release-gate-production-sustainability-certification-check.py",
+                "--label", "release-gate",
+                "--policy-file", "docs/release-gate-production-sustainability-certification-policy.json",
+                "--required-reports", "artifacts/release-gate-post-release-continuity-release-gate.json,artifacts/release-gate-steady-state-certification-release-gate.json,artifacts/release-gate-post-release-watch-release-gate.json,artifacts/p0-burnin-consecutive-green-release-gate.json,artifacts/p0-closure-report-release-gate.json,artifacts/release-gate-production-final-attestation-release-gate.json",
+                "--post-release-continuity-report-file", "artifacts/release-gate-post-release-continuity-release-gate.json",
+                "--steady-state-report-file", "artifacts/release-gate-steady-state-certification-release-gate.json",
+                "--production-final-report-file", "artifacts/release-gate-production-final-attestation-release-gate.json",
+                "--burnin-report-file", "artifacts/p0-burnin-consecutive-green-release-gate.json",
+                "--closure-report-file", "artifacts/p0-closure-report-release-gate.json",
+                "--required-label", "release-gate",
+                "--output-file", $reportPath
+            )
+        } catch {
+            if ($StrictReleaseGateProductionSustainabilityCertificationCheck) {
+                throw
+            }
+            Write-Warning (
+                "Release-gate production sustainability certification check failed but StrictReleaseGateProductionSustainabilityCertificationCheck is off. " +
                 "Continuing. Error: $($_.Exception.Message)"
             )
         }

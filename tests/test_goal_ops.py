@@ -5481,6 +5481,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
         "artifacts/release-gate-post-cutover-finalization-release-gate.json",
         "artifacts/release-gate-post-release-watch-release-gate.json",
         "artifacts/release-gate-steady-state-certification-release-gate.json",
+        "artifacts/release-gate-post-release-continuity-release-gate.json",
+        "artifacts/release-gate-production-sustainability-certification-release-gate.json",
     ]
     for artifact_path in required_artifact_paths:
         assert artifact_path in ci_workflow
@@ -5517,6 +5519,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "Release-gate post-cutover finalization check (Stage AF production finalization gate)" in release_gate
     assert "Release-gate post-release watch check (Stage AG post-release watch gate)" in release_gate
     assert "Release-gate steady-state certification check (Stage AH steady-state production certificate)" in release_gate
+    assert "Release-gate post-release continuity check (Stage AI continuity gate)" in release_gate
+    assert "Release-gate production sustainability certification check (Stage AJ sustained production certificate)" in release_gate
     assert "release-gate-evidence-lineage-check.py" in release_gate
     assert "release-gate-production-readiness-certification.py" in release_gate
     assert "release-gate-slo-burn-rate-v2-check.py" in release_gate
@@ -5533,6 +5537,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-post-cutover-finalization-check.py" in release_gate
     assert "release-gate-post-release-watch-check.py" in release_gate
     assert "release-gate-steady-state-certification-check.py" in release_gate
+    assert "release-gate-post-release-continuity-check.py" in release_gate
+    assert "release-gate-production-sustainability-certification-check.py" in release_gate
     assert "--step-timings-file" in release_gate
     assert "release-gate-performance-budget-policy.json" in release_gate
     assert "release-gate-evidence-freshness-policy.json" in release_gate
@@ -5550,6 +5556,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "release-gate-post-cutover-finalization-policy.json" in release_gate
     assert "release-gate-post-release-watch-policy.json" in release_gate
     assert "release-gate-steady-state-certification-policy.json" in release_gate
+    assert "release-gate-post-release-continuity-policy.json" in release_gate
+    assert "release-gate-production-sustainability-certification-policy.json" in release_gate
     assert "artifacts\\release-gate-step-timings-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-freshness-release-gate.json" in release_gate
     assert "artifacts\\release-gate-evidence-hash-manifest-release-gate.json" in release_gate
@@ -5575,6 +5583,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts\\release-gate-post-cutover-finalization-release-gate.json" in release_gate
     assert "artifacts\\release-gate-post-release-watch-release-gate.json" in release_gate
     assert "artifacts\\release-gate-steady-state-certification-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-post-release-continuity-release-gate.json" in release_gate
+    assert "artifacts\\release-gate-production-sustainability-certification-release-gate.json" in release_gate
     assert 'default="*-release-gate.json"' in schema_script
     assert 'parser.add_argument("--required-top-level-keys", default=' in schema_script
     assert 'parser.add_argument("--required-decision-keys", default=' in schema_script
@@ -5614,6 +5624,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "run-release-gate-post-cutover-finalization-check.ps1" in runbook_contract_script
     assert "run-release-gate-post-release-watch-check.ps1" in runbook_contract_script
     assert "run-release-gate-steady-state-certification-check.ps1" in runbook_contract_script
+    assert "run-release-gate-post-release-continuity-check.ps1" in runbook_contract_script
+    assert "run-release-gate-production-sustainability-certification-check.ps1" in runbook_contract_script
     assert "artifacts/p0-report-schema-contract-release-gate.json" in runbook_contract_script
     assert "artifacts/incident-rollback-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-evidence-freshness-release-gate.json" in runbook_contract_script
@@ -5638,6 +5650,8 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "artifacts/release-gate-post-cutover-finalization-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-post-release-watch-release-gate.json" in runbook_contract_script
     assert "artifacts/release-gate-steady-state-certification-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-post-release-continuity-release-gate.json" in runbook_contract_script
+    assert "artifacts/release-gate-production-sustainability-certification-release-gate.json" in runbook_contract_script
     assert "metrics.stale_reports=0" in runbook_contract_script
     assert "metrics.schema_failed_steps=0" in runbook_contract_script
     assert "metrics.history_regression_violations=0" in runbook_contract_script
@@ -5696,6 +5710,19 @@ def test_154_ci_release_artifact_includes_stage_d_runtime_evidence_reports():
     assert "metrics.steady_state_watch_signal_failed=0" in runbook_contract_script
     assert "metrics.steady_state_burnin_threshold_failed=0" in runbook_contract_script
     assert "metrics.steady_state_closure_signal_failed=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_reports_non_green=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_release_block_signals=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_watch_signal_failed=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_steady_state_signal_failed=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_freshness_budget_violations=0" in runbook_contract_script
+    assert "metrics.post_release_continuity_attestation_budget_violations=0" in runbook_contract_script
+    assert "metrics.production_sustainability_reports_non_green=0" in runbook_contract_script
+    assert "metrics.production_sustainability_release_block_signals=0" in runbook_contract_script
+    assert "metrics.production_sustainability_continuity_signal_failed=0" in runbook_contract_script
+    assert "metrics.production_sustainability_steady_state_signal_failed=0" in runbook_contract_script
+    assert "metrics.production_sustainability_production_final_signal_failed=0" in runbook_contract_script
+    assert "metrics.production_sustainability_burnin_threshold_failed=0" in runbook_contract_script
+    assert "metrics.production_sustainability_closure_signal_failed=0" in runbook_contract_script
     assert 'parser.add_argument("--required-ci-artifact-paths", default=' in runbook_contract_script
     assert 'parser.add_argument("--required-runbook-tokens", default=' in runbook_contract_script
     assert "[string]$RequiredCiArtifactPaths =" in runbook_contract_wrapper
@@ -9221,6 +9248,316 @@ def test_198_release_gate_steady_state_certification_check_succeeds_for_green_ch
     assert payload["metrics"]["steady_state_burnin_threshold_failed"] == 0
     assert payload["metrics"]["steady_state_closure_signal_failed"] == 0
     assert payload["decision"]["recommended_action"] == "production_ready_steady_state"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_199_release_gate_post_release_continuity_check_fails_when_freshness_budget_is_exceeded():
+    workspace = _local_test_dir("pytest-release-gate-post-release-continuity-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    post_release_watch_report = artifacts_dir / "release-gate-post-release-watch-release-gate.json"
+    steady_state_report = artifacts_dir / "release-gate-steady-state-certification-release-gate.json"
+    freshness_report = artifacts_dir / "release-gate-evidence-freshness-release-gate.json"
+    attestation_report = artifacts_dir / "release-gate-evidence-attestation-release-gate.json"
+    handoff_report = artifacts_dir / "release-gate-operations-handoff-readiness-release-gate.json"
+    policy_file = workspace / "release-gate-post-release-continuity-policy.json"
+    output_file = artifacts_dir / "release-gate-post-release-continuity-release-gate.json"
+
+    post_release_watch_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ah"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    steady_state_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "production_ready_steady_state"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    freshness_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"stale_reports": 2},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    attestation_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"evidence_attestation_unverified_entries": 0},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    handoff_report.write_text(
+        json.dumps(
+            {"label": "release-gate", "success": True, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_continuity_windows": ["d_plus_1", "d_plus_3", "d_plus_7"],
+                "max_stale_reports": 0,
+                "max_unverified_attestation_entries": 0,
+                "min_required_green_reports": 5,
+                "runbook_section": "3.51 Post-release continuity gate",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-post-release-continuity-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [
+                post_release_watch_report,
+                steady_state_report,
+                freshness_report,
+                attestation_report,
+                handoff_report,
+            ]
+        ),
+        "--post-release-watch-report-file",
+        str(post_release_watch_report.resolve()),
+        "--steady-state-report-file",
+        str(steady_state_report.resolve()),
+        "--freshness-report-file",
+        str(freshness_report.resolve()),
+        "--attestation-report-file",
+        str(attestation_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "[release-gate-post-release-continuity-check] ERROR: "
+    assert marker in completed.stderr
+    payload_text = completed.stderr.split(marker, 1)[1].strip()
+    nested_marker = "Release-gate post-release continuity check failed: "
+    if payload_text.startswith(nested_marker):
+        payload_text = payload_text.split(nested_marker, 1)[1]
+    payload = json.loads(payload_text)
+    assert payload["success"] is False
+    assert payload["metrics"]["post_release_continuity_freshness_budget_violations"] == 1
+    assert payload["metrics"]["post_release_continuity_stale_reports"] == 2
+    assert payload["metrics"]["criteria_failed"] >= 1
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_200_release_gate_production_sustainability_certification_check_succeeds_for_green_chain():
+    workspace = _local_test_dir("pytest-release-gate-production-sustainability-success").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    continuity_report = artifacts_dir / "release-gate-post-release-continuity-release-gate.json"
+    steady_state_report = artifacts_dir / "release-gate-steady-state-certification-release-gate.json"
+    post_release_watch_report = artifacts_dir / "release-gate-post-release-watch-release-gate.json"
+    burnin_report = artifacts_dir / "p0-burnin-consecutive-green-release-gate.json"
+    closure_report = artifacts_dir / "p0-closure-report-release-gate.json"
+    production_final_report = artifacts_dir / "release-gate-production-final-attestation-release-gate.json"
+    policy_file = workspace / "release-gate-production-sustainability-certification-policy.json"
+    output_file = artifacts_dir / "release-gate-production-sustainability-certification-release-gate.json"
+
+    continuity_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_aj"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    steady_state_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "production_ready_steady_state"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    post_release_watch_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "proceed_to_stage_ah"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    burnin_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "metrics": {"consecutive_green": 15, "required_consecutive": 10},
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    closure_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    production_final_report.write_text(
+        json.dumps(
+            {
+                "label": "release-gate",
+                "success": True,
+                "decision": {"release_blocked": False, "recommended_action": "production_ready_finalized"},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    policy_file.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "required_sustainability_signals": [
+                    "post_release_continuity",
+                    "steady_state_certification",
+                    "production_final_attestation",
+                    "burnin_consecutive_green",
+                    "p0_closure_go_no_go",
+                ],
+                "min_required_green_reports": 6,
+                "runbook_section": "3.52 Production sustainability certification",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "release-gate-production-sustainability-certification-check.py"),
+        "--label",
+        "pytest-drill",
+        "--project-root",
+        str(workspace.resolve()),
+        "--policy-file",
+        str(policy_file.resolve()),
+        "--required-reports",
+        ",".join(
+            str(path.resolve())
+            for path in [
+                continuity_report,
+                steady_state_report,
+                post_release_watch_report,
+                burnin_report,
+                closure_report,
+                production_final_report,
+            ]
+        ),
+        "--post-release-continuity-report-file",
+        str(continuity_report.resolve()),
+        "--steady-state-report-file",
+        str(steady_state_report.resolve()),
+        "--production-final-report-file",
+        str(production_final_report.resolve()),
+        "--burnin-report-file",
+        str(burnin_report.resolve()),
+        "--closure-report-file",
+        str(closure_report.resolve()),
+        "--required-label",
+        "release-gate",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["production_sustainability_reports_non_green"] == 0
+    assert payload["metrics"]["production_sustainability_release_block_signals"] == 0
+    assert payload["metrics"]["production_sustainability_continuity_signal_failed"] == 0
+    assert payload["metrics"]["production_sustainability_steady_state_signal_failed"] == 0
+    assert payload["metrics"]["production_sustainability_production_final_signal_failed"] == 0
+    assert payload["metrics"]["production_sustainability_burnin_threshold_failed"] == 0
+    assert payload["metrics"]["production_sustainability_closure_signal_failed"] == 0
+    assert payload["decision"]["recommended_action"] == "production_ready_sustained"
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
