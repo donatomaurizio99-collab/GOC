@@ -52,6 +52,8 @@ DEFAULT_REQUIRED_RUNBOOK_SCRIPTS = [
     "run-release-gate-hypercare-activation-check.ps1",
     "run-release-gate-rollback-trigger-integrity-check.ps1",
     "run-release-gate-post-cutover-finalization-check.ps1",
+    "run-release-gate-post-release-watch-check.ps1",
+    "run-release-gate-steady-state-certification-check.ps1",
     "run-p0-burnin-consecutive-green.ps1",
     "run-p0-release-evidence-bundle.ps1",
     "run-p0-report-schema-contract-check.ps1",
@@ -104,6 +106,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "Release-gate hypercare activation check (Stage AD hypercare activation gate)",
     "Release-gate rollback trigger integrity check (Stage AE rollback integrity gate)",
     "Release-gate post-cutover finalization check (Stage AF production finalization gate)",
+    "Release-gate post-release watch check (Stage AG post-release watch gate)",
+    "Release-gate steady-state certification check (Stage AH steady-state production certificate)",
     "release-gate-evidence-lineage-check.py",
     "release-gate-production-readiness-certification.py",
     "release-gate-slo-burn-rate-v2-check.py",
@@ -118,6 +122,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "release-gate-hypercare-activation-check.py",
     "release-gate-rollback-trigger-integrity-check.py",
     "release-gate-post-cutover-finalization-check.py",
+    "release-gate-post-release-watch-check.py",
+    "release-gate-steady-state-certification-check.py",
     "release-candidate-rollout-policy.json",
     "release-gate-slo-burn-rate-v2-policy.json",
     "release-gate-deploy-rehearsal-policy.json",
@@ -128,6 +134,8 @@ DEFAULT_REQUIRED_RELEASE_GATE_TOKENS = [
     "release-gate-hypercare-policy.json",
     "release-gate-rollback-trigger-integrity-policy.json",
     "release-gate-post-cutover-finalization-policy.json",
+    "release-gate-post-release-watch-policy.json",
+    "release-gate-steady-state-certification-policy.json",
 ]
 
 DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
@@ -159,6 +167,8 @@ DEFAULT_REQUIRED_CI_ARTIFACT_PATHS = [
     "artifacts/release-gate-hypercare-activation-release-gate.json",
     "artifacts/release-gate-rollback-trigger-integrity-release-gate.json",
     "artifacts/release-gate-post-cutover-finalization-release-gate.json",
+    "artifacts/release-gate-post-release-watch-release-gate.json",
+    "artifacts/release-gate-steady-state-certification-release-gate.json",
 ]
 
 DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
@@ -213,6 +223,16 @@ DEFAULT_REQUIRED_RUNBOOK_TOKENS = [
     "metrics.post_cutover_reports_non_green=0",
     "metrics.post_cutover_release_block_signals=0",
     "metrics.post_cutover_final_signal_failed=0",
+    "metrics.post_release_watch_reports_non_green=0",
+    "metrics.post_release_watch_release_block_signals=0",
+    "metrics.post_release_watch_non_ok_window_violations=0",
+    "metrics.post_release_watch_chaos_regression_violations=0",
+    "metrics.post_release_watch_finalization_signal_failed=0",
+    "metrics.steady_state_reports_non_green=0",
+    "metrics.steady_state_release_block_signals=0",
+    "metrics.steady_state_watch_signal_failed=0",
+    "metrics.steady_state_burnin_threshold_failed=0",
+    "metrics.steady_state_closure_signal_failed=0",
 ]
 
 

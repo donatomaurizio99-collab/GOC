@@ -9,7 +9,7 @@ This runbook is optimized for reliability-first releases of the desktop app and 
 Run in repo root:
 
 ```powershell
-.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck -StrictReleaseGateEvidenceLineageCheck -StrictReleaseGateProductionReadinessCertificationCheck -StrictReleaseGateSloBurnRateV2Check -StrictReleaseGateDeployRehearsalCheck -StrictReleaseGateChaosMatrixContinuousCheck -StrictReleaseGateSupplyChainArtifactTrustCheck -StrictReleaseGateOperationsHandoffReadinessCheck -StrictReleaseGateEvidenceAttestationCheck -StrictReleaseGateReleaseTrainReadinessCheck -StrictReleaseGateProductionFinalAttestationCheck -StrictReleaseGateProductionCutoverReadinessCheck -StrictReleaseGateHypercareActivationCheck -StrictReleaseGateRollbackTriggerIntegrityCheck -StrictReleaseGatePostCutoverFinalizationCheck
+.\scripts\release-gate.ps1 -StrictSecurityConfigHardeningCheck -StrictAuditTrailHardeningCheck -StrictSecurityCiLaneCheck -StrictAlertRoutingOnCallCheck -StrictIncidentDrillAutomationCheck -StrictLoadProfileFrameworkCheck -StrictCanaryGuardrailCheck -StrictRtoRpoAssertionCheck -StrictReleaseFreezePolicyDrill -StrictFileDatabaseProbe -StrictAutoRollbackPolicyDrill -StrictDesktopUpdateSafetyDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictPowerLossDurabilityDrill -StrictWalCheckpointCrashDrill -StrictDiskPressureFaultInjectionDrill -StrictFsyncIoStallDrill -StrictSqliteRealFullDrill -StrictDbCorruptionQuarantineDrill -StrictStorageCorruptionHardeningDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill -StrictDbSafeModeWatchdogDrill -StrictInvariantMonitorWatchdogDrill -StrictEventConsumerRecoveryChaosDrill -StrictInvariantBurstDrill -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictUpgradeDowngradeCompatibilityDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictSnapshotRestoreCrashConsistencyDrill -StrictMultiDbAtomicSwitchDrill -StrictIncidentRollbackDrill -StrictDisasterRecoveryRehearsalPack -StrictFailureBudgetDashboard -StrictSafeModeUxDegradationCheck -StrictA11yTestHarnessCheck -StrictReleaseGateRuntimeStabilityDrill -StrictCriticalDrillFlakeGate -StrictP0BurnInConsecutiveGreen -StrictP0RunbookContractCheck -StrictP0ReportSchemaContractCheck -StrictP0ReleaseEvidenceBundle -StrictP0ClosureReport -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateRcCanaryRolloutCheck -StrictReleaseGateEvidenceLineageCheck -StrictReleaseGateProductionReadinessCertificationCheck -StrictReleaseGateSloBurnRateV2Check -StrictReleaseGateDeployRehearsalCheck -StrictReleaseGateChaosMatrixContinuousCheck -StrictReleaseGateSupplyChainArtifactTrustCheck -StrictReleaseGateOperationsHandoffReadinessCheck -StrictReleaseGateEvidenceAttestationCheck -StrictReleaseGateReleaseTrainReadinessCheck -StrictReleaseGateProductionFinalAttestationCheck -StrictReleaseGateProductionCutoverReadinessCheck -StrictReleaseGateHypercareActivationCheck -StrictReleaseGateRollbackTriggerIntegrityCheck -StrictReleaseGatePostCutoverFinalizationCheck -StrictReleaseGatePostReleaseWatchCheck -StrictReleaseGateSteadyStateCertificationCheck
 ```
 
 The gate performs a preflight cleanup of stale `artifacts\*-release-gate.json` files and previous release-gate evidence directories before checks run, so evidence manifests are deterministic per execution.
@@ -83,6 +83,8 @@ This gate covers:
 - release-gate hypercare activation check (Stage AD post-cutover hypercare activation contract over AC + burn-rate/failure-budget evidence)
 - release-gate rollback trigger integrity check (Stage AE rollback trigger integrity contract over AD + auto/incident rollback evidence)
 - release-gate post-cutover finalization check (Stage AF production finalization contract over AC/AD/AE + final attestation)
+- release-gate post-release watch check (Stage AG post-release watch stability contract over AF + burn-rate + chaos + handoff evidence)
+- release-gate steady-state certification check (Stage AH steady-state production certificate over AG + AF + burn-in + closure evidence)
 - P0 burn-in consecutive-green monitor (latest CI history must satisfy N consecutive fully green runs)
 - P0 runbook contract check (release-gate token + CI artifact path + runbook metric token + strict-flag/script-reference consistency and canary baseline drill completeness)
 - P0 report schema contract check (baseline `label/success` schema contract across required release-gate evidence reports)
@@ -467,6 +469,18 @@ Manual release-gate post-cutover finalization invocation:
 .\scripts\run-release-gate-post-cutover-finalization-check.ps1 -PolicyFile "docs\release-gate-post-cutover-finalization-policy.json"
 ```
 
+Manual release-gate post-release watch invocation:
+
+```powershell
+.\scripts\run-release-gate-post-release-watch-check.ps1 -PolicyFile "docs\release-gate-post-release-watch-policy.json"
+```
+
+Manual release-gate steady-state certification invocation:
+
+```powershell
+.\scripts\run-release-gate-steady-state-certification-check.ps1 -PolicyFile "docs\release-gate-steady-state-certification-policy.json"
+```
+
 Manual canary determinism + flake intelligence invocation:
 
 ```powershell
@@ -546,6 +560,8 @@ Verify before release:
 - Stage-AD hypercare activation report is present and green (`artifacts\release-gate-hypercare-activation-release-gate.json`, `success=true`)
 - Stage-AE rollback trigger integrity report is present and green (`artifacts\release-gate-rollback-trigger-integrity-release-gate.json`, `success=true`)
 - Stage-AF post-cutover finalization report is present and green (`artifacts\release-gate-post-cutover-finalization-release-gate.json`, `success=true`)
+- Stage-AG post-release watch report is present and green (`artifacts\release-gate-post-release-watch-release-gate.json`, `success=true`)
+- Stage-AH steady-state certification report is present and green (`artifacts\release-gate-steady-state-certification-release-gate.json`, `success=true`)
 - release-gate evidence freshness report confirms zero freshness regressions (`success=true`, `metrics.stale_reports=0`, `metrics.non_green_reports=0`)
 - release-gate step timing schema report confirms zero schema violations (`success=true`, `metrics.schema_failed_steps=0`)
 - release-gate performance history report confirms zero history regressions (`success=true`, `metrics.history_regression_violations=0`)
@@ -567,6 +583,8 @@ Verify before release:
 - release-gate hypercare activation report confirms no hypercare non-green/block-signal regressions (`success=true`, `metrics.hypercare_reports_non_green=0`, `metrics.hypercare_release_block_signals=0`)
 - release-gate rollback trigger integrity report confirms zero trigger mismatches/violations (`success=true`, `metrics.rollback_integrity_reports_non_green=0`, `metrics.rollback_integrity_expected_reason_mismatches=0`, `metrics.rollback_integrity_trigger_reason_violations=0`)
 - release-gate post-cutover finalization report confirms final production lock is green (`success=true`, `metrics.post_cutover_reports_non_green=0`, `metrics.post_cutover_release_block_signals=0`, `metrics.post_cutover_final_signal_failed=0`)
+- release-gate post-release watch report confirms no post-release drift violations (`success=true`, `metrics.post_release_watch_reports_non_green=0`, `metrics.post_release_watch_release_block_signals=0`, `metrics.post_release_watch_non_ok_window_violations=0`, `metrics.post_release_watch_chaos_regression_violations=0`, `metrics.post_release_watch_finalization_signal_failed=0`)
+- release-gate steady-state certification report confirms sustained production-ready state (`success=true`, `metrics.steady_state_reports_non_green=0`, `metrics.steady_state_release_block_signals=0`, `metrics.steady_state_watch_signal_failed=0`, `metrics.steady_state_burnin_threshold_failed=0`, `metrics.steady_state_closure_signal_failed=0`)
 - closure report confirms all readiness criteria and required evidence checks are green (`success=true`, `metrics.criteria_failed=0`, `metrics.required_evidence_reports_missing=0`, `metrics.required_evidence_reports_non_green=0`)
 - security hardening report confirms production policy criteria are green (`success=true`)
 - `master` branch only receives PR merges (no direct pushes).
@@ -1521,6 +1539,48 @@ Actions:
    - `metrics.post_cutover_final_signal_failed = 0`
    - `decision.recommended_action = production_ready_finalized`
 3. Treat this report as the final production-lock artifact before any ring-wide promotion or announcement.
+
+### 3.49 Post-release watch gate (Stage AG)
+
+Symptoms:
+- immediate post-cutover gates are green, but first post-release watch windows show drift risk
+- SLO non-ok windows or chaos regression budgets are no longer deterministic after hypercare handoff
+
+Actions:
+1. Execute post-release watch check:
+   ```powershell
+   .\scripts\run-release-gate-post-release-watch-check.ps1 -PolicyFile "docs\release-gate-post-release-watch-policy.json"
+   ```
+2. Validate report criteria:
+   - `success = true`
+   - `metrics.post_release_watch_reports_non_green = 0`
+   - `metrics.post_release_watch_release_block_signals = 0`
+   - `metrics.post_release_watch_non_ok_window_violations = 0`
+   - `metrics.post_release_watch_chaos_regression_violations = 0`
+   - `metrics.post_release_watch_finalization_signal_failed = 0`
+   - `decision.recommended_action = proceed_to_stage_ah`
+3. If AG fails, keep release blocked for broad rollout and continue stabilization until burn-rate and chaos budgets are green again.
+
+### 3.50 Steady-state certification gate (Stage AH)
+
+Symptoms:
+- post-release watch is green, but teams still need one deterministic steady-state certificate for production handoff
+- sustained production-ready state is not yet explicitly proven across post-release watch + burn-in + closure chain
+
+Actions:
+1. Execute steady-state certification check:
+   ```powershell
+   .\scripts\run-release-gate-steady-state-certification-check.ps1 -PolicyFile "docs\release-gate-steady-state-certification-policy.json"
+   ```
+2. Validate report criteria:
+   - `success = true`
+   - `metrics.steady_state_reports_non_green = 0`
+   - `metrics.steady_state_release_block_signals = 0`
+   - `metrics.steady_state_watch_signal_failed = 0`
+   - `metrics.steady_state_burnin_threshold_failed = 0`
+   - `metrics.steady_state_closure_signal_failed = 0`
+   - `decision.recommended_action = production_ready_steady_state`
+3. Treat AH as the sustained production-ready certificate for ongoing operations after cutover/hypercare completion.
 
 ## 4. Operational Defaults
 
