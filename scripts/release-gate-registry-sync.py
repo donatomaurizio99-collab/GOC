@@ -380,7 +380,14 @@ def _update_release_gate_command_line(ci_text: str, strict_flags: list[str]) -> 
 
 def _update_registry_sync_command_line(ci_text: str, registry_sync_report_path: str) -> tuple[str, bool]:
     lines = ci_text.splitlines()
-    command_indexes = [idx for idx, line in enumerate(lines) if "python .\\scripts\\release-gate-registry-sync.py" in line]
+    command_indexes = [
+        idx
+        for idx, line in enumerate(lines)
+        if (
+            "python .\\scripts\\release-gate-registry-sync.py" in line
+            or ".\\scripts\\run-release-gate-registry-sync.ps1" in line
+        )
+    ]
     _expect(command_indexes, "Unable to find release-gate registry sync command in CI workflow.")
     _expect(
         len(command_indexes) == 1,
@@ -389,10 +396,7 @@ def _update_registry_sync_command_line(ci_text: str, registry_sync_report_path: 
 
     index = command_indexes[0]
     indent = _leading_whitespace(lines[index])
-    generated = (
-        indent
-        + f'python .\\scripts\\release-gate-registry-sync.py --output-file "{registry_sync_report_path}"'
-    )
+    generated = indent + f'.\\scripts\\run-release-gate-registry-sync.ps1 -OutputFile "{registry_sync_report_path}"'
     changed = lines[index] != generated
     lines[index] = generated
     return ("\n".join(lines) + ("\n" if ci_text.endswith("\n") else "")), changed
@@ -443,6 +447,7 @@ def validate_registry_wiring(
     release_gate_text: str,
     schema_wrapper_text: str,
     bundle_wrapper_text: str,
+    registry_sync_wrapper_text: str,
 ) -> dict[str, int]:
     release_gate_registry_arg = '"--registry-file", "docs/release-gate-registry.json"'
     release_gate_registry_arg_count = release_gate_text.count(release_gate_registry_arg)
@@ -484,11 +489,29 @@ def validate_registry_wiring(
         wrapper_registry_arg in bundle_wrapper_text,
         "P0 bundle wrapper must pass --registry-file to the Python checker.",
     )
+    _expect(
+        '[string]$OutputFile = ""' in registry_sync_wrapper_text,
+        "Registry sync wrapper must define OutputFile default.",
+    )
+    _expect(
+        '@("--output-file", $OutputFile)' in registry_sync_wrapper_text,
+        "Registry sync wrapper must pass --output-file when OutputFile is provided.",
+    )
+    _expect(
+        (
+            '".\\scripts\\release-gate-registry-sync.py"' in registry_sync_wrapper_text
+            or '".\\\\scripts\\\\release-gate-registry-sync.py"' in registry_sync_wrapper_text
+        ),
+        "Registry sync wrapper must call scripts\\release-gate-registry-sync.py.",
+    )
 
     return {
         "release_gate_registry_argument_occurrences": release_gate_registry_arg_count,
         "schema_wrapper_registry_argument_occurrences": schema_wrapper_text.count(wrapper_registry_arg),
         "bundle_wrapper_registry_argument_occurrences": bundle_wrapper_text.count(wrapper_registry_arg),
+        "registry_sync_wrapper_output_file_argument_occurrences": registry_sync_wrapper_text.count(
+            '@("--output-file", $OutputFile)'
+        ),
     }
 
 
@@ -517,6 +540,7 @@ def _build_sync_report_payload(
     release_gate_file: Path,
     schema_wrapper_file: Path,
     bundle_wrapper_file: Path,
+    registry_sync_wrapper_file: Path,
     wiring_metrics: dict[str, int],
 ) -> dict[str, Any]:
     return {
@@ -530,6 +554,7 @@ def _build_sync_report_payload(
         "release_gate_file": str(release_gate_file),
         "schema_wrapper_file": str(schema_wrapper_file),
         "bundle_wrapper_file": str(bundle_wrapper_file),
+        "registry_sync_wrapper_file": str(registry_sync_wrapper_file),
         "strict_flags_total": len(registry["strict_flags"]),
         "artifact_paths_total": len(registry["release_evidence_artifact_paths"]),
         "registry_sync_report_path": registry["registry_sync_report_path"],
@@ -545,6 +570,9 @@ def _build_sync_report_payload(
         "release_gate_registry_argument_occurrences": wiring_metrics["release_gate_registry_argument_occurrences"],
         "schema_wrapper_registry_argument_occurrences": wiring_metrics["schema_wrapper_registry_argument_occurrences"],
         "bundle_wrapper_registry_argument_occurrences": wiring_metrics["bundle_wrapper_registry_argument_occurrences"],
+        "registry_sync_wrapper_output_file_argument_occurrences": wiring_metrics[
+            "registry_sync_wrapper_output_file_argument_occurrences"
+        ],
     }
 
 
@@ -578,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-gate-file", default="scripts/release-gate.ps1")
     parser.add_argument("--schema-wrapper-file", default="scripts/run-p0-report-schema-contract-check.ps1")
     parser.add_argument("--bundle-wrapper-file", default="scripts/run-p0-release-evidence-bundle.ps1")
+    parser.add_argument("--registry-sync-wrapper-file", default="scripts/run-release-gate-registry-sync.ps1")
     parser.add_argument("--output-file")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
@@ -594,6 +623,7 @@ def main(argv: list[str] | None = None) -> int:
     release_gate_file = (project_root / str(args.release_gate_file)).resolve()
     schema_wrapper_file = (project_root / str(args.schema_wrapper_file)).resolve()
     bundle_wrapper_file = (project_root / str(args.bundle_wrapper_file)).resolve()
+    registry_sync_wrapper_file = (project_root / str(args.registry_sync_wrapper_file)).resolve()
     output_file = _resolve_output_file(project_root, args.output_file)
 
     try:
@@ -606,10 +636,12 @@ def main(argv: list[str] | None = None) -> int:
         release_gate_text = _read_text(release_gate_file)
         schema_wrapper_text = _read_text(schema_wrapper_file)
         bundle_wrapper_text = _read_text(bundle_wrapper_file)
+        registry_sync_wrapper_text = _read_text(registry_sync_wrapper_file)
         wiring_metrics = validate_registry_wiring(
             release_gate_text=release_gate_text,
             schema_wrapper_text=schema_wrapper_text,
             bundle_wrapper_text=bundle_wrapper_text,
+            registry_sync_wrapper_text=registry_sync_wrapper_text,
         )
         synchronized_ci, changed = synchronize_ci_workflow(
             original_ci,
@@ -638,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
             release_gate_file=release_gate_file,
             schema_wrapper_file=schema_wrapper_file,
             bundle_wrapper_file=bundle_wrapper_file,
+            registry_sync_wrapper_file=registry_sync_wrapper_file,
             wiring_metrics=wiring_metrics,
         )
         _write_optional_output_file(output_file, payload)
@@ -677,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
         release_gate_file=release_gate_file,
         schema_wrapper_file=schema_wrapper_file,
         bundle_wrapper_file=bundle_wrapper_file,
+        registry_sync_wrapper_file=registry_sync_wrapper_file,
         wiring_metrics=wiring_metrics,
     )
     _write_optional_output_file(output_file, payload)
