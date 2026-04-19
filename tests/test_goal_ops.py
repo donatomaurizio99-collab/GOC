@@ -14046,6 +14046,9 @@ def test_256_master_guard_burnin_workflow_wrapper_and_docs_wiring():
     assert "burnin_window_days" in workflow
     assert "mttr_target_seconds" in workflow
     assert "allow_degraded" in workflow
+    assert "$burninParams = @{" in workflow
+    assert "RequiredSuccessfulRuns = [int]$env:REQUIRED_SUCCESSFUL_RUNS" in workflow
+    assert ".\\scripts\\run-master-guard-burnin-check.ps1 @burninParams" in workflow
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
 
     assert "master-guard-burnin-check.py" in wrapper
@@ -15158,6 +15161,9 @@ def test_265d_master_watchdog_mttr_weekly_calibration_workflow_wiring():
     assert "watchdog-rehearsal-mttr-calibration" in workflow
     assert "watchdog-rehearsal-mttr-calibration-weekly.json" in workflow
     assert "no_action_required" in workflow
+    assert "$runId = [string]$run.id" in workflow
+    assert "[string]::IsNullOrWhiteSpace($runId)" in workflow
+    assert "workflow_id = [long]$workflow.id" in workflow
     assert "actions/upload-artifact@v7" in workflow
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
 

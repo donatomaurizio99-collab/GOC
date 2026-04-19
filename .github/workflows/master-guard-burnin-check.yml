@@ -69,22 +69,22 @@ jobs:
           MTTR_TARGET_SECONDS: ${{ github.event.inputs.mttr_target_seconds || '' }}
           ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
         run: |
-          $burninArgs = @(
-            "-Repo", "$env:REPO_FULL",
-            "-PerPage", "$env:PER_PAGE",
-            "-RequiredSuccessfulRuns", "$env:REQUIRED_SUCCESSFUL_RUNS",
-            "-DigestRequiredSuccessfulRuns", "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS",
-            "-DrillRequiredSuccessfulRuns", "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS",
-            "-BurninWindowDays", "$env:BURNIN_WINDOW_DAYS",
-            "-OutputFile", "artifacts\master-guard-burnin-check.json"
-          )
+          $burninParams = @{
+            Repo = "$env:REPO_FULL"
+            PerPage = [int]$env:PER_PAGE
+            RequiredSuccessfulRuns = [int]$env:REQUIRED_SUCCESSFUL_RUNS
+            DigestRequiredSuccessfulRuns = [int]$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS
+            DrillRequiredSuccessfulRuns = [int]$env:DRILL_REQUIRED_SUCCESSFUL_RUNS
+            BurninWindowDays = [int]$env:BURNIN_WINDOW_DAYS
+            OutputFile = "artifacts\master-guard-burnin-check.json"
+          }
           if ($env:MTTR_TARGET_SECONDS) {
-            $burninArgs += @("-MttrTargetSeconds", "$env:MTTR_TARGET_SECONDS")
+            $burninParams.MttrTargetSeconds = [double]$env:MTTR_TARGET_SECONDS
           }
           if ($env:ALLOW_DEGRADED -eq "true") {
-            .\scripts\run-master-guard-burnin-check.ps1 @burninArgs -AllowDegraded
+            .\scripts\run-master-guard-burnin-check.ps1 @burninParams -AllowDegraded
           } else {
-            .\scripts\run-master-guard-burnin-check.ps1 @burninArgs
+            .\scripts\run-master-guard-burnin-check.ps1 @burninParams
           }
 
       - name: Publish burn-in summary

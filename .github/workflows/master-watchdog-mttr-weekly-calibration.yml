@@ -71,8 +71,8 @@ jobs:
           $downloaded = 0
           $downloadErrors = @()
           foreach ($run in ($runsPayload.workflow_runs | Where-Object { $_ -ne $null })) {
-            $runId = [int]$run.id
-            if ($runId -le 0) {
+            $runId = [string]$run.id
+            if ([string]::IsNullOrWhiteSpace($runId)) {
               continue
             }
             $runDir = Join-Path $env:REPORTS_DIR ("run-" + $runId)
@@ -87,7 +87,7 @@ jobs:
 
           $manifest = @{
             workflow_name = $env:WORKFLOW_NAME
-            workflow_id = [int]$workflow.id
+            workflow_id = [long]$workflow.id
             runs_considered = [int](($runsPayload.workflow_runs | Measure-Object).Count)
             reports_downloaded = [int]$downloaded
             download_errors = $downloadErrors
