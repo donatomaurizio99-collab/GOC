@@ -8,6 +8,7 @@ param(
     [int]$GuardTrendRuns = 10,
     [int]$ReleaseGateWarningSeconds = 540,
     [int]$WarningSustainedRuns = 3,
+    [int]$GuardWarningSustainedRuns = 2,
     [string]$CiRunsFile = "",
     [string]$CiJobsDir = "",
     [string]$GuardRunsFile = "",
@@ -33,6 +34,7 @@ $args = @(
     "--guard-trend-runs", [string]$GuardTrendRuns,
     "--release-gate-warning-seconds", [string]$ReleaseGateWarningSeconds,
     "--warning-sustained-runs", [string]$WarningSustainedRuns,
+    "--guard-warning-sustained-runs", [string]$GuardWarningSustainedRuns,
     "--output-file", $OutputFile,
     "--markdown-output-file", $MarkdownOutputFile
 )

@@ -342,6 +342,9 @@ def _build_reliability_markdown(
     warning_sustained_runs: int,
     release_gate_warning_triggered: bool,
     release_gate_consecutive_over_threshold: int,
+    guard_warning_sustained_runs: int,
+    guard_consecutive_non_success: int,
+    guard_warning_triggered: bool,
     release_gate_samples: list[dict[str, Any]],
     guard_samples: list[dict[str, Any]],
     guard_non_success_runs: list[dict[str, Any]],
@@ -397,6 +400,11 @@ def _build_reliability_markdown(
         f"- Guard samples: {len(guard_samples)}",
         f"- Non-success guard runs: {len(guard_non_success_runs)}",
         (
+            "- Consecutive non-success guard runs (head): "
+            f"{guard_consecutive_non_success} (threshold={guard_warning_sustained_runs})"
+        ),
+        f"- Guard warning triggered: {'yes' if guard_warning_triggered else 'no'}",
+        (
             f"- Latest degraded guard run: `#{degraded_run_id}` ({degraded_run_url}) "
             f"conclusion=`{degraded_conclusion or 'unknown'}`"
             if degraded_run_id > 0 and degraded_run_url
@@ -451,6 +459,7 @@ def run_master_reliability_digest(
     guard_trend_runs: int,
     release_gate_warning_seconds: int,
     warning_sustained_runs: int,
+    guard_warning_sustained_runs: int,
     fail_on_warning: bool,
     ci_runs_file: Path | None,
     ci_jobs_dir: Path | None,
@@ -465,6 +474,7 @@ def run_master_reliability_digest(
     _expect(guard_trend_runs > 0, "guard_trend_runs must be > 0.")
     _expect(release_gate_warning_seconds > 0, "release_gate_warning_seconds must be > 0.")
     _expect(warning_sustained_runs > 0, "warning_sustained_runs must be > 0.")
+    _expect(guard_warning_sustained_runs > 0, "guard_warning_sustained_runs must be > 0.")
 
     started = time.perf_counter()
     ci_runs = (
@@ -506,6 +516,20 @@ def run_master_reliability_digest(
         if str(item.get("status") or "") == "completed"
         and str(item.get("conclusion") or "").strip().lower() != "success"
     ]
+
+    guard_consecutive_non_success = 0
+    for sample in guard_samples:
+        sample_status = str(sample.get("status") or "").strip().lower()
+        sample_conclusion = str(sample.get("conclusion") or "").strip().lower()
+        if sample_status == "completed" and sample_conclusion != "success":
+            guard_consecutive_non_success += 1
+        else:
+            break
+
+    guard_warning_triggered = bool(
+        guard_consecutive_non_success >= guard_warning_sustained_runs
+        and len(guard_samples) >= guard_warning_sustained_runs
+    )
 
     release_gate_consecutive_over_threshold = 0
     for sample in release_gate_duration_samples:
@@ -598,12 +622,13 @@ def run_master_reliability_digest(
             "name": "warning_policy",
             "passed": bool(
                 (not fail_on_warning)
-                or (not release_gate_warning_triggered and len(guard_non_success_runs) == 0)
+                or (not release_gate_warning_triggered and not guard_warning_triggered)
             ),
             "details": (
                 f"fail_on_warning={fail_on_warning}, "
                 f"release_gate_warning_triggered={release_gate_warning_triggered}, "
-                f"guard_non_success_total={len(guard_non_success_runs)}"
+                f"guard_warning_triggered={guard_warning_triggered}, "
+                f"guard_consecutive_non_success={guard_consecutive_non_success}"
             ),
         },
     ]
@@ -612,7 +637,7 @@ def run_master_reliability_digest(
 
     latest_release_sample = release_gate_duration_samples[0] if release_gate_duration_samples else {}
     latest_guard_non_success = guard_non_success_runs[0] if guard_non_success_runs else {}
-    if release_gate_warning_triggered and len(guard_non_success_runs) > 0:
+    if release_gate_warning_triggered and guard_warning_triggered:
         top_cause = "compound_runtime_and_guard_degradation"
         top_cause_detail = (
             "Sustained Release Gate slowdown and degraded guard workflow(s) observed simultaneously."
@@ -622,9 +647,12 @@ def run_master_reliability_digest(
         top_cause_detail = (
             "Release Gate runtime stayed above threshold for sustained runs."
         )
-    elif len(guard_non_success_runs) > 0:
-        top_cause = "guard_workflow_degraded"
-        top_cause_detail = "Guard workflow reported non-success conclusion."
+    elif guard_warning_triggered:
+        top_cause = "guard_workflow_consecutive_degradation"
+        top_cause_detail = (
+            f"Guard workflow reported {guard_consecutive_non_success} consecutive non-success runs "
+            f"(threshold={guard_warning_sustained_runs})."
+        )
     else:
         top_cause = "none"
         top_cause_detail = "No warning-level signal in digest window."
@@ -636,6 +664,9 @@ def run_master_reliability_digest(
         warning_sustained_runs=warning_sustained_runs,
         release_gate_warning_triggered=release_gate_warning_triggered,
         release_gate_consecutive_over_threshold=release_gate_consecutive_over_threshold,
+        guard_warning_sustained_runs=guard_warning_sustained_runs,
+        guard_consecutive_non_success=guard_consecutive_non_success,
+        guard_warning_triggered=guard_warning_triggered,
         release_gate_samples=release_gate_duration_samples,
         guard_samples=guard_samples,
         guard_non_success_runs=guard_non_success_runs,
@@ -677,6 +708,7 @@ def run_master_reliability_digest(
             "guard_trend_runs": int(guard_trend_runs),
             "release_gate_warning_seconds": int(release_gate_warning_seconds),
             "warning_sustained_runs": int(warning_sustained_runs),
+            "guard_warning_sustained_runs": int(guard_warning_sustained_runs),
             "fail_on_warning": bool(fail_on_warning),
             "ci_runs_file": str(ci_runs_file) if ci_runs_file is not None else None,
             "ci_jobs_dir": str(ci_jobs_dir) if ci_jobs_dir is not None else None,
@@ -695,6 +727,9 @@ def run_master_reliability_digest(
             ),
             "guard_samples_total": int(len(guard_samples)),
             "guard_non_success_total": int(len(guard_non_success_runs)),
+            "guard_consecutive_non_success": int(guard_consecutive_non_success),
+            "guard_warning_sustained_runs": int(guard_warning_sustained_runs),
+            "guard_warning_triggered": 1 if guard_warning_triggered else 0,
             "issue_upsert_samples_total": int(len(issue_upsert_samples)),
             "upsert_artifacts_missing_total": int(upsert_artifacts_missing_total),
             "active_comment_suppressed_total_sum": int(active_comment_suppressed_total_sum),
@@ -721,7 +756,7 @@ def run_master_reliability_digest(
         "failed_criteria": failed_criteria,
         "decision": {
             "release_gate_warning_triggered": bool(release_gate_warning_triggered),
-            "guard_health_degraded": bool(len(guard_non_success_runs) > 0),
+            "guard_health_degraded": bool(guard_warning_triggered),
             "top_cause": top_cause,
             "top_cause_detail": top_cause_detail,
             "mttr_trend": str(mttr_summary.get("mttr_trend") or "insufficient_data"),
@@ -729,12 +764,12 @@ def run_master_reliability_digest(
             "latest_degraded_guard_run_url": str(latest_guard_non_success.get("run_url") or ""),
             "warning_level": (
                 "warning"
-                if release_gate_warning_triggered or len(guard_non_success_runs) > 0
+                if release_gate_warning_triggered or guard_warning_triggered
                 else "healthy"
             ),
             "recommended_action": (
                 "investigate_master_reliability_regression"
-                if release_gate_warning_triggered or len(guard_non_success_runs) > 0
+                if release_gate_warning_triggered or guard_warning_triggered
                 else "master_reliability_stable"
             ),
         },
@@ -778,6 +813,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guard-trend-runs", type=int, default=10)
     parser.add_argument("--release-gate-warning-seconds", type=int, default=540)
     parser.add_argument("--warning-sustained-runs", type=int, default=3)
+    parser.add_argument("--guard-warning-sustained-runs", type=int, default=2)
     parser.add_argument("--ci-runs-file")
     parser.add_argument("--ci-jobs-dir")
     parser.add_argument("--guard-runs-file")
@@ -805,6 +841,9 @@ def main(argv: list[str] | None = None) -> int:
     if int(args.warning_sustained_runs) <= 0:
         print("[master-reliability-digest] ERROR: --warning-sustained-runs must be > 0.", file=sys.stderr)
         return 2
+    if int(args.guard_warning_sustained_runs) <= 0:
+        print("[master-reliability-digest] ERROR: --guard-warning-sustained-runs must be > 0.", file=sys.stderr)
+        return 2
 
     try:
         report = run_master_reliability_digest(
@@ -821,6 +860,7 @@ def main(argv: list[str] | None = None) -> int:
             guard_trend_runs=int(args.guard_trend_runs),
             release_gate_warning_seconds=int(args.release_gate_warning_seconds),
             warning_sustained_runs=int(args.warning_sustained_runs),
+            guard_warning_sustained_runs=int(args.guard_warning_sustained_runs),
             fail_on_warning=bool(args.fail_on_warning),
             ci_runs_file=Path(str(args.ci_runs_file)).expanduser() if args.ci_runs_file else None,
             ci_jobs_dir=Path(str(args.ci_jobs_dir)).expanduser() if args.ci_jobs_dir else None,

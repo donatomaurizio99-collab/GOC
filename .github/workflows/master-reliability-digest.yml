@@ -29,6 +29,10 @@ on:
         description: "Consecutive over-threshold runs to flag runtime warning"
         required: false
         default: "3"
+      guard_warning_sustained_runs:
+        description: "Consecutive degraded guard-health runs required for digest warning"
+        required: false
+        default: "2"
       fail_on_warning:
         description: "Fail digest workflow when warning-level findings are present"
         required: false
@@ -76,6 +80,7 @@ jobs:
           GUARD_TREND_RUNS: ${{ github.event.inputs.guard_trend_runs || '10' }}
           RELEASE_GATE_WARNING_SECONDS: ${{ github.event.inputs.release_gate_warning_seconds || '540' }}
           WARNING_SUSTAINED_RUNS: ${{ github.event.inputs.warning_sustained_runs || '3' }}
+          GUARD_WARNING_SUSTAINED_RUNS: ${{ github.event.inputs.guard_warning_sustained_runs || '2' }}
           FAIL_ON_WARNING: ${{ github.event.inputs.fail_on_warning || 'false' }}
         run: |
           if ($env:FAIL_ON_WARNING -eq "true") {
@@ -87,6 +92,7 @@ jobs:
               -GuardTrendRuns "$env:GUARD_TREND_RUNS" `
               -ReleaseGateWarningSeconds "$env:RELEASE_GATE_WARNING_SECONDS" `
               -WarningSustainedRuns "$env:WARNING_SUSTAINED_RUNS" `
+              -GuardWarningSustainedRuns "$env:GUARD_WARNING_SUSTAINED_RUNS" `
               -OutputFile "artifacts\master-reliability-digest.json" `
               -MarkdownOutputFile "artifacts\master-reliability-digest.md" `
               -FailOnWarning
@@ -99,6 +105,7 @@ jobs:
               -GuardTrendRuns "$env:GUARD_TREND_RUNS" `
               -ReleaseGateWarningSeconds "$env:RELEASE_GATE_WARNING_SECONDS" `
               -WarningSustainedRuns "$env:WARNING_SUSTAINED_RUNS" `
+              -GuardWarningSustainedRuns "$env:GUARD_WARNING_SUSTAINED_RUNS" `
               -OutputFile "artifacts\master-reliability-digest.json" `
               -MarkdownOutputFile "artifacts\master-reliability-digest.md"
           }

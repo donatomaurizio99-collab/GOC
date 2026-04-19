@@ -13273,11 +13273,13 @@ def test_250_master_reliability_digest_workflow_wrapper_and_docs_wiring():
     assert "master-reliability-digest-warning" in workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in workflow
     assert "active_comment_cooldown" in workflow
+    assert "guard_warning_sustained_runs" in workflow
     assert "master-reliability-digest" in workflow
 
     assert "master-reliability-digest.py" in wrapper
     assert "--release-gate-warning-seconds" in wrapper
     assert "--warning-sustained-runs" in wrapper
+    assert "--guard-warning-sustained-runs" in wrapper
     assert "--guard-upsert-reports-dir" in wrapper
     assert "MarkdownOutputFile" in wrapper
 
@@ -13395,7 +13397,7 @@ def test_251_master_reliability_digest_computes_trends_from_fixtures():
                         "id": 9902,
                         "updated_at": "2026-04-18T02:40:00Z",
                         "status": "completed",
-                        "conclusion": "success",
+                        "conclusion": "failure",
                         "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9902",
                     },
                     {
@@ -13471,6 +13473,8 @@ def test_251_master_reliability_digest_computes_trends_from_fixtures():
         "540",
         "--warning-sustained-runs",
         "2",
+        "--guard-warning-sustained-runs",
+        "2",
         "--output-file",
         str(output_file.resolve()),
         "--markdown-output-file",
@@ -13487,7 +13491,10 @@ def test_251_master_reliability_digest_computes_trends_from_fixtures():
     assert payload["success"] is True
     assert payload["decision"]["release_gate_warning_triggered"] is True
     assert payload["metrics"]["release_gate_consecutive_over_threshold"] == 2
-    assert payload["metrics"]["guard_non_success_total"] == 1
+    assert payload["metrics"]["guard_non_success_total"] == 2
+    assert payload["metrics"]["guard_consecutive_non_success"] == 2
+    assert payload["metrics"]["guard_warning_triggered"] == 1
+    assert payload["decision"]["guard_health_degraded"] is True
     assert payload["metrics"]["active_comment_suppressed_total_sum"] == 3
     assert payload["metrics"]["upsert_artifacts_missing_total"] == 0
     assert payload["metrics"]["mttr_samples_total"] == 0
@@ -14036,6 +14043,7 @@ def test_260_master_workflow_wrapper_invocations_use_named_parameters():
         project_root / ".github" / "workflows" / "master-guard-workflow-health.yml",
         project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml",
         project_root / ".github" / "workflows" / "master-reliability-digest.yml",
+        project_root / ".github" / "workflows" / "master-ci-drift-status-report.yml",
         project_root / ".github" / "workflows" / "master-reliability-digest-guard.yml",
         project_root / ".github" / "workflows" / "master-guard-burnin-check.yml",
         project_root / ".github" / "workflows" / "master-production-readiness-gate.yml",
@@ -14112,3 +14120,310 @@ def test_262_ci_alert_issue_upsert_label_ensure_accepts_generic_422_when_label_e
     assert len(calls) == 2
     assert calls[0][0:4] == ["gh", "api", "repos/donatomaurizio99-collab/GOC/labels", "-X"]
     assert calls[1][0:3] == ["gh", "api", "repos/donatomaurizio99-collab/GOC/labels/ci-drift"]
+
+
+def test_263_master_reliability_digest_ignores_non_consecutive_guard_failures_for_warning():
+    workspace = _local_test_dir("pytest-master-reliability-digest-non-consecutive-guard-failures").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    ci_runs_file = workspace / "ci-runs.json"
+    ci_jobs_dir = workspace / "ci-jobs"
+    guard_runs_file = workspace / "guard-runs.json"
+    guard_upsert_dir = workspace / "guard-upsert"
+    output_file = workspace / "master-reliability-digest.json"
+    markdown_output_file = workspace / "master-reliability-digest.md"
+
+    ci_jobs_dir.mkdir(parents=True, exist_ok=True)
+    guard_upsert_dir.mkdir(parents=True, exist_ok=True)
+
+    ci_runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 7711,
+                        "updated_at": "2026-04-18T04:00:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/7711",
+                    },
+                    {
+                        "id": 7712,
+                        "updated_at": "2026-04-18T03:00:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/7712",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (ci_jobs_dir / "7711.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "started_at": "2026-04-18T04:00:00Z",
+                        "completed_at": "2026-04-18T04:07:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (ci_jobs_dir / "7712.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "name": "Release Gate (Windows)",
+                        "started_at": "2026-04-18T03:00:00Z",
+                        "completed_at": "2026-04-18T03:08:00Z",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    guard_runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 8811,
+                        "updated_at": "2026-04-18T03:50:00Z",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8811",
+                    },
+                    {
+                        "id": 8812,
+                        "updated_at": "2026-04-18T02:50:00Z",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8812",
+                    },
+                    {
+                        "id": 8813,
+                        "updated_at": "2026-04-18T01:50:00Z",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/8813",
+                    },
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "8811.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 0},
+                "decision": {"issue_action": "recovery_progress", "alert_triggered": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "8812.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 0},
+                "decision": {"issue_action": "commented", "alert_triggered": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (guard_upsert_dir / "8813.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"active_comment_suppressed_total": 0},
+                "decision": {"issue_action": "commented", "alert_triggered": True},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-reliability-digest.py"),
+        "--label",
+        "pytest-master-reliability-digest-non-consecutive-guard-failures",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--ci-runs-file",
+        str(ci_runs_file.resolve()),
+        "--ci-jobs-dir",
+        str(ci_jobs_dir.resolve()),
+        "--guard-runs-file",
+        str(guard_runs_file.resolve()),
+        "--guard-upsert-reports-dir",
+        str(guard_upsert_dir.resolve()),
+        "--trend-runs",
+        "2",
+        "--guard-trend-runs",
+        "3",
+        "--release-gate-warning-seconds",
+        "540",
+        "--warning-sustained-runs",
+        "2",
+        "--guard-warning-sustained-runs",
+        "2",
+        "--output-file",
+        str(output_file.resolve()),
+        "--markdown-output-file",
+        str(markdown_output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["warning_level"] == "healthy"
+    assert payload["decision"]["guard_health_degraded"] is False
+    assert payload["decision"]["top_cause"] == "none"
+    assert payload["metrics"]["guard_non_success_total"] == 2
+    assert payload["metrics"]["guard_consecutive_non_success"] == 0
+    assert payload["metrics"]["guard_warning_triggered"] == 0
+    assert payload["metrics"]["release_gate_warning_triggered"] == 0
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_264_master_ci_drift_status_report_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (project_root / ".github" / "workflows" / "master-ci-drift-status-report.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (project_root / "scripts" / "run-master-ci-drift-status-report.ps1").read_text(encoding="utf-8")
+    script = (project_root / "scripts" / "master-ci-drift-status-report.py").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master CI Drift Status Report" in workflow
+    assert 'cron: "40 6 * * *"' in workflow
+    assert ".\\scripts\\run-master-ci-drift-status-report.ps1" in workflow
+    assert "master-ci-drift-status-report.json" in workflow
+    assert "master-ci-drift-status-report.md" in workflow
+    assert "blocked_age_hours" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
+
+    assert "master-ci-drift-status-report.py" in wrapper
+    assert "--blocked-age-hours" in wrapper
+    assert "--per-page" in wrapper
+    assert "--issues-file" in wrapper
+
+    assert "BLOCKING_SIGNAL_IDS" in script
+    assert "RESIDUAL_SIGNAL_IDS" in script
+    assert "status_class" in script
+
+    assert "master-ci-drift-status-report.yml" in readme
+    assert "run-master-ci-drift-status-report.ps1" in readme
+
+
+def test_265_master_ci_drift_status_report_classifies_blocked_and_residual_from_fixtures():
+    workspace = _local_test_dir("pytest-master-ci-drift-status-report-fixtures").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    issues_file = workspace / "issues.json"
+    output_file = workspace / "master-ci-drift-status-report.json"
+    markdown_output_file = workspace / "master-ci-drift-status-report.md"
+
+    issues_file.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 2001,
+                    "title": "[CI Drift] master branch protection required checks drift",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/2001",
+                    "created_at": "2026-04-18T00:00:00Z",
+                    "updated_at": "2026-04-18T04:00:00Z",
+                    "labels": [{"name": "ci-drift"}, {"name": "branch-protection"}],
+                    "body": (
+                        "<!-- ci-alert-key:master-branch-protection-drift:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                },
+                {
+                    "number": 2002,
+                    "title": "[CI Drift] master reliability digest warning detected",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/2002",
+                    "created_at": "2026-04-18T05:00:00Z",
+                    "updated_at": "2026-04-18T05:30:00Z",
+                    "labels": [{"name": "ci-drift"}, {"name": "reliability-digest"}],
+                    "body": (
+                        "<!-- ci-alert-key:master-reliability-digest-warning:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                },
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-ci-drift-status-report.py"),
+        "--label",
+        "pytest-master-ci-drift-status-report",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--blocked-age-hours",
+        "24",
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+        "--markdown-output-file",
+        str(markdown_output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["open_ci_drift_issues_total"] == 2
+    assert payload["metrics"]["blocked_issues_total"] == 1
+    assert payload["metrics"]["residual_issues_total"] == 1
+    assert payload["decision"]["attention_required"] is True
+    assert payload["decision"]["recommended_action"] == "ci_drift_blocked_incident_review_required"
+    assert output_file.exists()
+    assert markdown_output_file.exists()
+
+    issues = payload["issues"]
+    assert issues[0]["signal_id"] == "master-branch-protection-drift"
+    assert issues[0]["status_class"] == "blocked"
+    assert issues[1]["signal_id"] == "master-reliability-digest-warning"
+    assert issues[1]["status_class"] == "residual"
+
+    markdown = markdown_output_file.read_text(encoding="utf-8")
+    assert "Master CI Drift Status Report" in markdown
+    assert "`blocked`" in markdown
+    assert "`residual`" in markdown
+
+    shutil.rmtree(workspace, ignore_errors=True)
