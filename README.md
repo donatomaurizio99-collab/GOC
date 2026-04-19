@@ -954,6 +954,7 @@ Nightly guard workflows now execute `run-master-guard-chain-selftest.ps1` to val
 Weekly [master-watchdog-rehearsal-drill.yml](.github/workflows/master-watchdog-rehearsal-drill.yml) runs an injected-failure drill for the watchdog chain and verifies guard-health alert upsert behavior in dry-run mode.
 Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watchdog-rehearsal-slo-guard.yml) verifies the rehearsal drill SLO (>=1 successful run in 8 days) and raises a deduped `ci-drift` issue with explicit `stale`/`failed` reason plus latest run reference.
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
+Nightly [master-release-gate-runtime-slo-guard.yml](.github/workflows/master-release-gate-runtime-slo-guard.yml) enforces a hard runtime guard (default: 3 consecutive runs >= 600s) and raises a deduped `ci-drift` blocking issue when breached.
 Nightly drift/warning workflows now upsert deduplicated GitHub issues (labels: `ci-drift` + signal label), enforce the invariant of at most one open issue per signal, reset recovery streak on active alerts, and auto-close recovered issues after 2 healthy nightly runs (configurable threshold). Active-alert comments are cooldown-throttled for unchanged failure states (default every 3 runs), while issue bodies continue to refresh each run. The runtime alert-age SLO escalation issue now carries a mandatory parent runtime-warning reference in its issue body and closes immediately when parent-coupled escalation criteria are no longer met.
 Weekly [master-reliability-digest.yml](.github/workflows/master-reliability-digest.yml) publishes a trend digest (Release Gate runtime, guard degradations, active-comment suppression totals) as artifact + workflow summary for proactive reliability tracking and feeds the deduped warning signal `master-reliability-digest-warning`.
 Reliability-digest guard degradation warnings are now based on consecutive head failures (default: 2) instead of any historical non-success sample in the trend window to reduce alert noise after successful recovery.
@@ -987,6 +988,9 @@ Nightly guard-workflow health watchdog:
 
 Nightly release-gate runtime early warning workflow:
 [master-release-gate-runtime-early-warning.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-release-gate-runtime-early-warning.yml)
+
+Nightly release-gate runtime SLO guard workflow:
+[master-release-gate-runtime-slo-guard.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-release-gate-runtime-slo-guard.yml)
 
 Weekly master reliability digest workflow:
 [master-reliability-digest.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-reliability-digest.yml)
@@ -1059,6 +1063,13 @@ Local release-gate runtime early warning command:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-release-gate-runtime-early-warning.ps1 -ThresholdSeconds 540 -SustainedRuns 3
+```
+
+Local release-gate runtime SLO guard command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-release-gate-runtime-slo-guard.ps1 -ThresholdSeconds 600 -SustainedRuns 3
 ```
 
 Local master reliability digest command:

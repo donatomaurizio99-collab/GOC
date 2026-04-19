@@ -1,0 +1,140 @@
+name: Master Release Gate Runtime SLO Guard
+
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Hours of master CI history to inspect"
+        required: false
+        default: "72"
+      per_page:
+        description: "Maximum completed CI runs to fetch"
+        required: false
+        default: "80"
+      threshold_seconds:
+        description: "Hard SLO guard threshold for Release Gate runtime in seconds"
+        required: false
+        default: "600"
+      sustained_runs:
+        description: "Consecutive runs over threshold needed to breach guard"
+        required: false
+        default: "3"
+      allow_breach:
+        description: "Do not fail workflow when runtime SLO guard is breached"
+        required: false
+        default: "false"
+      recovery_threshold:
+        description: "Healthy nightly runs required before auto-closing an open runtime SLO guard issue"
+        required: false
+        default: "2"
+      active_comment_cooldown:
+        description: "Comment cooldown for unchanged active alerts (comment every N runs)"
+        required: false
+        default: "3"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  runtime-slo-guard:
+    name: Release Gate Runtime SLO Guard
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Run release-gate runtime SLO guard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '72' }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '80' }}
+          THRESHOLD_SECONDS: ${{ github.event.inputs.threshold_seconds || '600' }}
+          SUSTAINED_RUNS: ${{ github.event.inputs.sustained_runs || '3' }}
+          ALLOW_BREACH: ${{ github.event.inputs.allow_breach || 'false' }}
+        run: |
+          if ($env:ALLOW_BREACH -eq "true") {
+            .\scripts\run-master-release-gate-runtime-slo-guard.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -ThresholdSeconds "$env:THRESHOLD_SECONDS" `
+              -SustainedRuns "$env:SUSTAINED_RUNS" `
+              -OutputFile "artifacts\release-gate-runtime-slo-guard.json" `
+              -AllowBreach
+          } else {
+            .\scripts\run-master-release-gate-runtime-slo-guard.ps1 `
+              -Repo "$env:REPO_FULL" `
+              -LookbackHours "$env:LOOKBACK_HOURS" `
+              -PerPage "$env:PER_PAGE" `
+              -ThresholdSeconds "$env:THRESHOLD_SECONDS" `
+              -SustainedRuns "$env:SUSTAINED_RUNS" `
+              -OutputFile "artifacts\release-gate-runtime-slo-guard.json"
+          }
+
+      - name: Upsert runtime SLO guard issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '2' }}
+          ACTIVE_COMMENT_COOLDOWN: ${{ github.event.inputs.active_comment_cooldown || '3' }}
+        run: |
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "release-gate-runtime-slo-guard" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\release-gate-runtime-slo-guard.json" `
+            -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -ActiveCommentCooldown "$env:ACTIVE_COMMENT_COOLDOWN" `
+            -OutputFile "artifacts\release-gate-runtime-slo-guard-issue-upsert.json"
+
+      - name: Run runtime SLO guard chain selftest
+        if: always()
+        shell: pwsh
+        run: |
+          .\scripts\run-master-guard-chain-selftest.ps1 `
+            -SignalId "release-gate-runtime-slo-guard" `
+            -GuardReportFile "artifacts\release-gate-runtime-slo-guard.json" `
+            -IssueUpsertReportFile "artifacts\release-gate-runtime-slo-guard-issue-upsert.json" `
+            -OutputFile "artifacts\release-gate-runtime-slo-guard-selftest.json"
+
+      - name: Upload runtime SLO guard report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gate-runtime-slo-guard
+          path: artifacts/release-gate-runtime-slo-guard.json
+          if-no-files-found: error
+
+      - name: Upload runtime SLO guard issue upsert report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gate-runtime-slo-guard-issue-upsert
+          path: artifacts/release-gate-runtime-slo-guard-issue-upsert.json
+          if-no-files-found: error
+
+      - name: Upload runtime SLO guard chain selftest report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gate-runtime-slo-guard-selftest
+          path: artifacts/release-gate-runtime-slo-guard-selftest.json
+          if-no-files-found: error

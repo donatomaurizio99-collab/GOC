@@ -34,6 +34,15 @@ DEFAULT_GUARD_WORKFLOW_SPECS = [
         ],
     },
     {
+        "workflow_file": "master-release-gate-runtime-slo-guard.yml",
+        "workflow_name": "Master Release Gate Runtime SLO Guard",
+        "required_artifacts": [
+            "release-gate-runtime-slo-guard",
+            "release-gate-runtime-slo-guard-issue-upsert",
+            "release-gate-runtime-slo-guard-selftest",
+        ],
+    },
+    {
         "workflow_file": "master-guard-workflow-health.yml",
         "workflow_name": "Master Guard Workflow Health",
         "required_artifacts": [

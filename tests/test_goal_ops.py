@@ -11470,6 +11470,9 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     runtime_workflow = (
         project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml"
     ).read_text(encoding="utf-8")
+    runtime_slo_guard_workflow = (
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-slo-guard.yml"
+    ).read_text(encoding="utf-8")
     rehearsal_slo_workflow = (
         project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml"
     ).read_text(encoding="utf-8")
@@ -11492,6 +11495,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "master-branch-protection-drift" in wrapper
     assert "master-guard-workflow-health" in wrapper
     assert "release-gate-runtime-early-warning" in wrapper
+    assert "release-gate-runtime-slo-guard" in wrapper
     assert "release-gate-runtime-alert-age-slo" in wrapper
     assert "master-watchdog-rehearsal-drill-slo" in wrapper
     assert "master-reliability-digest-warning" in wrapper
@@ -11514,6 +11518,13 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "recovery_threshold" in runtime_workflow
     assert "alert_age_hours" in runtime_workflow
 
+    assert "issues: write" in runtime_slo_guard_workflow
+    assert ".\\scripts\\run-master-release-gate-runtime-slo-guard.ps1" in runtime_slo_guard_workflow
+    assert "release-gate-runtime-slo-guard" in runtime_slo_guard_workflow
+    assert "release-gate-runtime-slo-guard-issue-upsert.json" in runtime_slo_guard_workflow
+    assert "release-gate-runtime-slo-guard-selftest.json" in runtime_slo_guard_workflow
+    assert "active_comment_cooldown" in runtime_slo_guard_workflow
+
     assert "issues: write" in rehearsal_slo_workflow
     assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in rehearsal_slo_workflow
     assert "master-watchdog-rehearsal-drill-slo" in rehearsal_slo_workflow
@@ -11534,6 +11545,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
 
     assert "run-ci-alert-issue-upsert.ps1" in readme
     assert "labels: `ci-drift` + signal label" in readme
+    assert "master-release-gate-runtime-slo-guard.yml" in readme
     assert "[master-guard-workflow-health.yml]" in readme
     assert "guard-workflow health watchdog" in readme
     assert "Immediate Actions" in readme
@@ -12381,6 +12393,14 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             "updated_at": "2026-04-18T03:20:00Z",
                         }
                     ],
+                    "Master Release Gate Runtime SLO Guard": [
+                        {
+                            "id": 9108,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:25:00Z",
+                        }
+                    ],
                     "Master Guard Workflow Health": [
                         {
                             "id": 9104,
@@ -12438,6 +12458,13 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
                             {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
                         ]
                     },
+                    "9108": {
+                        "artifacts": [
+                            {"name": "release-gate-runtime-slo-guard", "expired": False},
+                            {"name": "release-gate-runtime-slo-guard-issue-upsert", "expired": False},
+                            {"name": "release-gate-runtime-slo-guard-selftest", "expired": False},
+                        ]
+                    },
                     "9105": {
                         "artifacts": [
                             {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
@@ -12491,7 +12518,7 @@ def test_240_master_guard_workflow_health_check_fails_on_degraded_guard_workflow
     payload_text = completed.stderr.split(marker, 1)[1].strip()
     payload = json.loads(payload_text)
     assert payload["success"] is False
-    assert payload["metrics"]["guard_workflows_total"] == 7
+    assert payload["metrics"]["guard_workflows_total"] == 8
     assert payload["metrics"]["guard_workflows_degraded_total"] == 2
     assert payload["metrics"]["guard_workflows_missing_required_artifacts_total"] == 1
     assert payload["metrics"]["guard_workflows_non_success_total"] == 1
@@ -12763,6 +12790,14 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             "updated_at": "2026-04-18T03:20:00Z",
                         }
                     ],
+                    "Master Release Gate Runtime SLO Guard": [
+                        {
+                            "id": 9308,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-18T03:25:00Z",
+                        }
+                    ],
                     "Master Guard Workflow Health": [
                         {
                             "id": 9304,
@@ -12821,6 +12856,13 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
                             {"name": "master-guard-workflow-health-issue-upsert", "expired": False},
                         ]
                     },
+                    "9308": {
+                        "artifacts": [
+                            {"name": "release-gate-runtime-slo-guard", "expired": False},
+                            {"name": "release-gate-runtime-slo-guard-issue-upsert", "expired": False},
+                            {"name": "release-gate-runtime-slo-guard-selftest", "expired": False},
+                        ]
+                    },
                     "9305": {
                         "artifacts": [
                             {"name": "master-watchdog-rehearsal-slo-guard", "expired": False},
@@ -12862,7 +12904,8 @@ def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_f
         "--contract-workflow-files",
         (
             "master-required-checks-24h.yml,master-branch-protection-drift-guard.yml,"
-            "master-release-gate-runtime-early-warning.yml,master-guard-workflow-health.yml,"
+            "master-release-gate-runtime-early-warning.yml,master-release-gate-runtime-slo-guard.yml,"
+            "master-guard-workflow-health.yml,"
             "master-watchdog-rehearsal-slo-guard.yml,master-reliability-digest-guard.yml,"
             "master-guard-burnin-check.yml,"
             "master-extra-guard-contract-probe.yml"
@@ -14040,6 +14083,7 @@ def test_260_master_workflow_wrapper_invocations_use_named_parameters():
         project_root / ".github" / "workflows" / "master-required-checks-24h.yml",
         project_root / ".github" / "workflows" / "master-branch-protection-drift-guard.yml",
         project_root / ".github" / "workflows" / "master-release-gate-runtime-early-warning.yml",
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-slo-guard.yml",
         project_root / ".github" / "workflows" / "master-guard-workflow-health.yml",
         project_root / ".github" / "workflows" / "master-watchdog-rehearsal-slo-guard.yml",
         project_root / ".github" / "workflows" / "master-reliability-digest.yml",
@@ -14444,3 +14488,33 @@ def test_266_workflows_use_node24_ready_artifact_action_major():
 
     assert modern_artifact_refs > 0
     assert legacy_artifact_refs == []
+
+
+def test_267_master_release_gate_runtime_slo_guard_workflow_wrapper_and_docs_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        project_root / ".github" / "workflows" / "master-release-gate-runtime-slo-guard.yml"
+    ).read_text(encoding="utf-8")
+    wrapper = (project_root / "scripts" / "run-master-release-gate-runtime-slo-guard.ps1").read_text(
+        encoding="utf-8"
+    )
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Release Gate Runtime SLO Guard" in workflow
+    assert 'cron: "20 3 * * *"' in workflow
+    assert ".\\scripts\\run-master-release-gate-runtime-slo-guard.ps1" in workflow
+    assert "release-gate-runtime-slo-guard.json" in workflow
+    assert "release-gate-runtime-slo-guard-issue-upsert.json" in workflow
+    assert "release-gate-runtime-slo-guard-selftest.json" in workflow
+    assert "release-gate-runtime-slo-guard" in workflow
+    assert "active_comment_cooldown" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
+
+    assert "release-gate-runtime-early-warning.py" in wrapper
+    assert "--threshold-seconds" in wrapper
+    assert "--sustained-runs" in wrapper
+    assert "--fail-on-warning" in wrapper
+    assert "AllowBreach" in wrapper
+
+    assert "master-release-gate-runtime-slo-guard.yml" in readme
+    assert "run-master-release-gate-runtime-slo-guard.ps1" in readme
