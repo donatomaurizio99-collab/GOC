@@ -167,6 +167,26 @@ def _parse_float(value: Any) -> float | None:
         return None
 
 
+def _resolve_mttr_from_drill_report(report: dict[str, Any]) -> tuple[float | None, float | None, str | None]:
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    mttr_seconds = _parse_float(metrics.get("alert_chain_mttr_seconds"))
+    mttr_value_source: str | None = None
+    if mttr_seconds is not None and mttr_seconds >= 0.0:
+        mttr_value_source = "metrics.alert_chain_mttr_seconds"
+    else:
+        mttr_seconds = None
+
+    # Backward-compatibility for older rehearsal drill artifacts.
+    if mttr_seconds is None:
+        duration_ms = _parse_float(report.get("duration_ms"))
+        if duration_ms is not None and duration_ms >= 0.0:
+            mttr_seconds = float(duration_ms) / 1000.0
+            mttr_value_source = "duration_ms_fallback"
+
+    reported_target = _parse_float(metrics.get("mttr_target_seconds"))
+    return mttr_seconds, reported_target, mttr_value_source
+
+
 def _load_drill_report_from_artifact(
     *,
     repo: str,
@@ -319,6 +339,7 @@ def run_watchdog_rehearsal_slo_guard(
     mttr_report_load_error: str | None = None
     mttr_report: dict[str, Any] | None = None
     mttr_seconds: float | None = None
+    mttr_value_source: str | None = None
     mttr_target_effective_seconds: float = float(mttr_target_seconds)
     mttr_evaluated = False
     mttr_breach = False
@@ -371,16 +392,14 @@ def run_watchdog_rehearsal_slo_guard(
             mttr_report_loaded = False
 
         if mttr_report_loaded and mttr_report is not None:
-            mttr_metrics = mttr_report.get("metrics") if isinstance(mttr_report.get("metrics"), dict) else {}
-            mttr_seconds = _parse_float(mttr_metrics.get("alert_chain_mttr_seconds"))
-            reported_target = _parse_float(mttr_metrics.get("mttr_target_seconds"))
+            mttr_seconds, reported_target, mttr_value_source = _resolve_mttr_from_drill_report(mttr_report)
             if reported_target is not None and reported_target > 0:
                 mttr_target_effective_seconds = float(reported_target)
             if mttr_seconds is None:
                 mttr_report_loaded = False
                 mttr_report_source = f"{mttr_report_source}-invalid"
                 mttr_report_load_error = (
-                    "Drill report missing numeric metrics.alert_chain_mttr_seconds."
+                    "Drill report missing numeric metrics.alert_chain_mttr_seconds and duration_ms fallback."
                 )
 
         if not mttr_report_loaded:
@@ -476,6 +495,7 @@ def run_watchdog_rehearsal_slo_guard(
             "mttr_breach": bool(mttr_breach),
             "mttr_report_loaded": bool(mttr_report_loaded),
             "mttr_report_unavailable": bool(mttr_report_unavailable),
+            "mttr_value_source": mttr_value_source,
             "mttr_report_source": mttr_report_source,
             "mttr_report_load_error": mttr_report_load_error,
             "criteria_failed": int(len(failed_criteria)),
@@ -493,6 +513,7 @@ def run_watchdog_rehearsal_slo_guard(
             "report_file": str(drill_report_file) if drill_report_file is not None else None,
             "load_error": mttr_report_load_error,
             "mttr_seconds": float(mttr_seconds) if mttr_seconds is not None else None,
+            "mttr_value_source": mttr_value_source,
             "mttr_target_seconds": float(mttr_target_effective_seconds),
         },
         "decision": {

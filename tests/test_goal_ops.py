@@ -13421,6 +13421,89 @@ def test_248c_master_watchdog_rehearsal_slo_guard_detects_mttr_breach_from_drill
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_248d_master_watchdog_rehearsal_slo_guard_uses_duration_ms_fallback_for_legacy_drill_report():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-slo-guard-duration-ms-fallback").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    drill_report_file = workspace / "master-guard-workflow-health-rehearsal-drill.json"
+
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 771005,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "updated_at": "2026-04-18T11:20:00Z",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771005",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    drill_report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-master-watchdog-rehearsal-drill-legacy",
+                "duration_ms": 412500,
+                "metrics": {
+                    "mttr_target_seconds": 300.0,
+                },
+                "generated_at_utc": "2026-04-18T11:21:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-slo-guard.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-slo-guard-duration-ms-fallback",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Watchdog Rehearsal Drill",
+        "--max-age-hours",
+        "192",
+        "--mttr-target-seconds",
+        "300",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--drill-report-file",
+        str(drill_report_file.resolve()),
+        "--now-utc",
+        "2026-04-18T12:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master watchdog rehearsal SLO guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["watchdog_rehearsal_slo_breached"] is True
+    assert payload["decision"]["breach_reason"] == "mttr"
+    assert payload["metrics"]["mttr_seconds"] == 412.5
+    assert payload["metrics"]["mttr_report_unavailable"] is False
+    assert payload["metrics"]["mttr_value_source"] == "duration_ms_fallback"
+    assert payload["drill_report"]["source"] == "file"
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
 def test_249_master_guard_chain_selftest_verifies_signal_chain():
     workspace = _local_test_dir("pytest-master-guard-chain-selftest").resolve()
     project_root = Path(__file__).resolve().parents[1]
@@ -14327,6 +14410,113 @@ def test_257b_master_guard_burnin_check_reports_hard_exit_criteria_and_window_tr
     assert payload["burnin_window"]["trend"]["available"] is True
     assert payload["burnin_window"]["trend"]["breach_total_delta"] == 2
     assert float(payload["burnin_window"]["current_window"]["mttr_percentiles_seconds"]["p95"]) > 300.0
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_257c_master_guard_burnin_check_ignores_non_success_missing_artifacts_in_hard_exit_count():
+    workspace = _local_test_dir("pytest-master-guard-burnin-check-ignore-failed-missing").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_file = workspace / "fixtures.json"
+    workflow_specs_file = workspace / "workflow-specs.json"
+    output_file = workspace / "master-guard-burnin-check.json"
+
+    workflow_specs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "workflow_name": "Master Watchdog Rehearsal SLO Guard",
+                    "workflow_file": "master-watchdog-rehearsal-slo-guard.yml",
+                    "required_artifacts": ["master-watchdog-rehearsal-slo-guard"],
+                    "required_successful_runs": 1,
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    fixtures_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": {
+                    "Master Watchdog Rehearsal SLO Guard": [
+                        {
+                            "id": 992001,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-28T08:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/992001",
+                        },
+                        {
+                            "id": 992000,
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "updated_at": "2026-04-27T08:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/992000",
+                        },
+                    ]
+                },
+                "run_artifacts": {
+                    "992001": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                    "992000": {"artifacts": []},
+                },
+                "run_reports": {
+                    "992001": {
+                        "label": "pytest-watchdog-slo-run-992001",
+                        "metrics": {"mttr_seconds": 120.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": False, "breach_reason": "none"},
+                    }
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-burnin-check.py"),
+        "--label",
+        "pytest-master-guard-burnin-ignore-failed-missing",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--fixtures-file",
+        str(fixtures_file.resolve()),
+        "--workflow-specs-file",
+        str(workflow_specs_file.resolve()),
+        "--required-successful-runs",
+        "1",
+        "--burnin-window-days",
+        "14",
+        "--mttr-target-seconds",
+        "300",
+        "--watchdog-slo-workflow-name",
+        "Master Watchdog Rehearsal SLO Guard",
+        "--watchdog-slo-artifact-name",
+        "master-watchdog-rehearsal-slo-guard",
+        "--watchdog-slo-report-filename",
+        "master-watchdog-rehearsal-slo-guard.json",
+        "--now-utc",
+        "2026-04-29T00:00:00Z",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["hard_exit_criteria_met"] is True
+    assert payload["burnin_window"]["current_window"]["missing_artifacts"]["total"] == 0
+    assert payload["burnin_window"]["current_window"]["missing_artifacts"]["non_success_runs"]["total"] == 1
 
     shutil.rmtree(workspace, ignore_errors=True)
 

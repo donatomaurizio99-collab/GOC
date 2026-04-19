@@ -528,6 +528,7 @@ def _collect_burnin_window_stats(
     mttr_samples: list[float] = []
     breach_counts = {reason: 0 for reason in BURNIN_BREACH_REASONS}
     missing_artifact_items: list[dict[str, Any]] = []
+    missing_artifact_items_non_success_runs: list[dict[str, Any]] = []
     report_load_errors: list[dict[str, Any]] = []
 
     for spec in workflow_specs:
@@ -546,6 +547,9 @@ def _collect_burnin_window_stats(
             runs_in_window_total += 1
             run_id = int(run.get("id") or 0)
             run_url = _resolve_run_url(repo=repo, run=run)
+            run_status = str(run.get("status") or "")
+            run_conclusion = str(run.get("conclusion") or "")
+            run_success = bool(run_status == "completed" and run_conclusion == "success")
             available_artifacts: list[str] = []
             if run_id > 0:
                 run_artifacts = load_artifacts_for_run(run_id)
@@ -557,15 +561,19 @@ def _collect_burnin_window_stats(
                 if artifact_name not in available_artifacts
             ]
             for artifact_name in missing_required_artifacts:
-                missing_artifact_items.append(
-                    {
-                        "workflow_name": workflow_name,
-                        "workflow_file": workflow_file,
-                        "run_id": run_id if run_id > 0 else None,
-                        "run_url": run_url or None,
-                        "artifact_name": artifact_name,
-                    }
-                )
+                missing_item = {
+                    "workflow_name": workflow_name,
+                    "workflow_file": workflow_file,
+                    "run_id": run_id if run_id > 0 else None,
+                    "run_url": run_url or None,
+                    "run_status": run_status,
+                    "run_conclusion": run_conclusion,
+                    "artifact_name": artifact_name,
+                }
+                if run_success:
+                    missing_artifact_items.append(missing_item)
+                else:
+                    missing_artifact_items_non_success_runs.append(missing_item)
 
             if workflow_name != watchdog_slo_workflow_name or run_id <= 0:
                 continue
@@ -608,25 +616,30 @@ def _collect_burnin_window_stats(
             if mttr_seconds is not None and mttr_seconds >= 0.0:
                 mttr_samples.append(float(mttr_seconds))
 
-    deduped_missing_items: list[dict[str, Any]] = []
-    seen_missing: set[tuple[str, int | None, str]] = set()
-    for item in sorted(
-        missing_artifact_items,
-        key=lambda entry: (
-            str(entry.get("workflow_name") or ""),
-            int(entry.get("run_id") or 0),
-            str(entry.get("artifact_name") or ""),
-        ),
-    ):
-        key = (
-            str(item.get("workflow_name") or ""),
-            int(item.get("run_id") or 0) if item.get("run_id") is not None else None,
-            str(item.get("artifact_name") or ""),
-        )
-        if key in seen_missing:
-            continue
-        seen_missing.add(key)
-        deduped_missing_items.append(item)
+    def dedupe_missing_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped_items: list[dict[str, Any]] = []
+        seen_missing: set[tuple[str, int | None, str]] = set()
+        for item in sorted(
+            items,
+            key=lambda entry: (
+                str(entry.get("workflow_name") or ""),
+                int(entry.get("run_id") or 0),
+                str(entry.get("artifact_name") or ""),
+            ),
+        ):
+            key = (
+                str(item.get("workflow_name") or ""),
+                int(item.get("run_id") or 0) if item.get("run_id") is not None else None,
+                str(item.get("artifact_name") or ""),
+            )
+            if key in seen_missing:
+                continue
+            seen_missing.add(key)
+            deduped_items.append(item)
+        return deduped_items
+
+    deduped_missing_items = dedupe_missing_items(missing_artifact_items)
+    deduped_missing_items_non_success_runs = dedupe_missing_items(missing_artifact_items_non_success_runs)
 
     breach_total = int(sum(int(breach_counts[reason]) for reason in BURNIN_BREACH_REASONS))
     percentiles = _percentile_snapshot(mttr_samples)
@@ -646,6 +659,10 @@ def _collect_burnin_window_stats(
         "missing_artifacts": {
             "total": int(len(deduped_missing_items)),
             "items": deduped_missing_items,
+            "non_success_runs": {
+                "total": int(len(deduped_missing_items_non_success_runs)),
+                "items": deduped_missing_items_non_success_runs,
+            },
         },
         "report_load_errors_total": int(len(report_load_errors)),
         "report_load_errors": report_load_errors,
