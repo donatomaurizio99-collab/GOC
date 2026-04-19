@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,8 @@ from typing import Any
 
 
 INJECTED_DEGRADED_WORKFLOW_NAME = "Master Branch Protection Drift Guard"
+DEFAULT_MTTR_TARGET_SECONDS = 300.0
+RUN_ID_PATTERN = re.compile(r"/actions/runs/(?P<run_id>\d+)")
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -20,6 +23,110 @@ def _expect(condition: bool, message: str) -> None:
 
 def _utc_now_text() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _parse_run_id_from_url(url: str | None) -> int:
+    text = str(url or "").strip()
+    if not text:
+        return 0
+    match = RUN_ID_PATTERN.search(text)
+    if match is None:
+        return 0
+    try:
+        return int(match.group("run_id") or 0)
+    except ValueError:
+        return 0
+
+
+def _resolve_run_reference(*, repo: str, run_id: Any, run_url: str | None) -> dict[str, Any]:
+    normalized_url = str(run_url or "").strip()
+    resolved_run_id = int(run_id or 0)
+    if resolved_run_id <= 0 and normalized_url:
+        resolved_run_id = _parse_run_id_from_url(normalized_url)
+    if resolved_run_id > 0 and not normalized_url:
+        normalized_url = f"https://github.com/{repo}/actions/runs/{resolved_run_id}"
+    return {
+        "run_id": int(resolved_run_id) if resolved_run_id > 0 else None,
+        "url": normalized_url if normalized_url else None,
+    }
+
+
+def _format_run_reference(run_ref: dict[str, Any] | None) -> str:
+    if not isinstance(run_ref, dict):
+        return "none"
+    run_id = int(run_ref.get("run_id") or 0)
+    run_url = str(run_ref.get("url") or "").strip()
+    if run_id > 0 and run_url:
+        return f"[#{run_id}]({run_url})"
+    if run_id > 0:
+        return f"#{run_id}"
+    if run_url:
+        return run_url
+    return "none"
+
+
+def _build_markdown_summary(*, report: dict[str, Any]) -> str:
+    decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    config = report.get("config") if isinstance(report.get("config"), dict) else {}
+    run_links = report.get("run_links") if isinstance(report.get("run_links"), dict) else {}
+    degraded_workflow = report.get("degraded_workflow") if isinstance(report.get("degraded_workflow"), dict) else {}
+
+    degraded_reasons = (
+        degraded_workflow.get("degraded_reasons") if isinstance(degraded_workflow.get("degraded_reasons"), list) else []
+    )
+    missing_artifacts = (
+        degraded_workflow.get("missing_required_artifacts")
+        if isinstance(degraded_workflow.get("missing_required_artifacts"), list)
+        else []
+    )
+
+    lines = [
+        "# Master Watchdog Rehearsal Drill",
+        "",
+        f"- Generated at (UTC): `{report.get('generated_at_utc') or ''}`",
+        f"- Injected failure detected: {'yes' if bool(decision.get('injected_failure_detected')) else 'no'}",
+        f"- Alert chain verified: {'yes' if bool(decision.get('alert_chain_verified')) else 'no'}",
+        f"- Recommended action: `{decision.get('recommended_action') or 'watchdog_rehearsal_chain_verified'}`",
+        "",
+        "## Alert-Chain MTTR",
+        (
+            f"- Measured MTTR: `{float(metrics.get('alert_chain_mttr_seconds') or 0.0):.3f}s`"
+            if metrics.get("alert_chain_mttr_seconds") is not None
+            else "- Measured MTTR: `unknown`"
+        ),
+        f"- MTTR target: `{float(metrics.get('mttr_target_seconds') or 0.0):.3f}s`",
+        f"- MTTR target breached: {'yes' if bool(decision.get('mttr_target_breached')) else 'no'}",
+        "",
+        "## Run Links",
+        f"- Rehearsal drill run: {_format_run_reference(run_links.get('drill_run') if isinstance(run_links, dict) else None)}",
+        (
+            "- Injected degraded workflow latest run: "
+            f"{_format_run_reference(run_links.get('injected_degraded_workflow_latest_run') if isinstance(run_links, dict) else None)}"
+        ),
+        "",
+        "## Injected Degraded Workflow Diagnostics",
+        f"- Workflow: `{degraded_workflow.get('workflow_name') or INJECTED_DEGRADED_WORKFLOW_NAME}`",
+        (
+            "- Reasons: "
+            + ", ".join([str(item) for item in degraded_reasons if str(item).strip()])
+            if degraded_reasons
+            else "- Reasons: none"
+        ),
+        (
+            "- Missing required artifacts: "
+            + ", ".join([f"`{str(item)}`" for item in missing_artifacts if str(item).strip()])
+            if missing_artifacts
+            else "- Missing required artifacts: none"
+        ),
+        "",
+        "## Artifacts",
+        f"- Guard-health check report: `{config.get('check_report_file') or ''}`",
+        f"- Issue-upsert report: `{config.get('issue_upsert_report_file') or ''}`",
+        f"- Drill JSON report: `{config.get('output_file') or ''}`",
+        f"- Drill markdown summary: `{config.get('markdown_output_file') or ''}`",
+    ]
+    return "\n".join(lines).strip() + "\n"
 
 
 def _load_json_file(path: Path) -> dict[str, Any]:
@@ -128,16 +235,20 @@ def run_rehearsal_drill(
     repo: str,
     branch: str,
     run_url: str | None,
+    mttr_target_seconds: float,
     check_report_file: Path,
     issue_upsert_report_file: Path,
     output_file: Path,
+    markdown_output_file: Path,
 ) -> dict[str, Any]:
+    _expect(float(mttr_target_seconds) > 0.0, "mttr_target_seconds must be > 0.")
     started = time.perf_counter()
     project_root = Path(__file__).resolve().parents[1]
 
     check_report_file.parent.mkdir(parents=True, exist_ok=True)
     issue_upsert_report_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    markdown_output_file.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="master-watchdog-rehearsal-drill-") as temp_root_text:
         temp_root = Path(temp_root_text)
@@ -178,6 +289,9 @@ def run_rehearsal_drill(
         check_degraded_names = (
             check_report.get("degraded_workflow_names") if isinstance(check_report.get("degraded_workflow_names"), list) else []
         )
+        check_degraded_workflows = (
+            check_report.get("degraded_workflows") if isinstance(check_report.get("degraded_workflows"), list) else []
+        )
         check_is_degraded = bool(check_decision.get("guard_workflow_health_degraded"))
         _expect(check_is_degraded, "Injected failure drill expected guard workflow health degradation signal.")
         _expect(
@@ -187,6 +301,33 @@ def run_rehearsal_drill(
         _expect(
             int(check_metrics.get("guard_workflows_degraded_total") or 0) >= 1,
             "Injected failure drill expected at least one degraded guard workflow.",
+        )
+        injected_degraded_workflow = next(
+            (
+                item
+                for item in check_degraded_workflows
+                if isinstance(item, dict) and str(item.get("workflow_name") or "") == INJECTED_DEGRADED_WORKFLOW_NAME
+            ),
+            None,
+        )
+        _expect(
+            isinstance(injected_degraded_workflow, dict),
+            "Injected failure drill expected degraded workflow diagnostics for injected workflow.",
+        )
+        injected_latest_run = (
+            injected_degraded_workflow.get("latest_run")
+            if isinstance(injected_degraded_workflow.get("latest_run"), dict)
+            else {}
+        )
+        injected_missing_artifacts = (
+            injected_degraded_workflow.get("missing_required_artifacts")
+            if isinstance(injected_degraded_workflow.get("missing_required_artifacts"), list)
+            else []
+        )
+        injected_degraded_reasons = (
+            injected_degraded_workflow.get("degraded_reasons")
+            if isinstance(injected_degraded_workflow.get("degraded_reasons"), list)
+            else []
         )
 
         issue_upsert_command = [
@@ -237,6 +378,15 @@ def run_rehearsal_drill(
             "Injected failure drill expected per-workflow degraded diagnostics in issue body.",
         )
 
+    alert_chain_mttr_seconds = max(0.0, float(time.perf_counter() - started))
+    mttr_target_breached = bool(alert_chain_mttr_seconds > float(mttr_target_seconds))
+    drill_run_ref = _resolve_run_reference(repo=repo, run_id=0, run_url=run_url)
+    injected_degraded_run_ref = _resolve_run_reference(
+        repo=repo,
+        run_id=injected_latest_run.get("run_id") if isinstance(injected_latest_run, dict) else 0,
+        run_url=None,
+    )
+
     report = {
         "label": label,
         "success": True,
@@ -244,9 +394,11 @@ def run_rehearsal_drill(
             "repo": repo,
             "branch": branch,
             "run_url": run_url,
+            "mttr_target_seconds": float(mttr_target_seconds),
             "check_report_file": str(check_report_file),
             "issue_upsert_report_file": str(issue_upsert_report_file),
             "output_file": str(output_file),
+            "markdown_output_file": str(markdown_output_file),
             "dry_run_issue_upsert": True,
             "injected_degraded_workflow_name": INJECTED_DEGRADED_WORKFLOW_NAME,
         },
@@ -254,17 +406,37 @@ def run_rehearsal_drill(
             "guard_workflows_degraded_total": int(check_metrics.get("guard_workflows_degraded_total") or 0),
             "degraded_workflow_names_total": int(len(check_degraded_names)),
             "issue_actions_total": int(len(issue_actions)),
+            "alert_chain_mttr_seconds": round(float(alert_chain_mttr_seconds), 3),
+            "mttr_target_seconds": round(float(mttr_target_seconds), 3),
+        },
+        "run_links": {
+            "drill_run": drill_run_ref,
+            "injected_degraded_workflow_latest_run": injected_degraded_run_ref,
+        },
+        "degraded_workflow": {
+            "workflow_name": str(injected_degraded_workflow.get("workflow_name") or INJECTED_DEGRADED_WORKFLOW_NAME),
+            "degraded_reasons": [str(item) for item in injected_degraded_reasons if str(item).strip()],
+            "missing_required_artifacts": [str(item) for item in injected_missing_artifacts if str(item).strip()],
+            "latest_run": injected_degraded_run_ref,
         },
         "decision": {
             "injected_failure_detected": bool(check_is_degraded),
             "alert_chain_verified": bool(issue_upsert_alert_triggered and issue_upsert_action == "created"),
-            "recommended_action": "watchdog_rehearsal_chain_verified",
+            "mttr_target_breached": bool(mttr_target_breached),
+            "recommended_action": (
+                "watchdog_rehearsal_chain_verified_mttr_breached"
+                if mttr_target_breached
+                else "watchdog_rehearsal_chain_verified"
+            ),
         },
         "generated_at_utc": _utc_now_text(),
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
 
+    markdown_summary = _build_markdown_summary(report=report)
+    report["markdown_summary"] = markdown_summary
     output_file.write_text(json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2), encoding="utf-8")
+    markdown_output_file.write_text(markdown_summary, encoding="utf-8")
     return report
 
 
@@ -279,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default="donatomaurizio99-collab/GOC")
     parser.add_argument("--branch", default="master")
     parser.add_argument("--run-url")
+    parser.add_argument("--mttr-target-seconds", type=float, default=DEFAULT_MTTR_TARGET_SECONDS)
     parser.add_argument(
         "--check-report-file",
         default="artifacts/master-guard-workflow-health-rehearsal-check.json",
@@ -291,7 +464,15 @@ def main(argv: list[str] | None = None) -> int:
         "--output-file",
         default="artifacts/master-guard-workflow-health-rehearsal-drill.json",
     )
+    parser.add_argument(
+        "--markdown-output-file",
+        default="artifacts/master-guard-workflow-health-rehearsal-drill.md",
+    )
     args = parser.parse_args(argv)
+
+    if float(args.mttr_target_seconds) <= 0:
+        print("[master-watchdog-rehearsal-drill] ERROR: --mttr-target-seconds must be > 0.", file=sys.stderr)
+        return 2
 
     try:
         report = run_rehearsal_drill(
@@ -299,9 +480,11 @@ def main(argv: list[str] | None = None) -> int:
             repo=str(args.repo),
             branch=str(args.branch),
             run_url=str(args.run_url) if args.run_url else None,
+            mttr_target_seconds=float(args.mttr_target_seconds),
             check_report_file=Path(str(args.check_report_file)).expanduser(),
             issue_upsert_report_file=Path(str(args.issue_upsert_report_file)).expanduser(),
             output_file=Path(str(args.output_file)).expanduser(),
+            markdown_output_file=Path(str(args.markdown_output_file)).expanduser(),
         )
     except Exception as exc:  # noqa: BLE001
         print(f"[master-watchdog-rehearsal-drill] ERROR: {exc}", file=sys.stderr)

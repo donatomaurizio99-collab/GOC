@@ -9,6 +9,10 @@ on:
         description: "Branch label for the injected watchdog rehearsal"
         required: false
         default: "master"
+      mttr_target_seconds:
+        description: "Alert-chain MTTR target in seconds (summary warning threshold)"
+        required: false
+        default: "300"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -36,15 +40,26 @@ jobs:
         env:
           REPO_FULL: ${{ github.repository }}
           BRANCH_NAME: ${{ github.event.inputs.branch || 'master' }}
+          MTTR_TARGET_SECONDS: ${{ github.event.inputs.mttr_target_seconds || '300' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           .\scripts\run-master-watchdog-rehearsal-drill.ps1 `
             -Repo "$env:REPO_FULL" `
             -Branch "$env:BRANCH_NAME" `
             -RunUrl "$env:RUN_URL" `
+            -MttrTargetSeconds "$env:MTTR_TARGET_SECONDS" `
             -CheckReportFile "artifacts\master-guard-workflow-health-rehearsal-check.json" `
             -IssueUpsertReportFile "artifacts\master-guard-workflow-health-rehearsal-issue-upsert.json" `
-            -OutputFile "artifacts\master-guard-workflow-health-rehearsal-drill.json"
+            -OutputFile "artifacts\master-guard-workflow-health-rehearsal-drill.json" `
+            -MarkdownOutputFile "artifacts\master-guard-workflow-health-rehearsal-drill.md"
+
+      - name: Publish watchdog rehearsal summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "artifacts\master-guard-workflow-health-rehearsal-drill.md") {
+            Get-Content "artifacts\master-guard-workflow-health-rehearsal-drill.md" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
 
       - name: Upload watchdog rehearsal check report
         if: always()
@@ -67,6 +82,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: master-guard-workflow-health-rehearsal-drill
-          path: artifacts/master-guard-workflow-health-rehearsal-drill.json
+          path: |
+            artifacts/master-guard-workflow-health-rehearsal-drill.json
+            artifacts/master-guard-workflow-health-rehearsal-drill.md
           if-no-files-found: error
 
