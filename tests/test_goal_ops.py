@@ -12940,18 +12940,26 @@ def test_244_master_watchdog_rehearsal_drill_workflow_wrapper_and_docs_wiring():
     assert "name: Master Watchdog Rehearsal Drill" in workflow
     assert 'cron: "45 4 * * 1"' in workflow
     assert ".\\scripts\\run-master-watchdog-rehearsal-drill.ps1" in workflow
+    assert "mttr_target_seconds" in workflow
     assert "master-guard-workflow-health-rehearsal-check.json" in workflow
     assert "master-guard-workflow-health-rehearsal-issue-upsert.json" in workflow
     assert "master-guard-workflow-health-rehearsal-drill.json" in workflow
+    assert "master-guard-workflow-health-rehearsal-drill.md" in workflow
+    assert "GITHUB_STEP_SUMMARY" in workflow
 
     assert "master-watchdog-rehearsal-drill.py" in wrapper
     assert "IssueUpsertReportFile" in wrapper
     assert "CheckReportFile" in wrapper
+    assert "MttrTargetSeconds" in wrapper
+    assert "MarkdownOutputFile" in wrapper
     assert "--issue-upsert-report-file" in wrapper
     assert "--check-report-file" in wrapper
+    assert "--mttr-target-seconds" in wrapper
+    assert "--markdown-output-file" in wrapper
 
     assert "master-watchdog-rehearsal-drill.yml" in readme
     assert "injected-failure drill for the watchdog chain" in readme
+    assert "run-master-watchdog-rehearsal-drill.ps1" in readme
 
 
 def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
@@ -12960,6 +12968,7 @@ def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
     check_report_file = workspace / "master-guard-workflow-health-rehearsal-check.json"
     issue_upsert_report_file = workspace / "master-guard-workflow-health-rehearsal-issue-upsert.json"
     output_file = workspace / "master-guard-workflow-health-rehearsal-drill.json"
+    markdown_output_file = workspace / "master-guard-workflow-health-rehearsal-drill.md"
 
     command = [
         sys.executable,
@@ -12972,12 +12981,16 @@ def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
         "master",
         "--run-url",
         "https://github.com/donatomaurizio99-collab/GOC/actions/runs/9990001",
+        "--mttr-target-seconds",
+        "300",
         "--check-report-file",
         str(check_report_file.resolve()),
         "--issue-upsert-report-file",
         str(issue_upsert_report_file.resolve()),
         "--output-file",
         str(output_file.resolve()),
+        "--markdown-output-file",
+        str(markdown_output_file.resolve()),
     ]
     completed = subprocess.run(
         command,
@@ -12990,9 +13003,18 @@ def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
     assert payload["success"] is True
     assert payload["decision"]["injected_failure_detected"] is True
     assert payload["decision"]["alert_chain_verified"] is True
+    assert payload["decision"]["mttr_target_breached"] is False
+    assert payload["metrics"]["mttr_target_seconds"] == 300.0
+    assert payload["metrics"]["alert_chain_mttr_seconds"] >= 0.0
+    assert payload["run_links"]["drill_run"]["run_id"] == 9990001
+    assert payload["run_links"]["injected_degraded_workflow_latest_run"]["run_id"] == 9702
+    assert payload["degraded_workflow"]["workflow_name"] == "Master Branch Protection Drift Guard"
+    assert "required_artifacts_missing" in payload["degraded_workflow"]["degraded_reasons"]
+    assert "master-branch-protection-drift-issue-upsert" in payload["degraded_workflow"]["missing_required_artifacts"]
     assert output_file.exists()
     assert check_report_file.exists()
     assert issue_upsert_report_file.exists()
+    assert markdown_output_file.exists()
 
     check_payload = json.loads(check_report_file.read_text(encoding="utf-8"))
     assert check_payload["decision"]["guard_workflow_health_degraded"] is True
@@ -13006,6 +13028,11 @@ def test_245_master_watchdog_rehearsal_drill_verifies_alert_chain():
         for action in issue_upsert_payload["actions"]
         if isinstance(action, dict)
     )
+
+    markdown = markdown_output_file.read_text(encoding="utf-8")
+    assert "Master Watchdog Rehearsal Drill" in markdown
+    assert "Alert-Chain MTTR" in markdown
+    assert "Injected Degraded Workflow Diagnostics" in markdown
 
     shutil.rmtree(workspace, ignore_errors=True)
 

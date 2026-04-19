@@ -951,7 +951,7 @@ It also enforces a coverage contract so all relevant `master-*` guard/warning/re
 Guard-health issue summaries now include per-degraded-workflow diagnostics (reason(s), missing required artifacts, and latest run ID/URL) so on-call can triage directly from the issue.
 Guard-health issue body/comments now include a dedicated `Immediate Actions` section with direct first-response steps and a local repro command.
 Nightly guard workflows now execute `run-master-guard-chain-selftest.ps1` to validate guard-report -> issue-upsert chain consistency and publish dedicated selftest artifacts.
-Weekly [master-watchdog-rehearsal-drill.yml](.github/workflows/master-watchdog-rehearsal-drill.yml) runs an injected-failure drill for the watchdog chain and verifies guard-health alert upsert behavior in dry-run mode.
+Weekly [master-watchdog-rehearsal-drill.yml](.github/workflows/master-watchdog-rehearsal-drill.yml) runs an injected-failure drill for the watchdog chain, verifies guard-health alert upsert behavior in dry-run mode, and publishes MTTR + run-link summary evidence for faster on-call triage.
 Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watchdog-rehearsal-slo-guard.yml) verifies the rehearsal drill SLO (>=1 successful run in 8 days) and raises a deduped `ci-drift` issue with explicit `stale`/`failed` reason plus latest run reference.
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
 Nightly [master-release-gate-runtime-slo-guard.yml](.github/workflows/master-release-gate-runtime-slo-guard.yml) enforces a hard runtime guard (default: 3 consecutive runs >= 600s) and raises a deduped `ci-drift` blocking issue when breached.
@@ -991,6 +991,12 @@ Nightly release-gate runtime early warning workflow:
 
 Nightly release-gate runtime SLO guard workflow:
 [master-release-gate-runtime-slo-guard.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-release-gate-runtime-slo-guard.yml)
+
+Weekly watchdog rehearsal drill workflow:
+[master-watchdog-rehearsal-drill.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-watchdog-rehearsal-drill.yml)
+
+Nightly watchdog rehearsal SLO guard workflow:
+[master-watchdog-rehearsal-slo-guard.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-watchdog-rehearsal-slo-guard.yml)
 
 Weekly master reliability digest workflow:
 [master-reliability-digest.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-reliability-digest.yml)
@@ -1056,6 +1062,13 @@ Local guard-chain selftest command:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-master-guard-chain-selftest.ps1 -SignalId master-guard-workflow-health -GuardReportFile artifacts\master-guard-workflow-health-check.json -IssueUpsertReportFile artifacts\master-guard-workflow-health-issue-upsert.json
+```
+
+Local watchdog rehearsal drill command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-watchdog-rehearsal-drill.ps1 -MttrTargetSeconds 300
 ```
 
 Local release-gate runtime early warning command:
