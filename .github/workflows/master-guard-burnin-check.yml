@@ -21,6 +21,14 @@ on:
         description: "Required successful completed runs for weekly watchdog rehearsal drill workflow"
         required: false
         default: "1"
+      burnin_window_days:
+        description: "Rolling burn-in window in days used for MTTR/breach hard-exit criteria"
+        required: false
+        default: "14"
+      mttr_target_seconds:
+        description: "Optional MTTR target override for hard-exit criteria (defaults to policy target)"
+        required: false
+        default: ""
       allow_degraded:
         description: "Do not fail workflow when guard burn-in requirements are not met"
         required: false
@@ -57,25 +65,42 @@ jobs:
           REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.required_successful_runs || '3' }}
           DIGEST_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.digest_required_successful_runs || '1' }}
           DRILL_REQUIRED_SUCCESSFUL_RUNS: ${{ github.event.inputs.drill_required_successful_runs || '1' }}
+          BURNIN_WINDOW_DAYS: ${{ github.event.inputs.burnin_window_days || '14' }}
+          MTTR_TARGET_SECONDS: ${{ github.event.inputs.mttr_target_seconds || '' }}
           ALLOW_DEGRADED: ${{ github.event.inputs.allow_degraded || 'false' }}
         run: |
+          $burninArgs = @(
+            "-Repo", "$env:REPO_FULL",
+            "-PerPage", "$env:PER_PAGE",
+            "-RequiredSuccessfulRuns", "$env:REQUIRED_SUCCESSFUL_RUNS",
+            "-DigestRequiredSuccessfulRuns", "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS",
+            "-DrillRequiredSuccessfulRuns", "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS",
+            "-BurninWindowDays", "$env:BURNIN_WINDOW_DAYS",
+            "-OutputFile", "artifacts\master-guard-burnin-check.json"
+          )
+          if ($env:MTTR_TARGET_SECONDS) {
+            $burninArgs += @("-MttrTargetSeconds", "$env:MTTR_TARGET_SECONDS")
+          }
           if ($env:ALLOW_DEGRADED -eq "true") {
-            .\scripts\run-master-guard-burnin-check.ps1 `
-              -Repo "$env:REPO_FULL" `
-              -PerPage "$env:PER_PAGE" `
-              -RequiredSuccessfulRuns "$env:REQUIRED_SUCCESSFUL_RUNS" `
-              -DigestRequiredSuccessfulRuns "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS" `
-              -DrillRequiredSuccessfulRuns "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS" `
-              -OutputFile "artifacts\master-guard-burnin-check.json" `
-              -AllowDegraded
+            .\scripts\run-master-guard-burnin-check.ps1 @burninArgs -AllowDegraded
           } else {
-            .\scripts\run-master-guard-burnin-check.ps1 `
-              -Repo "$env:REPO_FULL" `
-              -PerPage "$env:PER_PAGE" `
-              -RequiredSuccessfulRuns "$env:REQUIRED_SUCCESSFUL_RUNS" `
-              -DigestRequiredSuccessfulRuns "$env:DIGEST_REQUIRED_SUCCESSFUL_RUNS" `
-              -DrillRequiredSuccessfulRuns "$env:DRILL_REQUIRED_SUCCESSFUL_RUNS" `
-              -OutputFile "artifacts\master-guard-burnin-check.json"
+            .\scripts\run-master-guard-burnin-check.ps1 @burninArgs
+          }
+
+      - name: Publish burn-in summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "artifacts\master-guard-burnin-check.json") {
+            $payload = Get-Content "artifacts\master-guard-burnin-check.json" -Raw | ConvertFrom-Json
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Master Guard Burn-in Check"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- burnin_status=$($payload.decision.burnin_status)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- hard_exit_criteria_met=$($payload.decision.hard_exit_criteria_met)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- missing_artifacts_total=$($payload.burnin_window.current_window.missing_artifacts.total)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- unjustified_breaches=$($payload.burnin_window.current_window.unjustified_breaches)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- p95_mttr_seconds=$($payload.burnin_window.current_window.mttr_percentiles_seconds.p95)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- mttr_target_seconds=$($payload.burnin_window.mttr_target_seconds)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- non_green_reasons=$([string]::Join(',', $payload.decision.non_green_reasons))"
           }
 
       - name: Upload guard burn-in report

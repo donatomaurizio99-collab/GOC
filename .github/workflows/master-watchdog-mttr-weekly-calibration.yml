@@ -1,0 +1,165 @@
+name: Master Watchdog MTTR Weekly Calibration
+
+on:
+  schedule:
+    - cron: "15 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      per_page:
+        description: "Maximum completed rehearsal-drill runs fetched from GitHub history"
+        required: false
+        default: "28"
+      min_samples:
+        description: "Minimum samples required for calibration recommendation"
+        required: false
+        default: "10"
+      max_samples:
+        description: "Maximum latest samples considered for calibration"
+        required: false
+        default: "14"
+      recommendation_delta_threshold_percent:
+        description: "Create/update issue when recommended target differs by more than this percent"
+        required: false
+        default: "10"
+      recovery_threshold:
+        description: "Healthy calibration runs required before auto-closing open calibration issue"
+        required: false
+        default: "1"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  weekly-watchdog-mttr-calibration:
+    name: Weekly Watchdog MTTR Calibration
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Collect recent rehearsal drill reports
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          PER_PAGE: ${{ github.event.inputs.per_page || '28' }}
+          WORKFLOW_NAME: Master Watchdog Rehearsal Drill
+          DRILL_ARTIFACT_NAME: master-guard-workflow-health-rehearsal-drill
+          REPORTS_DIR: artifacts\watchdog-mttr-calibration-samples
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path $env:REPORTS_DIR | Out-Null
+          $workflowPayload = gh api "repos/$env:REPO_FULL/actions/workflows?per_page=100" | ConvertFrom-Json
+          $workflow = $workflowPayload.workflows | Where-Object { $_.name -eq $env:WORKFLOW_NAME } | Select-Object -First 1
+          if (-not $workflow) {
+            throw "Workflow '$env:WORKFLOW_NAME' not found in repository '$env:REPO_FULL'."
+          }
+
+          $runsPayload = gh api "repos/$env:REPO_FULL/actions/workflows/$($workflow.id)/runs?branch=master&status=completed&per_page=$env:PER_PAGE" | ConvertFrom-Json
+          $downloaded = 0
+          $downloadErrors = @()
+          foreach ($run in ($runsPayload.workflow_runs | Where-Object { $_ -ne $null })) {
+            $runId = [int]$run.id
+            if ($runId -le 0) {
+              continue
+            }
+            $runDir = Join-Path $env:REPORTS_DIR ("run-" + $runId)
+            New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+            $downloadOutput = gh run download $runId -R $env:REPO_FULL -n $env:DRILL_ARTIFACT_NAME -D $runDir 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $downloaded += 1
+            } else {
+              $downloadErrors += "run_id=$runId error=$([string]::Join(' ', $downloadOutput))"
+            }
+          }
+
+          $manifest = @{
+            workflow_name = $env:WORKFLOW_NAME
+            workflow_id = [int]$workflow.id
+            runs_considered = [int](($runsPayload.workflow_runs | Measure-Object).Count)
+            reports_downloaded = [int]$downloaded
+            download_errors = $downloadErrors
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path "artifacts/watchdog-rehearsal-mttr-calibration-samples-manifest.json" -Encoding utf8
+
+      - name: Run weekly MTTR calibration
+        shell: pwsh
+        env:
+          MIN_SAMPLES: ${{ github.event.inputs.min_samples || '10' }}
+          MAX_SAMPLES: ${{ github.event.inputs.max_samples || '14' }}
+          RECOMMENDATION_DELTA_THRESHOLD_PERCENT: ${{ github.event.inputs.recommendation_delta_threshold_percent || '10' }}
+        run: |
+          .\scripts\run-watchdog-rehearsal-mttr-calibrate.ps1 `
+            -MinSamples "$env:MIN_SAMPLES" `
+            -MaxSamples "$env:MAX_SAMPLES" `
+            -ReportsGlob "artifacts\watchdog-mttr-calibration-samples\**\master-guard-workflow-health-rehearsal-drill.json" `
+            -ActivePolicyFile "docs\watchdog-rehearsal-mttr-policy.json" `
+            -RecommendationDeltaThresholdPercent "$env:RECOMMENDATION_DELTA_THRESHOLD_PERCENT" `
+            -AllowInsufficientSamples `
+            -OutputFile "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json" `
+            -PolicyOutputFile "docs\watchdog-rehearsal-mttr-policy.json"
+
+      - name: Upsert calibration drift issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RECOVERY_THRESHOLD: ${{ github.event.inputs.recovery_threshold || '1' }}
+        run: |
+          if (-not (Test-Path "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json")) {
+            throw "Calibration report not found: artifacts\\watchdog-rehearsal-mttr-calibration-weekly.json"
+          }
+          .\scripts\run-ci-alert-issue-upsert.ps1 `
+            -SignalId "watchdog-rehearsal-mttr-calibration" `
+            -Repo "$env:REPO_FULL" `
+            -ReportFile "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json" `
+            -RunUrl "$env:RUN_URL" `
+            -RecoveryThreshold "$env:RECOVERY_THRESHOLD" `
+            -OutputFile "artifacts\watchdog-rehearsal-mttr-calibration-weekly-issue-upsert.json"
+
+      - name: Publish weekly calibration summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json") {
+            $payload = Get-Content "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json" -Raw | ConvertFrom-Json
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Weekly Watchdog MTTR Calibration"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- sample_values_total=$($payload.metrics.sample_values_total)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- active_target_seconds=$($payload.metrics.active_target_seconds)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- recommended_target_seconds=$($payload.metrics.recommended_target_seconds)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- recommendation_delta_percent=$($payload.metrics.recommendation_delta_percent)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- action_required=$($payload.decision.action_required)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- no_action_required=$($payload.decision.no_action_required)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- recommended_action=$($payload.decision.recommended_action)"
+          }
+          if (Test-Path "artifacts\watchdog-rehearsal-mttr-calibration-weekly-issue-upsert.json") {
+            $issuePayload = Get-Content "artifacts\watchdog-rehearsal-mttr-calibration-weekly-issue-upsert.json" -Raw | ConvertFrom-Json
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- issue_action=$($issuePayload.decision.issue_action)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- issue_number=$($issuePayload.issue.number)"
+          }
+
+      - name: Upload weekly calibration reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watchdog-rehearsal-mttr-calibration-weekly
+          path: |
+            artifacts/watchdog-rehearsal-mttr-calibration-weekly.json
+            artifacts/watchdog-rehearsal-mttr-calibration-weekly-issue-upsert.json
+            artifacts/watchdog-rehearsal-mttr-calibration-samples-manifest.json
+          if-no-files-found: error

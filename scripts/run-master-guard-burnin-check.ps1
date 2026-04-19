@@ -6,6 +6,12 @@ param(
     [int]$RequiredSuccessfulRuns = 3,
     [int]$DigestRequiredSuccessfulRuns = 1,
     [int]$DrillRequiredSuccessfulRuns = 1,
+    [int]$BurninWindowDays = 14,
+    [double]$MttrTargetSeconds = 0,
+    [string]$MttrPolicyFile = "docs\\watchdog-rehearsal-mttr-policy.json",
+    [string]$WatchdogSloWorkflowName = "Master Watchdog Rehearsal SLO Guard",
+    [string]$WatchdogSloArtifactName = "master-watchdog-rehearsal-slo-guard",
+    [string]$WatchdogSloReportFilename = "master-watchdog-rehearsal-slo-guard.json",
     [string]$FixturesFile = "",
     [string]$WorkflowSpecsFile = "",
     [string]$OutputFile = "artifacts\\master-guard-burnin-check.json",
@@ -26,8 +32,16 @@ $args = @(
     "--required-successful-runs", [string]$RequiredSuccessfulRuns,
     "--digest-required-successful-runs", [string]$DigestRequiredSuccessfulRuns,
     "--drill-required-successful-runs", [string]$DrillRequiredSuccessfulRuns,
+    "--burnin-window-days", [string]$BurninWindowDays,
+    "--mttr-policy-file", $MttrPolicyFile,
+    "--watchdog-slo-workflow-name", $WatchdogSloWorkflowName,
+    "--watchdog-slo-artifact-name", $WatchdogSloArtifactName,
+    "--watchdog-slo-report-filename", $WatchdogSloReportFilename,
     "--output-file", $OutputFile
 )
+if ($MttrTargetSeconds -gt 0) {
+    $args += @("--mttr-target-seconds", [string]$MttrTargetSeconds)
+}
 if ($FixturesFile) {
     $args += @("--fixtures-file", $FixturesFile)
 }

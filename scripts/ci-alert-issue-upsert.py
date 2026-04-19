@@ -38,6 +38,10 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
         "title": "[CI Drift] watchdog rehearsal drill SLO breached on master",
         "labels": ["ci-drift", "watchdog-rehearsal"],
     },
+    "watchdog-rehearsal-mttr-calibration": {
+        "title": "[CI Drift] watchdog rehearsal MTTR calibration drift on master",
+        "labels": ["ci-drift", "watchdog-rehearsal"],
+    },
     "master-reliability-digest-warning": {
         "title": "[CI Drift] master reliability digest warning detected",
         "labels": ["ci-drift", "reliability-digest"],
@@ -248,6 +252,56 @@ def _resolve_guard_workflow_run_url(*, repo: str, latest_run: dict[str, Any]) ->
     return f"https://github.com/{repo}/actions/runs/{run_id}"
 
 
+def _guard_workflow_next_action(
+    *,
+    workflow_name: str,
+    degraded_reasons: list[str],
+    missing_required_artifacts: list[str],
+) -> str:
+    normalized_reasons = {str(item).strip().lower() for item in degraded_reasons}
+    if "no_recent_completed_run_in_window" in normalized_reasons:
+        return (
+            f"Trigger `{workflow_name}` manually, confirm successful completion in-window, "
+            "then rerun guard-health watchdog."
+        )
+    if "latest_run_not_success" in normalized_reasons:
+        return (
+            f"Inspect failing logs for `{workflow_name}`, apply remediation, "
+            "rerun workflow, and confirm success."
+        )
+    if missing_required_artifacts:
+        return (
+            f"Restore artifact upload for `{workflow_name}` ({', '.join(missing_required_artifacts)}), "
+            "rerun workflow, and confirm artifact availability."
+        )
+    return f"Re-run `{workflow_name}` and validate green status with required artifacts."
+
+
+def _watchdog_breach_next_action(*, breach_reason: str) -> str:
+    reason = str(breach_reason or "").strip().lower()
+    if reason == "stale":
+        return (
+            "Trigger `master-watchdog-rehearsal-drill.yml` immediately and confirm a fresh successful run "
+            "within the 8-day SLO."
+        )
+    if reason == "failed":
+        return (
+            "Inspect the latest rehearsal drill failure, fix root cause, and rerun "
+            "`master-watchdog-rehearsal-drill.yml` until green."
+        )
+    if reason == "mttr":
+        return (
+            "Investigate alert-chain latency contributors, run weekly MTTR calibration evidence, "
+            "and restore MTTR <= target."
+        )
+    if reason == "mttr_report_unavailable":
+        return (
+            "Restore missing MTTR evidence artifact (`master-guard-workflow-health-rehearsal-drill`) "
+            "and rerun the rehearsal drill."
+        )
+    return "No immediate action required."
+
+
 def _format_guard_workflow_degraded_detail_lines(
     *,
     repo: str,
@@ -272,13 +326,19 @@ def _format_guard_workflow_degraded_detail_lines(
             latest_run_text = run_url
         else:
             latest_run_text = "none"
+        next_action = _guard_workflow_next_action(
+            workflow_name=workflow_name,
+            degraded_reasons=degraded_reasons,
+            missing_required_artifacts=missing_required_artifacts,
+        )
 
         detail_lines.append(
             (
                 f"- Degraded detail: {workflow_name} | "
                 f"reasons={reasons_text} | "
                 f"missing_required_artifacts={missing_text} | "
-                f"latest_run={latest_run_text}"
+                f"latest_run={latest_run_text} | "
+                f"next_action={next_action}"
             )
         )
     return detail_lines
@@ -439,6 +499,7 @@ def _signal_alert_state(
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
         metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
         latest_run = report.get("latest_run") if isinstance(report.get("latest_run"), dict) else {}
+        drill_report = report.get("drill_report") if isinstance(report.get("drill_report"), dict) else {}
 
         latest_run_id = int(latest_run.get("run_id") or 0)
         latest_run_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
@@ -451,8 +512,12 @@ def _signal_alert_state(
         mttr_report_loaded = bool(metrics.get("mttr_report_loaded"))
         mttr_report_source = str(metrics.get("mttr_report_source") or "none")
         mttr_report_load_error = str(metrics.get("mttr_report_load_error") or "")
+        missing_required_artifacts = _coerce_string_list(latest_run.get("missing_required_artifacts"))
+        if not missing_required_artifacts:
+            missing_required_artifacts = _coerce_string_list(drill_report.get("missing_required_artifacts"))
         breach_reason = str(decision.get("breach_reason") or "none")
         alert_triggered = bool(decision.get("watchdog_rehearsal_slo_breached"))
+        next_action = _watchdog_breach_next_action(breach_reason=breach_reason)
 
         if latest_run_id > 0 and latest_run_url:
             latest_run_text = f"#{latest_run_id} ({latest_run_url})"
@@ -462,6 +527,7 @@ def _signal_alert_state(
             latest_run_text = latest_run_url
         else:
             latest_run_text = "none"
+        missing_artifacts_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
         age_text = (
             f"{float(latest_run_age_hours):.2f}h"
             if latest_run_age_hours is not None
@@ -484,6 +550,7 @@ def _signal_alert_state(
             f"- Latest rehearsal run: {latest_run_text}",
             f"- Latest rehearsal run status: {latest_run_status or 'unknown'} / {latest_run_conclusion or 'unknown'}",
             f"- Latest rehearsal run age: {age_text} (threshold={max_age_hours}h)",
+            f"- Missing drill artifacts: {missing_artifacts_text}",
             f"- Latest alert-chain MTTR: {mttr_text} (target={mttr_target_text})",
             f"- MTTR evidence loaded: {'yes' if mttr_report_loaded else 'no'} (source={mttr_report_source})",
             (
@@ -491,9 +558,62 @@ def _signal_alert_state(
                 if mttr_report_load_error
                 else "- MTTR evidence load error: none"
             ),
+            f"- Recommended next action: {next_action}",
             f"- Recommended action: {decision.get('recommended_action') or 'watchdog_rehearsal_slo_healthy'}",
         ]
         return alert_triggered, summary, branch, {}
+
+    if signal_id == "watchdog-rehearsal-mttr-calibration":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        config = report.get("config") if isinstance(report.get("config"), dict) else {}
+        active_policy = report.get("active_policy") if isinstance(report.get("active_policy"), dict) else {}
+
+        action_required = bool(decision.get("action_required"))
+        no_action_required = bool(decision.get("no_action_required"))
+        sample_requirements_met = bool(decision.get("sample_requirements_met"))
+        recommended_action = str(decision.get("recommended_action") or "no_action_required")
+
+        sample_values_total = int(metrics.get("sample_values_total") or 0)
+        recommended_target_seconds = metrics.get("recommended_target_seconds")
+        active_target_seconds = metrics.get("active_target_seconds")
+        recommendation_delta_percent = metrics.get("recommendation_delta_percent")
+        recommendation_delta_threshold_percent = config.get("recommendation_delta_threshold_percent")
+        active_target_source = str(active_policy.get("source") or "unknown")
+        active_policy_load_error = str(active_policy.get("load_error") or "")
+
+        summary = [
+            f"- Action required: {'yes' if action_required else 'no'}",
+            f"- No action required: {'yes' if no_action_required else 'no'}",
+            f"- Sample requirements met: {'yes' if sample_requirements_met else 'no'} (samples={sample_values_total})",
+            (
+                f"- Active MTTR target: {float(active_target_seconds):.3f}s (source={active_target_source})"
+                if active_target_seconds is not None
+                else f"- Active MTTR target: unknown (source={active_target_source})"
+            ),
+            (
+                f"- Recommended MTTR target: {float(recommended_target_seconds):.3f}s"
+                if recommended_target_seconds is not None
+                else "- Recommended MTTR target: unavailable"
+            ),
+            (
+                "- Recommended-target delta: "
+                f"{float(recommendation_delta_percent):.3f}% "
+                f"(threshold={float(recommendation_delta_threshold_percent or 0):.3f}%)"
+                if recommendation_delta_percent is not None
+                else (
+                    "- Recommended-target delta: unavailable "
+                    f"(threshold={float(recommendation_delta_threshold_percent or 0):.3f}%)"
+                )
+            ),
+            (
+                f"- Active policy load error: {active_policy_load_error}"
+                if active_policy_load_error
+                else "- Active policy load error: none"
+            ),
+            f"- Recommended action: {recommended_action}",
+        ]
+        return bool(action_required), summary, branch, {}
 
     if signal_id in {"release-gate-runtime-early-warning", "release-gate-runtime-slo-guard"}:
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
@@ -848,6 +968,74 @@ def _signal_immediate_actions(
                 "`.\\scripts\\run-master-guard-workflow-health-check.ps1 "
                 "-LookbackHours 30 -PerPage 50 "
                 "-OutputFile artifacts\\master-guard-workflow-health-check.json`"
+            ),
+        ]
+
+    if signal_id == "master-watchdog-rehearsal-drill-slo":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        latest_run = report.get("latest_run") if isinstance(report.get("latest_run"), dict) else {}
+        drill_report = report.get("drill_report") if isinstance(report.get("drill_report"), dict) else {}
+
+        latest_run_id = int(latest_run.get("run_id") or 0)
+        latest_run_url = str(latest_run.get("url") or latest_run.get("html_url") or "").strip()
+        if latest_run_id > 0 and latest_run_url:
+            latest_reference = f"#{latest_run_id} ({latest_run_url})"
+        elif latest_run_id > 0:
+            latest_reference = f"#{latest_run_id}"
+        elif latest_run_url:
+            latest_reference = latest_run_url
+        else:
+            latest_reference = "none"
+
+        missing_required_artifacts = _coerce_string_list(latest_run.get("missing_required_artifacts"))
+        if not missing_required_artifacts:
+            missing_required_artifacts = _coerce_string_list(drill_report.get("missing_required_artifacts"))
+        missing_artifacts_text = ", ".join(missing_required_artifacts) if missing_required_artifacts else "none"
+        breach_reason = str(decision.get("breach_reason") or "none")
+
+        return [
+            f"- Open latest rehearsal run immediately: {latest_reference}",
+            f"- Restore missing drill artifacts if needed: {missing_artifacts_text}",
+            (
+                f"- Execute breach-specific playbook for reason `{breach_reason}` "
+                "(`stale`/`failed`/`mttr`) and rerun `master-watchdog-rehearsal-slo-guard.yml`."
+            ),
+            (
+                "- Re-run guard locally for confirmation: "
+                "`.\\scripts\\run-master-watchdog-rehearsal-slo-guard.ps1 "
+                "-MaxAgeHours 192 -MttrTargetSeconds 300 -PerPage 20 "
+                "-OutputFile artifacts\\master-watchdog-rehearsal-slo-guard.json`"
+            ),
+        ]
+
+    if signal_id == "watchdog-rehearsal-mttr-calibration":
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        active_target_seconds = metrics.get("active_target_seconds")
+        recommended_target_seconds = metrics.get("recommended_target_seconds")
+        recommendation_delta_percent = metrics.get("recommendation_delta_percent")
+
+        return [
+            (
+                f"- Review MTTR target drift evidence: active={float(active_target_seconds):.3f}s, "
+                f"recommended={float(recommended_target_seconds):.3f}s, "
+                f"delta={float(recommendation_delta_percent):.3f}%"
+                if (
+                    active_target_seconds is not None
+                    and recommended_target_seconds is not None
+                    and recommendation_delta_percent is not None
+                )
+                else "- Review MTTR target drift evidence in the calibration report."
+            ),
+            (
+                f"- Apply recommendation decision: {decision.get('recommended_action') or 'no_action_required'} "
+                "(no silent policy changes)."
+            ),
+            (
+                "- Re-run weekly calibration manually if needed: "
+                "`.\\scripts\\run-watchdog-rehearsal-mttr-calibrate.ps1 "
+                "-MinSamples 10 -MaxSamples 14 "
+                "-OutputFile artifacts\\watchdog-rehearsal-mttr-calibration-weekly.json`"
             ),
         ]
 

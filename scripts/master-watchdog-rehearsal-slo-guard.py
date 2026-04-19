@@ -97,16 +97,49 @@ def _fetch_runs_from_github(
     return [item for item in runs if isinstance(item, dict)]
 
 
-def _load_fixture_runs(*, runs_file: Path, workflow_name: str) -> list[dict[str, Any]]:
-    payload = _load_json_file(runs_file)
+def _fetch_run_artifacts_from_github(*, repo: str, run_id: int) -> list[dict[str, Any]]:
+    payload = _run_gh_api(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")
+    artifacts = payload.get("artifacts") or []
+    _expect(isinstance(artifacts, list), f"Invalid artifacts payload for run {run_id}.")
+    return [item for item in artifacts if isinstance(item, dict)]
+
+
+def _load_fixture_runs(*, payload: dict[str, Any], workflow_name: str) -> list[dict[str, Any]]:
     if isinstance(payload.get("workflow_runs"), list):
         runs = payload.get("workflow_runs") or []
     elif isinstance(payload.get("workflow_runs"), dict):
         runs = (payload.get("workflow_runs") or {}).get(workflow_name) or []
     else:
         runs = payload.get("runs") or []
-    _expect(isinstance(runs, list), f"Invalid runs fixture payload in {runs_file}")
+    _expect(isinstance(runs, list), "Invalid runs fixture payload.")
     return [item for item in runs if isinstance(item, dict)]
+
+
+def _load_fixture_artifacts(*, payload: dict[str, Any], run_id: int) -> list[dict[str, Any]]:
+    run_artifacts = payload.get("run_artifacts") if isinstance(payload.get("run_artifacts"), dict) else {}
+    value = run_artifacts.get(str(run_id)) if isinstance(run_artifacts, dict) else None
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        artifacts = value.get("artifacts") or []
+    else:
+        artifacts = value
+    _expect(isinstance(artifacts, list), f"fixtures.run_artifacts['{run_id}'] must resolve to a list.")
+    return [item for item in artifacts if isinstance(item, dict)]
+
+
+def _extract_artifact_names(artifacts: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    available: list[str] = []
+    expired: list[str] = []
+    for artifact in artifacts:
+        name = str(artifact.get("name") or "").strip()
+        if not name:
+            continue
+        if bool(artifact.get("expired")):
+            expired.append(name)
+        else:
+            available.append(name)
+    return sorted(available), sorted(expired)
 
 
 def _run_timestamp_for_sort(run: dict[str, Any]) -> datetime:
@@ -198,9 +231,13 @@ def run_watchdog_rehearsal_slo_guard(
     _expect(str(drill_artifact_name).strip(), "drill_artifact_name must be non-empty.")
 
     started = time.perf_counter()
+    fixtures_payload = _load_json_file(runs_file) if runs_file is not None else None
+    fixture_artifacts_available = bool(
+        fixtures_payload is not None and isinstance(fixtures_payload.get("run_artifacts"), dict)
+    )
     runs = (
-        _load_fixture_runs(runs_file=runs_file, workflow_name=workflow_name)
-        if runs_file is not None
+        _load_fixture_runs(payload=fixtures_payload or {}, workflow_name=workflow_name)
+        if fixtures_payload is not None
         else _fetch_runs_from_github(
             repo=repo,
             branch=branch,
@@ -208,6 +245,21 @@ def run_watchdog_rehearsal_slo_guard(
             per_page=per_page,
         )
     )
+
+    artifacts_cache: dict[int, list[dict[str, Any]]] = {}
+
+    def load_artifacts_for_run(run_id: int) -> list[dict[str, Any]]:
+        if run_id <= 0:
+            return []
+        if int(run_id) in artifacts_cache:
+            return artifacts_cache[int(run_id)]
+        if fixtures_payload is not None:
+            loaded = _load_fixture_artifacts(payload=fixtures_payload, run_id=run_id)
+        else:
+            loaded = _fetch_run_artifacts_from_github(repo=repo, run_id=run_id)
+        artifacts_cache[int(run_id)] = loaded
+        return loaded
+
     sorted_runs = sorted(runs, key=_run_timestamp_for_sort, reverse=True)
     latest_run = sorted_runs[0] if sorted_runs else None
 
@@ -233,19 +285,34 @@ def run_watchdog_rehearsal_slo_guard(
     )
     failed_breach = bool(latest_run is not None and not latest_run_success)
 
+    latest_run_id = int(latest_run.get("id") or 0) if latest_run is not None else 0
+    latest_run_artifacts = load_artifacts_for_run(latest_run_id) if latest_run_id > 0 else []
+    latest_run_available_artifacts, latest_run_expired_artifacts = _extract_artifact_names(latest_run_artifacts)
+    required_artifacts = [str(drill_artifact_name)]
+    artifact_inventory_known = bool(fixtures_payload is None or fixture_artifacts_available)
+    latest_run_missing_required_artifacts = (
+        [artifact_name for artifact_name in required_artifacts if artifact_name not in latest_run_available_artifacts]
+        if artifact_inventory_known
+        else []
+    )
+
     latest_run_snapshot = (
         {
-            "run_id": int(latest_run.get("id") or 0),
+            "run_id": latest_run_id,
             "status": str(latest_run.get("status") or ""),
             "conclusion": str(latest_run.get("conclusion") or ""),
             "updated_at": str(latest_run.get("updated_at") or ""),
             "updated_at_parsed_utc": _format_utc(latest_run_updated_at),
             "url": _resolve_latest_run_url(repo=repo, run=latest_run),
+            "required_artifacts": required_artifacts,
+            "artifact_inventory_known": bool(artifact_inventory_known),
+            "available_artifacts": latest_run_available_artifacts,
+            "expired_artifacts": latest_run_expired_artifacts,
+            "missing_required_artifacts": latest_run_missing_required_artifacts,
         }
         if latest_run is not None
         else None
     )
-    latest_run_id = int((latest_run_snapshot or {}).get("run_id") or 0)
 
     mttr_report_loaded = False
     mttr_report_source = "none"
@@ -262,9 +329,28 @@ def run_watchdog_rehearsal_slo_guard(
         and (not failed_breach)
         and latest_run_id > 0
         and (drill_report_file is not None or runs_file is None)
+        and (not artifact_inventory_known or len(latest_run_missing_required_artifacts) == 0)
     )
-    if not should_attempt_mttr and runs_file is not None and drill_report_file is None:
+    if (
+        not should_attempt_mttr
+        and runs_file is not None
+        and drill_report_file is None
+        and not artifact_inventory_known
+    ):
         mttr_report_source = "skipped_fixture_mode"
+    elif (
+        not should_attempt_mttr
+        and artifact_inventory_known
+        and len(latest_run_missing_required_artifacts) > 0
+        and not stale_breach
+        and not failed_breach
+    ):
+        mttr_report_source = "missing_required_artifact"
+        mttr_report_load_error = (
+            "Latest rehearsal run missing required artifact(s): "
+            + ", ".join(latest_run_missing_required_artifacts)
+        )
+        mttr_report_unavailable = True
 
     if should_attempt_mttr:
         mttr_evaluated = True
@@ -379,6 +465,11 @@ def run_watchdog_rehearsal_slo_guard(
             "runs_total_fetched": int(len(runs)),
             "max_age_hours": float(max_age_hours),
             "latest_run_age_hours": float(latest_run_age_hours) if latest_run_age_hours is not None else None,
+            "latest_run_artifact_inventory_known": bool(artifact_inventory_known),
+            "latest_run_available_artifacts_total": int(len(latest_run_available_artifacts)),
+            "latest_run_expired_artifacts_total": int(len(latest_run_expired_artifacts)),
+            "required_artifacts_missing_total": int(len(latest_run_missing_required_artifacts)),
+            "latest_run_missing_required_artifacts": latest_run_missing_required_artifacts,
             "mttr_evaluated": bool(mttr_evaluated),
             "mttr_seconds": float(mttr_seconds) if mttr_seconds is not None else None,
             "mttr_target_seconds": float(mttr_target_effective_seconds),
@@ -396,6 +487,9 @@ def run_watchdog_rehearsal_slo_guard(
             "loaded": bool(mttr_report_loaded),
             "source": mttr_report_source,
             "artifact_name": str(drill_artifact_name),
+            "required_artifacts": required_artifacts,
+            "artifact_inventory_known": bool(artifact_inventory_known),
+            "missing_required_artifacts": latest_run_missing_required_artifacts,
             "report_file": str(drill_report_file) if drill_report_file is not None else None,
             "load_error": mttr_report_load_error,
             "mttr_seconds": float(mttr_seconds) if mttr_seconds is not None else None,
