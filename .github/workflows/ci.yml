@@ -55,7 +55,7 @@ jobs:
           .\scripts\release-gate.ps1 -StrictA11yTestHarnessCheck -StrictAlertRoutingOnCallCheck -StrictAuditTrailHardeningCheck -StrictAutoRollbackPolicyDrill -StrictBackupRestoreDrill -StrictBackupRestoreStressDrill -StrictCanaryGuardrailCheck -StrictCriticalDrillFlakeGate -StrictDbCorruptionQuarantineDrill -StrictDbSafeModeWatchdogDrill -StrictDesktopUpdateSafetyDrill -StrictDisasterRecoveryRehearsalPack -StrictDiskPressureFaultInjectionDrill -StrictEventConsumerRecoveryChaosDrill -StrictFailureBudgetDashboard -StrictFileDatabaseProbe -StrictFsyncIoStallDrill -StrictIncidentDrillAutomationCheck -StrictIncidentRollbackDrill -StrictInvariantBurstDrill -StrictInvariantMonitorWatchdogDrill -StrictLoadProfileFrameworkCheck -StrictLongSoakBudgetDrill -StrictMigrationRehearsal -StrictMultiDbAtomicSwitchDrill -StrictP0BurnInConsecutiveGreen -StrictP0ClosureReport -StrictP0ReleaseEvidenceBundle -StrictP0ReportSchemaContractCheck -StrictP0RunbookContractCheck -StrictPowerLossDurabilityDrill -StrictRecoveryHardAbortDrill -StrictRecoveryIdempotenceDrill -StrictReleaseFreezePolicyDrill -StrictReleaseGateChaosMatrixContinuousCheck -StrictReleaseGateDeployRehearsalCheck -StrictReleaseGateEvidenceAttestationCheck -StrictReleaseGateEvidenceFreshnessCheck -StrictReleaseGateEvidenceHashManifestCheck -StrictReleaseGateEvidenceLineageCheck -StrictReleaseGateHypercareActivationCheck -StrictReleaseGateOperationsHandoffReadinessCheck -StrictReleaseGatePerformanceBudgetCheck -StrictReleaseGatePerformanceHistoryCheck -StrictReleaseGatePostCutoverFinalizationCheck -StrictReleaseGatePostReleaseContinuityCheck -StrictReleaseGatePostReleaseWatchCheck -StrictReleaseGateProductionCutoverReadinessCheck -StrictReleaseGateProductionFinalAttestationCheck -StrictReleaseGateProductionReadinessCertificationCheck -StrictReleaseGateProductionSustainabilityCertificationCheck -StrictReleaseGateRcCanaryRolloutCheck -StrictReleaseGateReleaseTrainReadinessCheck -StrictReleaseGateRollbackTriggerIntegrityCheck -StrictReleaseGateRuntimeStabilityDrill -StrictReleaseGateSloBurnRateV2Check -StrictReleaseGateStabilityFinalReadinessCheck -StrictReleaseGateStagingSoakReadinessCheck -StrictReleaseGateSteadyStateCertificationCheck -StrictReleaseGateStepTimingSchemaCheck -StrictReleaseGateSupplyChainArtifactTrustCheck -StrictRtoRpoAssertionCheck -StrictSafeModeUxDegradationCheck -StrictSecurityCiLaneCheck -StrictSecurityConfigHardeningCheck -StrictSnapshotRestoreCrashConsistencyDrill -StrictSqliteRealFullDrill -StrictStorageCorruptionHardeningDrill -StrictUpgradeDowngradeCompatibilityDrill -StrictWalCheckpointCrashDrill -StrictWorkflowLockResilienceDrill -StrictWorkflowSoakDrill -StrictWorkflowWorkerRestartDrill
 
       - name: Upload release evidence artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: p0-release-evidence-bundle
           path: |
@@ -138,7 +138,7 @@ jobs:
           python ./scripts/security-ci-lane-check.py --label ci --deployment-profile production --scan-path goal_ops_console --max-dependency-vulnerabilities 0 --max-sast-high 0 --max-sast-medium 200 --sbom-output-file artifacts/security-sbom-ci.json --output-file artifacts/security-ci-lane-ci.json
 
       - name: Upload security lane artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-ci-lane
           path: |
@@ -198,3 +198,4 @@ jobs:
         shell: pwsh
         run: |
           python .\scripts\desktop-smoke.py
+

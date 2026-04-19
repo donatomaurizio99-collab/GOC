@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload guard-workflow health report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-guard-workflow-health-check
           path: artifacts/master-guard-workflow-health-check.json
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload guard-workflow health issue upsert report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-guard-workflow-health-issue-upsert
           path: artifacts/master-guard-workflow-health-issue-upsert.json
@@ -116,8 +116,9 @@ jobs:
 
       - name: Upload guard-workflow health chain selftest report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-guard-workflow-health-selftest
           path: artifacts/master-guard-workflow-health-selftest.json
           if-no-files-found: error
+

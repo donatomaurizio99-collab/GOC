@@ -48,10 +48,11 @@ jobs:
             --evidence-dir .\artifacts\p0-disaster-recovery-rehearsal-pack-evidence-scheduled
 
       - name: Upload disaster-recovery rehearsal artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: p0-disaster-recovery-rehearsal-pack-scheduled
           path: |
             artifacts/p0-disaster-recovery-rehearsal-pack-scheduled.json
             artifacts/p0-disaster-recovery-rehearsal-pack-evidence-scheduled/**
           if-no-files-found: error
+

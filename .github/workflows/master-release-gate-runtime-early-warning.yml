@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload runtime early warning report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-gate-runtime-early-warning
           path: artifacts/release-gate-runtime-early-warning.json
@@ -129,7 +129,7 @@ jobs:
 
       - name: Upload runtime warning issue upsert report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-gate-runtime-early-warning-issue-upsert
           path: artifacts/release-gate-runtime-early-warning-issue-upsert.json
@@ -137,8 +137,9 @@ jobs:
 
       - name: Upload runtime alert-age SLO issue upsert report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-gate-runtime-alert-age-slo-issue-upsert
           path: artifacts/release-gate-runtime-alert-age-slo-issue-upsert.json
           if-no-files-found: error
+

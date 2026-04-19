@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload watchdog rehearsal SLO guard report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-watchdog-rehearsal-slo-guard
           path: artifacts/master-watchdog-rehearsal-slo-guard.json
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload watchdog rehearsal SLO issue upsert report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-watchdog-rehearsal-slo-guard-issue-upsert
           path: artifacts/master-watchdog-rehearsal-slo-guard-issue-upsert.json
@@ -119,8 +119,9 @@ jobs:
 
       - name: Upload watchdog rehearsal SLO guard chain selftest report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-watchdog-rehearsal-slo-guard-selftest
           path: artifacts/master-watchdog-rehearsal-slo-guard-selftest.json
           if-no-files-found: error
+

@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload reliability-digest guard report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-reliability-digest-guard
           path: artifacts/master-reliability-digest-guard.json
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload reliability-digest guard issue upsert report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-reliability-digest-guard-issue-upsert
           path: artifacts/master-reliability-digest-guard-issue-upsert.json
@@ -119,8 +119,9 @@ jobs:
 
       - name: Upload reliability-digest guard chain selftest report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-reliability-digest-guard-selftest
           path: artifacts/master-reliability-digest-guard-selftest.json
           if-no-files-found: error
+
