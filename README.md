@@ -956,8 +956,10 @@ Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watch
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
 Nightly drift/warning workflows now upsert deduplicated GitHub issues (labels: `ci-drift` + signal label), enforce the invariant of at most one open issue per signal, reset recovery streak on active alerts, and auto-close recovered issues after 2 healthy nightly runs (configurable threshold). Active-alert comments are cooldown-throttled for unchanged failure states (default every 3 runs), while issue bodies continue to refresh each run. The runtime alert-age SLO escalation issue now carries a mandatory parent runtime-warning reference in its issue body and closes immediately when parent-coupled escalation criteria are no longer met.
 Weekly [master-reliability-digest.yml](.github/workflows/master-reliability-digest.yml) publishes a trend digest (Release Gate runtime, guard degradations, active-comment suppression totals) as artifact + workflow summary for proactive reliability tracking and feeds the deduped warning signal `master-reliability-digest-warning`.
+Reliability-digest guard degradation warnings are now based on consecutive head failures (default: 2) instead of any historical non-success sample in the trend window to reduce alert noise after successful recovery.
 Nightly [master-guard-burnin-check.yml](.github/workflows/master-guard-burnin-check.yml) enforces burn-in health for master guard/digest workflows by requiring recent successful runs with required artifacts (including weekly digest/rehearsal bootstrap windows).
 Daily [master-production-readiness-gate.yml](.github/workflows/master-production-readiness-gate.yml) aggregates required-check integrity, branch-protection drift, guard-workflow health, and guard burn-in into one hard go/no-go production readiness gate.
+Daily [master-ci-drift-status-report.yml](.github/workflows/master-ci-drift-status-report.yml) publishes an operations report for open `ci-drift` issues with blocked/residual classification and issue-age context.
 Core CI and master guard/reliability workflows now set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` to proactively avoid Node-20 action-runtime deprecation drift.
 
 Release Gate workflow artifact includes `p0-release-evidence-bundle` (manifest + copied evidence reports, including safe-mode/A11y/runtime/flake stage outputs, + closure report), Stage-L/M evidence artifacts (`release-gate-evidence-freshness-release-gate.json`, `release-gate-evidence-hash-manifest-release-gate.json`, `release-gate-evidence-manifest-release-gate.json`), Stage-N/O timing-history artifacts (`release-gate-step-timing-schema-release-gate.json`, `release-gate-performance-history-release-gate.json`), Stage-K/P artifacts (`release-gate-step-timings-release-gate.json`, `release-gate-performance-budget-release-gate.json`, `release-gate-stability-final-readiness-release-gate.json`), Stage-Q/R readiness artifacts (`release-gate-staging-soak-readiness-release-gate.json`, `release-gate-rc-canary-rollout-release-gate.json`), Stage-S/T readiness artifacts (`release-gate-evidence-lineage-release-gate.json`, `release-gate-production-readiness-certification-release-gate.json`), Stage-U/AB expanded readiness artifacts (`release-gate-slo-burn-rate-v2-release-gate.json`, `release-gate-deploy-rehearsal-release-gate.json`, `release-gate-chaos-matrix-continuous-release-gate.json`, `release-gate-supply-chain-artifact-trust-release-gate.json`, `release-gate-operations-handoff-readiness-release-gate.json`, `release-gate-evidence-attestation-release-gate.json`, `release-gate-release-train-readiness-release-gate.json`, `release-gate-production-final-attestation-release-gate.json`), Stage-AC/AJ cutover-to-sustainability artifacts (`release-gate-production-cutover-readiness-release-gate.json`, `release-gate-hypercare-activation-release-gate.json`, `release-gate-rollback-trigger-integrity-release-gate.json`, `release-gate-post-cutover-finalization-release-gate.json`, `release-gate-post-release-watch-release-gate.json`, `release-gate-steady-state-certification-release-gate.json`, `release-gate-post-release-continuity-release-gate.json`, `release-gate-production-sustainability-certification-release-gate.json`), and registry attestation artifacts (`release-gate-registry-sync-ci.json`, `release-gate-registry-attestation-gate-ci.json`).
@@ -991,6 +993,9 @@ Weekly master reliability digest workflow:
 
 Nightly master reliability digest guard workflow:
 [master-reliability-digest-guard.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-reliability-digest-guard.yml)
+
+Daily master CI-drift status report workflow:
+[master-ci-drift-status-report.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-ci-drift-status-report.yml)
 
 Nightly master guard burn-in workflow:
 [master-guard-burnin-check.yml](/C:/Users/raffa/OneDrive/Documents/New%20project/.github/workflows/master-guard-burnin-check.yml)
@@ -1060,7 +1065,7 @@ Local master reliability digest command:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\run-master-reliability-digest.ps1 -ReleaseGateWarningSeconds 540 -WarningSustainedRuns 3
+.\scripts\run-master-reliability-digest.ps1 -ReleaseGateWarningSeconds 540 -WarningSustainedRuns 3 -GuardWarningSustainedRuns 2
 ```
 
 Local master reliability digest guard command:
@@ -1068,6 +1073,13 @@ Local master reliability digest guard command:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-master-reliability-digest-guard.ps1 -MaxAgeHours 192 -RequiredArtifact master-reliability-digest
+```
+
+Local master CI-drift status report command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-ci-drift-status-report.ps1 -BlockedAgeHours 24 -PerPage 100
 ```
 
 Local alert-to-action issue upsert command (dry run example):
