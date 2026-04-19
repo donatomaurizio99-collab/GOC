@@ -26,6 +26,10 @@ SIGNAL_SPECS: dict[str, dict[str, Any]] = {
         "title": "[Release Gate Runtime] sustained runtime warning on master",
         "labels": ["ci-drift", "release-gate-runtime"],
     },
+    "release-gate-runtime-slo-guard": {
+        "title": "[CI Drift] release gate runtime SLO guard breached on master",
+        "labels": ["ci-drift", "release-gate-runtime", "release-gate-runtime-guard"],
+    },
     "release-gate-runtime-alert-age-slo": {
         "title": "[Release Gate Runtime] alert issue age SLO breached on master",
         "labels": ["ci-drift", "release-gate-runtime", "alert-age-slo"],
@@ -60,6 +64,10 @@ LABEL_DEFINITIONS: dict[str, dict[str, str]] = {
     "release-gate-runtime": {
         "color": "0E8A16",
         "description": "Sustained Release Gate runtime warning on master CI",
+    },
+    "release-gate-runtime-guard": {
+        "color": "B60205",
+        "description": "Release Gate runtime SLO guard breach on master CI",
     },
     "alert-age-slo": {
         "color": "FBCA04",
@@ -465,18 +473,23 @@ def _signal_alert_state(
         ]
         return alert_triggered, summary, branch, {}
 
-    if signal_id == "release-gate-runtime-early-warning":
+    if signal_id in {"release-gate-runtime-early-warning", "release-gate-runtime-slo-guard"}:
         decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
         metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
         warning_message = str(report.get("warning_message") or "")
         threshold_seconds = config.get("threshold_seconds")
         sustained_runs = config.get("sustained_runs")
         alert_triggered = bool(decision.get("warning_triggered"))
+        signal_prefix = (
+            "Runtime SLO guard breach"
+            if signal_id == "release-gate-runtime-slo-guard"
+            else "Runtime warning"
+        )
         summary = [
             (
                 f"- Warning: {warning_message}"
                 if warning_message
-                else "- Warning: Release Gate runtime warning triggered without explicit message"
+                else f"- {signal_prefix}: triggered without explicit message"
             ),
             (
                 "- Consecutive runs over threshold: "

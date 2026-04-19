@@ -10,6 +10,7 @@ from typing import Any
 
 SIGNAL_ALERT_DECISION_KEY = {
     "master-guard-workflow-health": "guard_workflow_health_degraded",
+    "release-gate-runtime-slo-guard": "warning_triggered",
     "master-watchdog-rehearsal-drill-slo": "watchdog_rehearsal_slo_breached",
     "master-reliability-digest-guard": "reliability_digest_guard_breached",
 }

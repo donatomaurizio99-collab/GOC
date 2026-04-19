@@ -14,6 +14,7 @@ from typing import Any
 BLOCKING_SIGNAL_IDS = {
     "master-branch-protection-drift",
     "master-guard-workflow-health",
+    "release-gate-runtime-slo-guard",
     "release-gate-runtime-alert-age-slo",
     "master-watchdog-rehearsal-drill-slo",
     "master-reliability-digest-guard",
