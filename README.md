@@ -952,14 +952,14 @@ Guard-health issue summaries now include per-degraded-workflow diagnostics (reas
 Guard-health issue body/comments now include a dedicated `Immediate Actions` section with direct first-response steps and a local repro command.
 Nightly guard workflows now execute `run-master-guard-chain-selftest.ps1` to validate guard-report -> issue-upsert chain consistency and publish dedicated selftest artifacts.
 Weekly [master-watchdog-rehearsal-drill.yml](.github/workflows/master-watchdog-rehearsal-drill.yml) runs an injected-failure drill for the watchdog chain, verifies guard-health alert upsert behavior in dry-run mode, and publishes MTTR + run-link summary evidence for faster on-call triage.
-Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watchdog-rehearsal-slo-guard.yml) verifies the rehearsal drill SLO (>=1 successful run in 8 days) and raises a deduped `ci-drift` issue with explicit `stale`/`failed` reason plus latest run reference.
+Nightly [master-watchdog-rehearsal-slo-guard.yml](.github/workflows/master-watchdog-rehearsal-slo-guard.yml) verifies the rehearsal drill SLO (>=1 successful run in 8 days), enforces latest drill MTTR target evidence, and raises a deduped `ci-drift` issue with explicit `stale`/`failed`/`mttr` reason plus latest run reference.
 Nightly release-gate runtime early warning now flags sustained runtime slowdown (default: 3 consecutive runs >= 540s) before it escalates into flaky failures, and escalates when an active runtime warning issue stays open beyond the alert-age SLO (default: 72h).
 Nightly [master-release-gate-runtime-slo-guard.yml](.github/workflows/master-release-gate-runtime-slo-guard.yml) enforces a hard runtime guard (default: 3 consecutive runs >= 600s) and raises a deduped `ci-drift` blocking issue when breached.
 Nightly drift/warning workflows now upsert deduplicated GitHub issues (labels: `ci-drift` + signal label), enforce the invariant of at most one open issue per signal, reset recovery streak on active alerts, and auto-close recovered issues after 2 healthy nightly runs (configurable threshold). Active-alert comments are cooldown-throttled for unchanged failure states (default every 3 runs), while issue bodies continue to refresh each run. The runtime alert-age SLO escalation issue now carries a mandatory parent runtime-warning reference in its issue body and closes immediately when parent-coupled escalation criteria are no longer met.
 Weekly [master-reliability-digest.yml](.github/workflows/master-reliability-digest.yml) publishes a trend digest (Release Gate runtime, guard degradations, active-comment suppression totals) as artifact + workflow summary for proactive reliability tracking and feeds the deduped warning signal `master-reliability-digest-warning`.
 Reliability-digest guard degradation warnings are now based on consecutive head failures (default: 2) instead of any historical non-success sample in the trend window to reduce alert noise after successful recovery.
 Nightly [master-guard-burnin-check.yml](.github/workflows/master-guard-burnin-check.yml) enforces burn-in health for master guard/digest workflows by requiring recent successful runs with required artifacts (including weekly digest/rehearsal bootstrap windows).
-Daily [master-production-readiness-gate.yml](.github/workflows/master-production-readiness-gate.yml) aggregates required-check integrity, branch-protection drift, guard-workflow health, and guard burn-in into one hard go/no-go production readiness gate.
+Daily [master-production-readiness-gate.yml](.github/workflows/master-production-readiness-gate.yml) aggregates required-check integrity, branch-protection drift, guard-workflow health, guard burn-in, and watchdog rehearsal SLO/MTTR integrity into one hard go/no-go production readiness gate.
 Daily [master-ci-drift-status-report.yml](.github/workflows/master-ci-drift-status-report.yml) publishes an operations report for open `ci-drift` issues with blocked/residual classification and issue-age context.
 Core CI and master guard/reliability workflows now set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` and standardize artifact uploads on `actions/upload-artifact@v7` to proactively avoid Node-20 action-runtime deprecation drift.
 
@@ -1054,7 +1054,14 @@ Local production readiness gate command:
 
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
-.\scripts\run-master-production-readiness-gate.ps1 -RequiredChecksReportFile artifacts\master-required-checks-24h-report-readiness.json -BranchProtectionReportFile artifacts\master-branch-protection-drift-guard-readiness.json -GuardHealthReportFile artifacts\master-guard-workflow-health-check-readiness.json -GuardBurninReportFile artifacts\master-guard-burnin-check-readiness.json
+.\scripts\run-master-production-readiness-gate.ps1 -RequiredChecksReportFile artifacts\master-required-checks-24h-report-readiness.json -BranchProtectionReportFile artifacts\master-branch-protection-drift-guard-readiness.json -GuardHealthReportFile artifacts\master-guard-workflow-health-check-readiness.json -GuardBurninReportFile artifacts\master-guard-burnin-check-readiness.json -WatchdogRehearsalGuardReportFile artifacts\master-watchdog-rehearsal-slo-guard-readiness.json
+```
+
+Local watchdog rehearsal SLO guard command:
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-master-watchdog-rehearsal-slo-guard.ps1 -MaxAgeHours 192 -MttrTargetSeconds 300 -PerPage 20
 ```
 
 Local guard-chain selftest command:
@@ -1069,6 +1076,13 @@ Local watchdog rehearsal drill command:
 ```powershell
 Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
 .\scripts\run-master-watchdog-rehearsal-drill.ps1 -MttrTargetSeconds 300
+```
+
+Watchdog MTTR calibration command (use after 10-14 daily samples):
+
+```powershell
+Set-Location "C:\Users\raffa\OneDrive\Documents\New project"
+.\scripts\run-watchdog-rehearsal-mttr-calibrate.ps1 -MinSamples 10 -MaxSamples 14 -WriteUpdates
 ```
 
 Local release-gate runtime early warning command:

@@ -37,6 +37,18 @@ on:
         description: "Required successful completed runs for weekly watchdog rehearsal drill workflow"
         required: false
         default: "1"
+      watchdog_max_age_hours:
+        description: "Maximum age (hours) for latest watchdog rehearsal drill run"
+        required: false
+        default: "192"
+      watchdog_per_page:
+        description: "Maximum completed watchdog rehearsal drill runs fetched"
+        required: false
+        default: "20"
+      watchdog_mttr_target_seconds:
+        description: "Alert-chain MTTR threshold (seconds) for watchdog rehearsal guard"
+        required: false
+        default: "300"
       allow_not_ready:
         description: "Do not fail workflow when production-readiness criteria are not met"
         required: false
@@ -120,6 +132,24 @@ jobs:
             -AllowDegraded `
             -OutputFile "artifacts\master-guard-burnin-check-readiness.json"
 
+      - name: Build watchdog rehearsal guard report
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_FULL: ${{ github.repository }}
+          WATCHDOG_MAX_AGE_HOURS: ${{ github.event.inputs.watchdog_max_age_hours || '192' }}
+          WATCHDOG_PER_PAGE: ${{ github.event.inputs.watchdog_per_page || '20' }}
+          WATCHDOG_MTTR_TARGET_SECONDS: ${{ github.event.inputs.watchdog_mttr_target_seconds || '300' }}
+        run: |
+          .\scripts\run-master-watchdog-rehearsal-slo-guard.ps1 `
+            -Repo "$env:REPO_FULL" `
+            -MaxAgeHours "$env:WATCHDOG_MAX_AGE_HOURS" `
+            -PerPage "$env:WATCHDOG_PER_PAGE" `
+            -MttrTargetSeconds "$env:WATCHDOG_MTTR_TARGET_SECONDS" `
+            -AllowBreach `
+            -OutputFile "artifacts\master-watchdog-rehearsal-slo-guard-readiness.json"
+
       - name: Evaluate production readiness gate
         if: always()
         shell: pwsh
@@ -132,6 +162,7 @@ jobs:
               -BranchProtectionReportFile "artifacts\master-branch-protection-drift-guard-readiness.json" `
               -GuardHealthReportFile "artifacts\master-guard-workflow-health-check-readiness.json" `
               -GuardBurninReportFile "artifacts\master-guard-burnin-check-readiness.json" `
+              -WatchdogRehearsalGuardReportFile "artifacts\master-watchdog-rehearsal-slo-guard-readiness.json" `
               -OutputFile "artifacts\master-production-readiness-gate.json" `
               -AllowNotReady
           } else {
@@ -140,6 +171,7 @@ jobs:
               -BranchProtectionReportFile "artifacts\master-branch-protection-drift-guard-readiness.json" `
               -GuardHealthReportFile "artifacts\master-guard-workflow-health-check-readiness.json" `
               -GuardBurninReportFile "artifacts\master-guard-burnin-check-readiness.json" `
+              -WatchdogRehearsalGuardReportFile "artifacts\master-watchdog-rehearsal-slo-guard-readiness.json" `
               -OutputFile "artifacts\master-production-readiness-gate.json"
           }
 

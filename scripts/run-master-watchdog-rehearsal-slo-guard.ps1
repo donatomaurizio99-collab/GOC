@@ -4,8 +4,11 @@ param(
     [string]$Branch = "master",
     [string]$WorkflowName = "Master Watchdog Rehearsal Drill",
     [double]$MaxAgeHours = 192,
+    [double]$MttrTargetSeconds = 300,
     [int]$PerPage = 20,
     [string]$RunsFile = "",
+    [string]$DrillReportFile = "",
+    [string]$DrillArtifactName = "master-guard-workflow-health-rehearsal-drill",
     [string]$OutputFile = "artifacts\\master-watchdog-rehearsal-slo-guard.json",
     [switch]$AllowBreach
 )
@@ -22,11 +25,16 @@ $args = @(
     "--branch", $Branch,
     "--workflow-name", $WorkflowName,
     "--max-age-hours", [string]$MaxAgeHours,
+    "--mttr-target-seconds", [string]$MttrTargetSeconds,
     "--per-page", [string]$PerPage,
+    "--drill-artifact-name", $DrillArtifactName,
     "--output-file", $OutputFile
 )
 if ($RunsFile) {
     $args += @("--runs-file", $RunsFile)
+}
+if ($DrillReportFile) {
+    $args += @("--drill-report-file", $DrillReportFile)
 }
 if ($AllowBreach) {
     $args += "--allow-breach"

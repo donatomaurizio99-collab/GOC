@@ -16,6 +16,7 @@ BLOCKING_SIGNAL_IDS = {
     "master-guard-workflow-health",
     "release-gate-runtime-slo-guard",
     "release-gate-runtime-alert-age-slo",
+    # Watchdog rehearsal SLO covers stale/failed and MTTR breach modes.
     "master-watchdog-rehearsal-drill-slo",
     "master-reliability-digest-guard",
 }

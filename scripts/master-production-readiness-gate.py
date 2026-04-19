@@ -46,6 +46,7 @@ def run_production_readiness_gate(
     branch_protection_report_file: Path,
     guard_health_report_file: Path,
     guard_burnin_report_file: Path,
+    watchdog_rehearsal_guard_report_file: Path,
     allow_not_ready: bool,
     output_file: Path,
 ) -> dict[str, Any]:
@@ -63,12 +64,14 @@ def run_production_readiness_gate(
     branch_protection_payload = load(branch_protection_report_file, "branch_protection")
     guard_health_payload = load(guard_health_report_file, "guard_health")
     guard_burnin_payload = load(guard_burnin_report_file, "guard_burnin")
+    watchdog_rehearsal_guard_payload = load(watchdog_rehearsal_guard_report_file, "watchdog_rehearsal_guard")
 
     reports_present = bool(
         required_checks_payload is not None
         and branch_protection_payload is not None
         and guard_health_payload is not None
         and guard_burnin_payload is not None
+        and watchdog_rehearsal_guard_payload is not None
     )
 
     required_checks_non_green_total = _safe_int(
@@ -115,12 +118,21 @@ def run_production_readiness_gate(
         guard_burnin_payload is not None and not guard_burnin_degraded
     )
 
+    watchdog_rehearsal_slo_breached = _safe_bool(
+        ((watchdog_rehearsal_guard_payload or {}).get("decision") or {}).get("watchdog_rehearsal_slo_breached"),
+        True,
+    )
+    watchdog_rehearsal_guard_integrity = bool(
+        watchdog_rehearsal_guard_payload is not None and not watchdog_rehearsal_slo_breached
+    )
+
     production_ready = bool(
         reports_present
         and required_checks_green
         and branch_protection_integrity
         and guard_workflow_health_integrity
         and guard_burnin_integrity
+        and watchdog_rehearsal_guard_integrity
     )
 
     criteria = [
@@ -163,6 +175,14 @@ def run_production_readiness_gate(
                 f"allow_not_ready={allow_not_ready}"
             ),
         },
+        {
+            "name": "watchdog_rehearsal_guard_integrity",
+            "passed": bool(watchdog_rehearsal_guard_integrity or allow_not_ready),
+            "details": (
+                f"watchdog_rehearsal_slo_breached={watchdog_rehearsal_slo_breached}, "
+                f"allow_not_ready={allow_not_ready}"
+            ),
+        },
     ]
     failed_criteria = [item for item in criteria if not bool(item.get("passed"))]
     success = len(failed_criteria) == 0
@@ -173,6 +193,7 @@ def run_production_readiness_gate(
         f"branch_protection_drift_detected={str(branch_protection_drift_detected).lower()}",
         f"guard_workflow_health_degraded={str(guard_workflow_health_degraded).lower()}",
         f"guard_burnin_degraded={str(guard_burnin_degraded).lower()}",
+        f"watchdog_rehearsal_slo_breached={str(watchdog_rehearsal_slo_breached).lower()}",
     ]
 
     report = {
@@ -183,6 +204,7 @@ def run_production_readiness_gate(
             "branch_protection_report_file": str(branch_protection_report_file),
             "guard_health_report_file": str(guard_health_report_file),
             "guard_burnin_report_file": str(guard_burnin_report_file),
+            "watchdog_rehearsal_guard_report_file": str(watchdog_rehearsal_guard_report_file),
             "allow_not_ready": bool(allow_not_ready),
             "output_file": str(output_file),
         },
@@ -193,6 +215,7 @@ def run_production_readiness_gate(
             "guard_workflow_health_degraded": bool(guard_workflow_health_degraded),
             "guard_workflow_coverage_contract_ok": bool(guard_workflow_coverage_contract_ok),
             "guard_burnin_degraded": bool(guard_burnin_degraded),
+            "watchdog_rehearsal_slo_breached": bool(watchdog_rehearsal_slo_breached),
             "reports_load_errors_total": int(len(errors)),
             "criteria_failed": int(len(failed_criteria)),
         },
@@ -226,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Aggregate required-check integrity, branch-protection drift, guard-workflow health, "
-            "and guard burn-in into a single production-readiness go/no-go signal."
+            "guard burn-in, and watchdog rehearsal guard integrity into a single production-readiness go/no-go signal."
         )
     )
     parser.add_argument("--label", default="master-production-readiness-gate")
@@ -246,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         "--guard-burnin-report-file",
         default="artifacts/master-guard-burnin-check-readiness.json",
     )
+    parser.add_argument(
+        "--watchdog-rehearsal-guard-report-file",
+        default="artifacts/master-watchdog-rehearsal-slo-guard-readiness.json",
+    )
     parser.add_argument("--allow-not-ready", action="store_true")
     parser.add_argument("--output-file", default="artifacts/master-production-readiness-gate.json")
     args = parser.parse_args(argv)
@@ -258,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             branch_protection_report_file=Path(str(args.branch_protection_report_file)).expanduser(),
             guard_health_report_file=Path(str(args.guard_health_report_file)).expanduser(),
             guard_burnin_report_file=Path(str(args.guard_burnin_report_file)).expanduser(),
+            watchdog_rehearsal_guard_report_file=Path(str(args.watchdog_rehearsal_guard_report_file)).expanduser(),
             allow_not_ready=bool(args.allow_not_ready),
             output_file=output_file,
         )

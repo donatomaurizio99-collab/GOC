@@ -1,0 +1,12 @@
+{
+  "calibration_window": {
+    "headroom_percent": 10.0,
+    "max_samples": 14,
+    "min_samples": 10,
+    "percentile_target": 95.0
+  },
+  "generated_at_utc": "2026-04-19T00:00:00Z",
+  "samples_total": 0,
+  "target_mttr_seconds": 300.0,
+  "version": "1.0.0"
+}
