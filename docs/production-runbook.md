@@ -1679,6 +1679,99 @@ Actions:
    - `decision.recommended_action = production_ready_sustained`
 3. Treat AJ as the sustained production-ready certificate for long-running operations after cutover/hypercare/steady-state completion.
 
+### 3.53 Master watchdog burn-in hard exit criteria (14-day window)
+
+Symptoms:
+- master guard burn-in report is non-green and promotion readiness is unclear without opening multiple artifacts
+- on-call needs deterministic go/no-go conditions for release readiness over the rolling 14-day window
+
+Actions:
+1. Run burn-in check:
+   ```powershell
+   .\scripts\run-master-guard-burnin-check.ps1 -BurninWindowDays 14 -PerPage 20 -RequiredSuccessfulRuns 3 -DigestRequiredSuccessfulRuns 1 -DrillRequiredSuccessfulRuns 1 -OutputFile "artifacts\master-guard-burnin-check.json"
+   ```
+2. Validate hard exit criteria exactly:
+   - `missing_artifacts = 0`
+   - `unjustified_breaches = 0`
+   - `p95_mttr <= target`
+3. Confirm machine-readable decision fields:
+   - `decision.burnin_status = green`
+   - `decision.hard_exit_criteria_met = true`
+   - `decision.non_green = false`
+4. If any hard exit criterion fails, treat as release blocker and remediate before retrying readiness gate.
+
+### 3.54 Watchdog rehearsal breach handling (`stale` / `failed` / `mttr`)
+
+#### 3.54.1 `stale` breach
+
+Owner:
+- Primary: CI/Release on-call
+- Secondary: Platform reliability owner
+
+SLA / expected response time:
+- Triage start within 30 minutes
+- Fresh successful rehearsal drill run within 2 hours
+
+Diagnosis and recovery steps:
+1. Open latest guard issue summary and confirm stale context (`latest_run_age_hours > max_age_hours`).
+2. Trigger `master-watchdog-rehearsal-drill.yml` manually and monitor completion.
+3. Verify drill artifacts exist:
+   - `master-guard-workflow-health-rehearsal-check.json`
+   - `master-guard-workflow-health-rehearsal-issue-upsert.json`
+   - `master-guard-workflow-health-rehearsal-drill.json`
+4. Re-run `master-watchdog-rehearsal-slo-guard.yml` and confirm stale breach is cleared.
+
+Closure criteria:
+- latest rehearsal run is successful and within freshness SLO
+- guard report shows `decision.breach_reason = none`
+- alert issue transitions to recovery/closed per lifecycle policy
+
+#### 3.54.2 `failed` breach
+
+Owner:
+- Primary: workflow owner for failing rehearsal path
+- Secondary: CI/Release on-call
+
+SLA / expected response time:
+- Initial failure diagnosis within 30 minutes
+- validated green rerun within 4 hours
+
+Diagnosis and recovery steps:
+1. Open latest failing run (`run_id` + URL from issue summary) and inspect failing job logs.
+2. Fix root cause in workflow/script path, rerun rehearsal drill, and confirm success.
+3. Confirm required artifact set is present and non-expired in rerun output.
+4. Re-run `master-watchdog-rehearsal-slo-guard.yml` to verify failure breach is resolved.
+
+Closure criteria:
+- latest rehearsal run conclusion is `success`
+- `latest_run_missing_required_artifacts = []`
+- guard report returns `decision.watchdog_rehearsal_slo_breached = false`
+
+#### 3.54.3 `mttr` breach
+
+Owner:
+- Primary: Reliability engineering owner
+- Secondary: CI/Release on-call
+
+SLA / expected response time:
+- MTTR regression triage within 1 hour
+- mitigation plan and target action within same business day
+
+Diagnosis and recovery steps:
+1. Confirm MTTR evidence line in issue summary (`Latest alert-chain MTTR` vs target).
+2. Run weekly calibration evidence flow (no silent policy changes):
+   ```powershell
+   .\scripts\run-watchdog-rehearsal-mttr-calibrate.ps1 -MinSamples 10 -MaxSamples 14 -RecommendationDeltaThresholdPercent 10 -OutputFile "artifacts\watchdog-rehearsal-mttr-calibration-weekly.json"
+   ```
+3. If recommendation delta is >10%, open/update calibration issue with explicit recommendation and evidence.
+4. If calibration says no action required, keep policy target and optimize runtime path until MTTR falls below active target.
+5. Re-run rehearsal drill + SLO guard to confirm sustained MTTR recovery.
+
+Closure criteria:
+- guard report shows `metrics.mttr_seconds <= metrics.mttr_target_seconds`
+- burn-in report hard exit criteria remain green (`p95_mttr <= target`)
+- calibration output records `decision.no_action_required = true` or a tracked approved policy update
+
 ## 4. Operational Defaults
 
 - Keep single-instance protection enabled in production.

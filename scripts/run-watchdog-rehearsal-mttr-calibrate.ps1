@@ -7,6 +7,8 @@ param(
     [int]$MaxSamples = 14,
     [double]$PercentileTarget = 95,
     [double]$HeadroomPercent = 10,
+    [string]$ActivePolicyFile = "docs\\watchdog-rehearsal-mttr-policy.json",
+    [double]$RecommendationDeltaThresholdPercent = 10,
     [string]$OutputFile = "artifacts\\watchdog-rehearsal-mttr-calibration.json",
     [string]$PolicyOutputFile = "docs\\watchdog-rehearsal-mttr-policy.json",
     [switch]$WriteUpdates,
@@ -26,6 +28,8 @@ $args = @(
     "--max-samples", [string]$MaxSamples,
     "--percentile-target", [string]$PercentileTarget,
     "--headroom-percent", [string]$HeadroomPercent,
+    "--active-policy-file", $ActivePolicyFile,
+    "--recommendation-delta-threshold-percent", [string]$RecommendationDeltaThresholdPercent,
     "--output-file", $OutputFile,
     "--policy-output-file", $PolicyOutputFile
 )

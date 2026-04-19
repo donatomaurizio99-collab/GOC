@@ -11499,6 +11499,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "release-gate-runtime-slo-guard" in wrapper
     assert "release-gate-runtime-alert-age-slo" in wrapper
     assert "master-watchdog-rehearsal-drill-slo" in wrapper
+    assert "watchdog-rehearsal-mttr-calibration" in wrapper
     assert "master-reliability-digest-warning" in wrapper
     assert "master-reliability-digest-guard" in wrapper
 
@@ -12754,6 +12755,8 @@ def test_242b_ci_alert_issue_upsert_creates_issue_for_watchdog_rehearsal_slo():
     created_body = str(issue_oplog["actions"][0]["body"])
     assert "Breach reason: stale" in created_body
     assert "Latest rehearsal run: #778899 (https://github.com/donatomaurizio99-collab/GOC/actions/runs/778899)" in created_body
+    assert "Missing drill artifacts: none" in created_body
+    assert "Recommended next action: Trigger `master-watchdog-rehearsal-drill.yml` immediately" in created_body
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -12834,6 +12837,7 @@ def test_242c_ci_alert_issue_upsert_includes_watchdog_mttr_details():
     assert "Breach reason: mttr" in created_body
     assert "Latest alert-chain MTTR: 412.500s (target=300.000s)" in created_body
     assert "MTTR evidence loaded: yes (source=file)" in created_body
+    assert "Recommended next action: Investigate alert-chain latency contributors" in created_body
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -14039,6 +14043,8 @@ def test_256_master_guard_burnin_workflow_wrapper_and_docs_wiring():
     assert "required_successful_runs" in workflow
     assert "digest_required_successful_runs" in workflow
     assert "drill_required_successful_runs" in workflow
+    assert "burnin_window_days" in workflow
+    assert "mttr_target_seconds" in workflow
     assert "allow_degraded" in workflow
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
 
@@ -14046,12 +14052,17 @@ def test_256_master_guard_burnin_workflow_wrapper_and_docs_wiring():
     assert "--required-successful-runs" in wrapper
     assert "--digest-required-successful-runs" in wrapper
     assert "--drill-required-successful-runs" in wrapper
+    assert "--burnin-window-days" in wrapper
+    assert "--mttr-policy-file" in wrapper
+    assert "--watchdog-slo-workflow-name" in wrapper
     assert "--workflow-specs-file" in wrapper
     assert "--allow-degraded" in wrapper
 
     assert "master-guard-burnin-check.yml" in readme
     assert "run-master-guard-burnin-check.ps1" in readme
     assert "burn-in health for master guard/digest workflows" in readme
+    assert "missing_artifacts=0" in readme
+    assert "unjustified_breaches=0" in readme
 
 
 def test_257_master_guard_burnin_check_detects_insufficient_runs():
@@ -14146,6 +14157,173 @@ def test_257_master_guard_burnin_check_detects_insufficient_runs():
     assert payload["decision"]["guard_burnin_degraded"] is True
     assert payload["degraded_workflow_names"] == ["Master Guard Burn-in Probe"]
     assert payload["evaluations"][0]["has_sufficient_runs"] is False
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_257b_master_guard_burnin_check_reports_hard_exit_criteria_and_window_trend():
+    workspace = _local_test_dir("pytest-master-guard-burnin-check-hard-exit-window").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    fixtures_file = workspace / "fixtures.json"
+    workflow_specs_file = workspace / "workflow-specs.json"
+
+    workflow_specs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "workflow_name": "Master Watchdog Rehearsal SLO Guard",
+                    "workflow_file": "master-watchdog-rehearsal-slo-guard.yml",
+                    "required_artifacts": ["master-watchdog-rehearsal-slo-guard"],
+                    "required_successful_runs": 1,
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    fixtures_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": {
+                    "Master Watchdog Rehearsal SLO Guard": [
+                        {
+                            "id": 991001,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-28T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991001",
+                        },
+                        {
+                            "id": 991002,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-27T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991002",
+                        },
+                        {
+                            "id": 991003,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-26T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991003",
+                        },
+                        {
+                            "id": 991004,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-25T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991004",
+                        },
+                        {
+                            "id": 991005,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-10T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991005",
+                        },
+                        {
+                            "id": 991006,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "updated_at": "2026-04-09T05:00:00Z",
+                            "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/991006",
+                        },
+                    ]
+                },
+                "run_artifacts": {
+                    "991001": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                    "991002": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                    "991003": {"artifacts": []},
+                    "991004": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                    "991005": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                    "991006": {"artifacts": [{"name": "master-watchdog-rehearsal-slo-guard", "expired": False}]},
+                },
+                "run_reports": {
+                    "991001": {
+                        "label": "pytest-watchdog-slo-run-991001",
+                        "metrics": {"mttr_seconds": 360.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": True, "breach_reason": "mttr"},
+                    },
+                    "991002": {
+                        "label": "pytest-watchdog-slo-run-991002",
+                        "metrics": {"mttr_seconds": 280.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": True, "breach_reason": "stale"},
+                    },
+                    "991004": {
+                        "label": "pytest-watchdog-slo-run-991004",
+                        "metrics": {"mttr_seconds": 320.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": True, "breach_reason": "failed"},
+                    },
+                    "991005": {
+                        "label": "pytest-watchdog-slo-run-991005",
+                        "metrics": {"mttr_seconds": 250.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": False, "breach_reason": "none"},
+                    },
+                    "991006": {
+                        "label": "pytest-watchdog-slo-run-991006",
+                        "metrics": {"mttr_seconds": 330.0, "mttr_target_seconds": 300.0},
+                        "decision": {"watchdog_rehearsal_slo_breached": True, "breach_reason": "mttr"},
+                    },
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-guard-burnin-check.py"),
+        "--label",
+        "pytest-master-guard-burnin-hard-exit-window",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--fixtures-file",
+        str(fixtures_file.resolve()),
+        "--workflow-specs-file",
+        str(workflow_specs_file.resolve()),
+        "--required-successful-runs",
+        "1",
+        "--burnin-window-days",
+        "14",
+        "--mttr-target-seconds",
+        "300",
+        "--watchdog-slo-workflow-name",
+        "Master Watchdog Rehearsal SLO Guard",
+        "--watchdog-slo-artifact-name",
+        "master-watchdog-rehearsal-slo-guard",
+        "--watchdog-slo-report-filename",
+        "master-watchdog-rehearsal-slo-guard.json",
+        "--now-utc",
+        "2026-04-29T00:00:00Z",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master guard burn-in check failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["guard_burnin_degraded"] is True
+    assert payload["decision"]["burnin_status"] == "non_green"
+    assert payload["decision"]["hard_exit_criteria_met"] is False
+    assert payload["burnin_window"]["current_window"]["samples_total"] == 3
+    assert payload["burnin_window"]["current_window"]["breach_counts"]["total"] == 3
+    assert payload["burnin_window"]["current_window"]["breach_counts"]["by_reason"]["stale"] == 1
+    assert payload["burnin_window"]["current_window"]["breach_counts"]["by_reason"]["failed"] == 1
+    assert payload["burnin_window"]["current_window"]["breach_counts"]["by_reason"]["mttr"] == 1
+    assert payload["burnin_window"]["current_window"]["missing_artifacts"]["total"] == 1
+    assert payload["burnin_window"]["trend"]["available"] is True
+    assert payload["burnin_window"]["trend"]["breach_total_delta"] == 2
+    assert float(payload["burnin_window"]["current_window"]["mttr_percentiles_seconds"]["p95"]) > 300.0
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -14822,6 +15000,19 @@ def test_265b_watchdog_rehearsal_mttr_calibration_wrapper_and_script_reports_rec
 
     output_file = workspace / "watchdog-rehearsal-mttr-calibration.json"
     policy_file = workspace / "watchdog-rehearsal-mttr-policy.json"
+    active_policy_file = workspace / "watchdog-rehearsal-active-policy.json"
+    active_policy_file.write_text(
+        json.dumps(
+            {
+                "target_mttr_seconds": 300.0,
+                "generated_at_utc": "2026-04-19T00:00:00Z",
+                "version": "1.0.0",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -14834,6 +15025,10 @@ def test_265b_watchdog_rehearsal_mttr_calibration_wrapper_and_script_reports_rec
         "10",
         "--max-samples",
         "14",
+        "--active-policy-file",
+        str(active_policy_file.resolve()),
+        "--recommendation-delta-threshold-percent",
+        "10",
         "--output-file",
         str(output_file.resolve()),
         "--policy-output-file",
@@ -14852,6 +15047,9 @@ def test_265b_watchdog_rehearsal_mttr_calibration_wrapper_and_script_reports_rec
     assert payload["metrics"]["sample_values_total"] == 12
     assert payload["metrics"]["sample_requirements_met"] == 1
     assert float(payload["metrics"]["recommended_target_seconds"]) > 300.0
+    assert payload["decision"]["action_required"] is True
+    assert payload["decision"]["no_action_required"] is False
+    assert payload["decision"]["recommended_action"] == "watchdog_mttr_target_update_recommended"
     assert output_file.exists()
     assert policy_file.exists()
 
@@ -14860,9 +15058,190 @@ def test_265b_watchdog_rehearsal_mttr_calibration_wrapper_and_script_reports_rec
     assert "watchdog-rehearsal-mttr-calibrate.py" in wrapper
     assert "--min-samples" in wrapper
     assert "--max-samples" in wrapper
+    assert "--active-policy-file" in wrapper
+    assert "--recommendation-delta-threshold-percent" in wrapper
     assert "--write-updates" in wrapper
     assert "run-watchdog-rehearsal-mttr-calibrate.ps1" in readme
     assert "10-14 daily samples" in readme
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_265c_watchdog_rehearsal_mttr_calibration_sets_no_action_required_with_small_delta():
+    workspace = _local_test_dir("pytest-watchdog-rehearsal-mttr-calibration-no-action").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_paths: list[Path] = []
+    base_time = datetime(2026, 4, 1, 6, 0, tzinfo=timezone.utc)
+    for index in range(10):
+        report_path = workspace / f"master-guard-workflow-health-rehearsal-drill-no-action-{index:02d}.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "label": "pytest-watchdog-rehearsal-drill-no-action",
+                    "metrics": {
+                        "alert_chain_mttr_seconds": float(250 + (index * 4)),
+                        "mttr_target_seconds": 330.0,
+                    },
+                    "generated_at_utc": (
+                        base_time + timedelta(days=index)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        report_paths.append(report_path)
+
+    active_policy_file = workspace / "watchdog-rehearsal-active-policy-no-action.json"
+    active_policy_file.write_text(
+        json.dumps(
+            {
+                "target_mttr_seconds": 330.0,
+                "generated_at_utc": "2026-04-19T00:00:00Z",
+                "version": "1.0.0",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    output_file = workspace / "watchdog-rehearsal-mttr-calibration-no-action.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "watchdog-rehearsal-mttr-calibrate.py"),
+        "--label",
+        "pytest-watchdog-rehearsal-mttr-calibration-no-action",
+        "--report-files",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--min-samples",
+        "10",
+        "--max-samples",
+        "10",
+        "--active-policy-file",
+        str(active_policy_file.resolve()),
+        "--recommendation-delta-threshold-percent",
+        "10",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["sample_requirements_met"] is True
+    assert payload["decision"]["action_required"] is False
+    assert payload["decision"]["no_action_required"] is True
+    assert payload["decision"]["recommended_action"] == "no_action_required"
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_265d_master_watchdog_mttr_weekly_calibration_workflow_wiring():
+    project_root = Path(__file__).resolve().parents[1]
+    workflow = (
+        project_root / ".github" / "workflows" / "master-watchdog-mttr-weekly-calibration.yml"
+    ).read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    assert "name: Master Watchdog MTTR Weekly Calibration" in workflow
+    assert 'cron: "15 6 * * 1"' in workflow
+    assert ".\\scripts\\run-watchdog-rehearsal-mttr-calibrate.ps1" in workflow
+    assert ".\\scripts\\run-ci-alert-issue-upsert.ps1" in workflow
+    assert "watchdog-rehearsal-mttr-calibration" in workflow
+    assert "watchdog-rehearsal-mttr-calibration-weekly.json" in workflow
+    assert "no_action_required" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
+
+    assert "master-watchdog-mttr-weekly-calibration.yml" in readme
+    assert "watchdog-rehearsal-mttr-calibration-weekly.json" in readme
+
+
+def test_265e_ci_alert_issue_upsert_creates_watchdog_mttr_calibration_issue_when_action_required():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-watchdog-mttr-calibration").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "watchdog-rehearsal-mttr-calibration-weekly.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert-watchdog-mttr-calibration.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-watchdog-mttr-calibration",
+                "config": {
+                    "branch": "master",
+                    "recommendation_delta_threshold_percent": 10.0,
+                },
+                "metrics": {
+                    "sample_values_total": 12,
+                    "active_target_seconds": 300.0,
+                    "recommended_target_seconds": 342.0,
+                    "recommendation_delta_percent": 14.0,
+                },
+                "decision": {
+                    "sample_requirements_met": True,
+                    "action_required": True,
+                    "no_action_required": False,
+                    "recommended_action": "watchdog_mttr_target_update_recommended",
+                },
+                "active_policy": {"source": "policy_file", "load_error": None},
+                "generated_at_utc": "2026-04-19T06:30:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-watchdog-mttr-calibration-upsert",
+        "--signal-id",
+        "watchdog-rehearsal-mttr-calibration",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+    assert payload["issue"]["title"] == "[CI Drift] watchdog rehearsal MTTR calibration drift on master"
+    assert "ci-alert-key:watchdog-rehearsal-mttr-calibration:donatomaurizio99-collab/GOC:master" in payload["issue"]["marker"]
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    created_body = str(issue_oplog["actions"][0]["body"])
+    assert "Action required: yes" in created_body
+    assert "Recommended MTTR target: 342.000s" in created_body
+    assert "Active MTTR target: 300.000s" in created_body
+    assert "Recommended-target delta: 14.000% (threshold=10.000%)" in created_body
 
     shutil.rmtree(workspace, ignore_errors=True)
 
