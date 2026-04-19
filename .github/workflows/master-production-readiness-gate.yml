@@ -157,8 +157,9 @@ jobs:
 
       - name: Upload production readiness gate report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-production-readiness-gate
           path: artifacts/master-production-readiness-gate.json
           if-no-files-found: error
+

@@ -69,8 +69,9 @@ jobs:
 
       - name: Upload 24h required checks report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: master-required-checks-24h-report
           path: artifacts/master-required-checks-24h-report.json
           if-no-files-found: error
+

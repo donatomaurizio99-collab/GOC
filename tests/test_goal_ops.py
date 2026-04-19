@@ -14427,3 +14427,20 @@ def test_265_master_ci_drift_status_report_classifies_blocked_and_residual_from_
     assert "`residual`" in markdown
 
     shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_266_workflows_use_node24_ready_artifact_action_major():
+    project_root = Path(__file__).resolve().parents[1]
+    workflows_dir = project_root / ".github" / "workflows"
+
+    legacy_artifact_refs: list[str] = []
+    modern_artifact_refs = 0
+    for workflow_path in sorted(workflows_dir.glob("*.yml")):
+        text = workflow_path.read_text(encoding="utf-8")
+        if "actions/upload-artifact@v7" in text:
+            modern_artifact_refs += text.count("actions/upload-artifact@v7")
+        if "actions/upload-artifact@v4" in text:
+            legacy_artifact_refs.append(workflow_path.name)
+
+    assert modern_artifact_refs > 0
+    assert legacy_artifact_refs == []

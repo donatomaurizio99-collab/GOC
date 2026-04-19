@@ -32,8 +32,9 @@ jobs:
           python .\scripts\stability-canary.py --output-file .\artifacts\stability-canary-report.json --long-soak-duration-seconds 120
 
       - name: Upload canary report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stability-canary-report
           path: artifacts/stability-canary-report.json
           if-no-files-found: error
+
