@@ -9,6 +9,7 @@ import shutil
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -11550,7 +11551,7 @@ def test_231_ci_alert_issue_upsert_workflow_wrapper_and_docs_wiring():
     assert "guard-workflow health watchdog" in readme
     assert "Immediate Actions" in readme
     assert "master-watchdog-rehearsal-slo-guard.yml" in readme
-    assert "stale`/`failed` reason" in readme
+    assert "stale`/`failed`/`mttr` reason" in readme
     assert "auto-close recovered issues after 2 healthy nightly runs" in readme
     assert "at most one open issue per signal" in readme
     assert "cooldown-throttled for unchanged failure states" in readme
@@ -12757,6 +12758,86 @@ def test_242b_ci_alert_issue_upsert_creates_issue_for_watchdog_rehearsal_slo():
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_242c_ci_alert_issue_upsert_includes_watchdog_mttr_details():
+    workspace = _local_test_dir("pytest-ci-alert-issue-upsert-watchdog-mttr").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_file = workspace / "master-watchdog-rehearsal-slo-guard.json"
+    issues_file = workspace / "issues.json"
+    issue_oplog_file = workspace / "issue-oplog.json"
+    output_file = workspace / "ci-alert-issue-upsert.json"
+
+    report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-watchdog-rehearsal-mttr",
+                "config": {"branch": "master", "max_age_hours": 192.0},
+                "metrics": {
+                    "latest_run_age_hours": 0.25,
+                    "max_age_hours": 192.0,
+                    "mttr_seconds": 412.5,
+                    "mttr_target_seconds": 300.0,
+                    "mttr_report_loaded": True,
+                    "mttr_report_source": "file",
+                },
+                "latest_run": {
+                    "run_id": 778900,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/778900",
+                },
+                "decision": {
+                    "watchdog_rehearsal_slo_breached": True,
+                    "breach_reason": "mttr",
+                    "recommended_action": "watchdog_rehearsal_slo_mttr",
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    issues_file.write_text("[]", encoding="utf-8")
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "ci-alert-issue-upsert.py"),
+        "--label",
+        "pytest-watchdog-mttr-create",
+        "--signal-id",
+        "master-watchdog-rehearsal-drill-slo",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--report-file",
+        str(report_file.resolve()),
+        "--issues-file",
+        str(issues_file.resolve()),
+        "--issue-oplog-file",
+        str(issue_oplog_file.resolve()),
+        "--dry-run",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["decision"]["alert_triggered"] is True
+    assert payload["decision"]["issue_action"] == "created"
+
+    issue_oplog = json.loads(issue_oplog_file.read_text(encoding="utf-8"))
+    created_body = str(issue_oplog["actions"][0]["body"])
+    assert "Breach reason: mttr" in created_body
+    assert "Latest alert-chain MTTR: 412.500s (target=300.000s)" in created_body
+    assert "MTTR evidence loaded: yes (source=file)" in created_body
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
 def test_243_master_guard_workflow_health_contract_fails_on_uncovered_workflow_file():
     workspace = _local_test_dir("pytest-master-guard-workflow-health-contract-failure").resolve()
     project_root = Path(__file__).resolve().parents[1]
@@ -13053,17 +13134,24 @@ def test_246_master_watchdog_rehearsal_slo_guard_workflow_wrapper_and_docs_wirin
     assert "master-watchdog-rehearsal-slo-guard-selftest.json" in workflow
     assert ".\\scripts\\run-master-guard-chain-selftest.ps1" in workflow
     assert "master-watchdog-rehearsal-drill-slo" in workflow
+    assert "mttr_target_seconds" in workflow
+    assert "drill_artifact_name" in workflow
 
     assert "master-watchdog-rehearsal-slo-guard.py" in wrapper
     assert "--max-age-hours" in wrapper
+    assert "--mttr-target-seconds" in wrapper
+    assert "--drill-artifact-name" in wrapper
+    assert "--drill-report-file" in wrapper
     assert "--per-page" in wrapper
     assert "--allow-breach" in wrapper
     assert "MaxAgeHours" in wrapper
+    assert "MttrTargetSeconds" in wrapper
+    assert "DrillArtifactName" in wrapper
     assert "AllowBreach" in wrapper
 
     assert "master-watchdog-rehearsal-slo-guard.yml" in readme
     assert "master-reliability-digest.yml" in readme
-    assert "stale`/`failed` reason" in readme
+    assert "stale`/`failed`/`mttr` reason" in readme
 
 
 def test_247_master_watchdog_rehearsal_slo_guard_detects_stale_breach():
@@ -13239,6 +13327,92 @@ def test_248b_master_watchdog_rehearsal_slo_guard_accepts_bom_runs_fixture():
     assert parsed["success"] is True
     assert parsed["decision"]["watchdog_rehearsal_slo_breached"] is False
     assert parsed["latest_run"]["run_id"] == 771003
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_248c_master_watchdog_rehearsal_slo_guard_detects_mttr_breach_from_drill_report_file():
+    workspace = _local_test_dir("pytest-master-watchdog-rehearsal-slo-guard-mttr-breach").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    runs_file = workspace / "runs.json"
+    drill_report_file = workspace / "master-guard-workflow-health-rehearsal-drill.json"
+    output_file = workspace / "master-watchdog-rehearsal-slo-guard.json"
+
+    runs_file.write_text(
+        json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 771004,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "updated_at": "2026-04-18T11:15:00Z",
+                        "html_url": "https://github.com/donatomaurizio99-collab/GOC/actions/runs/771004",
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    drill_report_file.write_text(
+        json.dumps(
+            {
+                "label": "pytest-master-watchdog-rehearsal-drill",
+                "metrics": {
+                    "alert_chain_mttr_seconds": 412.5,
+                    "mttr_target_seconds": 300.0,
+                },
+                "generated_at_utc": "2026-04-18T11:16:00Z",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-watchdog-rehearsal-slo-guard.py"),
+        "--label",
+        "pytest-master-watchdog-rehearsal-slo-guard-mttr-breach",
+        "--repo",
+        "donatomaurizio99-collab/GOC",
+        "--branch",
+        "master",
+        "--workflow-name",
+        "Master Watchdog Rehearsal Drill",
+        "--max-age-hours",
+        "192",
+        "--mttr-target-seconds",
+        "300",
+        "--runs-file",
+        str(runs_file.resolve()),
+        "--drill-report-file",
+        str(drill_report_file.resolve()),
+        "--now-utc",
+        "2026-04-18T12:00:00Z",
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master watchdog rehearsal SLO guard failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["watchdog_rehearsal_slo_breached"] is True
+    assert payload["decision"]["breach_reason"] == "mttr"
+    assert payload["metrics"]["mttr_seconds"] == 412.5
+    assert payload["metrics"]["mttr_target_seconds"] == 300.0
+    assert payload["metrics"]["mttr_report_loaded"] is True
+    assert payload["drill_report"]["source"] == "file"
 
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -13992,8 +14166,11 @@ def test_258_master_production_readiness_gate_workflow_wrapper_and_docs_wiring()
     assert ".\\scripts\\run-master-branch-protection-drift-guard.ps1" in workflow
     assert ".\\scripts\\run-master-guard-workflow-health-check.ps1" in workflow
     assert ".\\scripts\\run-master-guard-burnin-check.ps1" in workflow
+    assert ".\\scripts\\run-master-watchdog-rehearsal-slo-guard.ps1" in workflow
     assert ".\\scripts\\run-master-production-readiness-gate.ps1" in workflow
     assert "master-production-readiness-gate.json" in workflow
+    assert "watchdog_mttr_target_seconds" in workflow
+    assert "master-watchdog-rehearsal-slo-guard-readiness.json" in workflow
     assert "allow_not_ready" in workflow
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in workflow
 
@@ -14002,11 +14179,13 @@ def test_258_master_production_readiness_gate_workflow_wrapper_and_docs_wiring()
     assert "--branch-protection-report-file" in wrapper
     assert "--guard-health-report-file" in wrapper
     assert "--guard-burnin-report-file" in wrapper
+    assert "--watchdog-rehearsal-guard-report-file" in wrapper
     assert "--allow-not-ready" in wrapper
 
     assert "production_ready" in script
     assert "guard_burnin_integrity" in script
     assert "guard_workflow_health_integrity" in script
+    assert "watchdog_rehearsal_guard_integrity" in script
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in ci_workflow
 
     assert "master-production-readiness-gate.yml" in readme
@@ -14021,6 +14200,7 @@ def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded()
     branch_protection_file = workspace / "branch-protection.json"
     guard_health_file = workspace / "guard-health.json"
     guard_burnin_file = workspace / "guard-burnin.json"
+    watchdog_rehearsal_guard_file = workspace / "watchdog-rehearsal-guard.json"
     output_file = workspace / "master-production-readiness-gate.json"
 
     required_checks_file.write_text(
@@ -14068,6 +14248,16 @@ def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded()
         ),
         encoding="utf-8",
     )
+    watchdog_rehearsal_guard_file.write_text(
+        json.dumps(
+            {
+                "decision": {"watchdog_rehearsal_slo_breached": False},
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -14082,6 +14272,8 @@ def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded()
         str(guard_health_file.resolve()),
         "--guard-burnin-report-file",
         str(guard_burnin_file.resolve()),
+        "--watchdog-rehearsal-guard-report-file",
+        str(watchdog_rehearsal_guard_file.resolve()),
         "--output-file",
         str(output_file.resolve()),
     ]
@@ -14098,7 +14290,94 @@ def test_259_master_production_readiness_gate_fails_when_guard_burnin_degraded()
     assert payload["success"] is False
     assert payload["decision"]["production_ready"] is False
     assert payload["metrics"]["guard_burnin_degraded"] is True
+    assert payload["metrics"]["watchdog_rehearsal_slo_breached"] is False
     assert "guard_burnin_integrity" in [item["name"] for item in payload["failed_criteria"]]
+    assert output_file.exists()
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_259b_master_production_readiness_gate_fails_when_watchdog_rehearsal_guard_breached():
+    workspace = _local_test_dir("pytest-master-production-readiness-gate-watchdog-failure").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    required_checks_file = workspace / "required-checks.json"
+    branch_protection_file = workspace / "branch-protection.json"
+    guard_health_file = workspace / "guard-health.json"
+    guard_burnin_file = workspace / "guard-burnin.json"
+    watchdog_rehearsal_guard_file = workspace / "watchdog-rehearsal-guard.json"
+    output_file = workspace / "master-production-readiness-gate.json"
+
+    required_checks_file.write_text(
+        json.dumps(
+            {"metrics": {"non_green_runs_total": 0}, "decision": {"release_blocked": False}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    branch_protection_file.write_text(
+        json.dumps({"decision": {"branch_protection_drift_detected": False}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    guard_health_file.write_text(
+        json.dumps(
+            {"decision": {"guard_workflow_health_degraded": False, "guard_workflow_coverage_contract_ok": True}},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    guard_burnin_file.write_text(
+        json.dumps({"decision": {"guard_burnin_degraded": False}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    watchdog_rehearsal_guard_file.write_text(
+        json.dumps(
+            {
+                "decision": {
+                    "watchdog_rehearsal_slo_breached": True,
+                    "breach_reason": "mttr",
+                }
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "master-production-readiness-gate.py"),
+        "--label",
+        "pytest-master-production-readiness-gate-watchdog-failure",
+        "--required-checks-report-file",
+        str(required_checks_file.resolve()),
+        "--branch-protection-report-file",
+        str(branch_protection_file.resolve()),
+        "--guard-health-report-file",
+        str(guard_health_file.resolve()),
+        "--guard-burnin-report-file",
+        str(guard_burnin_file.resolve()),
+        "--watchdog-rehearsal-guard-report-file",
+        str(watchdog_rehearsal_guard_file.resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    marker = "Master production readiness gate failed: "
+    assert marker in completed.stderr
+    payload = json.loads(completed.stderr.split(marker, 1)[1].strip())
+    assert payload["success"] is False
+    assert payload["decision"]["production_ready"] is False
+    assert payload["metrics"]["guard_burnin_degraded"] is False
+    assert payload["metrics"]["watchdog_rehearsal_slo_breached"] is True
+    assert "watchdog_rehearsal_guard_integrity" in [item["name"] for item in payload["failed_criteria"]]
     assert output_file.exists()
 
     shutil.rmtree(workspace, ignore_errors=True)
@@ -14407,6 +14686,7 @@ def test_264_master_ci_drift_status_report_workflow_wrapper_and_docs_wiring():
     assert "BLOCKING_SIGNAL_IDS" in script
     assert "RESIDUAL_SIGNAL_IDS" in script
     assert "status_class" in script
+    assert "master-watchdog-rehearsal-drill-slo" in script
 
     assert "master-ci-drift-status-report.yml" in readme
     assert "run-master-ci-drift-status-report.ps1" in readme
@@ -14446,6 +14726,18 @@ def test_265_master_ci_drift_status_report_classifies_blocked_and_residual_from_
                         "donatomaurizio99-collab/GOC:master -->"
                     ),
                 },
+                {
+                    "number": 2003,
+                    "title": "[CI Drift] watchdog rehearsal drill SLO breached on master",
+                    "html_url": "https://github.com/donatomaurizio99-collab/GOC/issues/2003",
+                    "created_at": "2026-04-18T06:00:00Z",
+                    "updated_at": "2026-04-18T06:30:00Z",
+                    "labels": [{"name": "ci-drift"}, {"name": "watchdog-rehearsal"}],
+                    "body": (
+                        "<!-- ci-alert-key:master-watchdog-rehearsal-drill-slo:"
+                        "donatomaurizio99-collab/GOC:master -->"
+                    ),
+                },
             ],
             ensure_ascii=True,
             sort_keys=True,
@@ -14478,8 +14770,8 @@ def test_265_master_ci_drift_status_report_classifies_blocked_and_residual_from_
     assert completed.returncode == 0, completed.stderr
     payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
     assert payload["success"] is True
-    assert payload["metrics"]["open_ci_drift_issues_total"] == 2
-    assert payload["metrics"]["blocked_issues_total"] == 1
+    assert payload["metrics"]["open_ci_drift_issues_total"] == 3
+    assert payload["metrics"]["blocked_issues_total"] == 2
     assert payload["metrics"]["residual_issues_total"] == 1
     assert payload["decision"]["attention_required"] is True
     assert payload["decision"]["recommended_action"] == "ci_drift_blocked_incident_review_required"
@@ -14489,13 +14781,88 @@ def test_265_master_ci_drift_status_report_classifies_blocked_and_residual_from_
     issues = payload["issues"]
     assert issues[0]["signal_id"] == "master-branch-protection-drift"
     assert issues[0]["status_class"] == "blocked"
-    assert issues[1]["signal_id"] == "master-reliability-digest-warning"
-    assert issues[1]["status_class"] == "residual"
+    assert issues[1]["signal_id"] == "master-watchdog-rehearsal-drill-slo"
+    assert issues[1]["status_class"] == "blocked"
+    assert issues[2]["signal_id"] == "master-reliability-digest-warning"
+    assert issues[2]["status_class"] == "residual"
 
     markdown = markdown_output_file.read_text(encoding="utf-8")
     assert "Master CI Drift Status Report" in markdown
     assert "`blocked`" in markdown
     assert "`residual`" in markdown
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_265b_watchdog_rehearsal_mttr_calibration_wrapper_and_script_reports_recommended_target():
+    workspace = _local_test_dir("pytest-watchdog-rehearsal-mttr-calibration").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    report_paths: list[Path] = []
+    base_time = datetime(2026, 4, 1, 5, 0, tzinfo=timezone.utc)
+    for index in range(12):
+        report_path = workspace / f"master-guard-workflow-health-rehearsal-drill-{index:02d}.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "label": "pytest-watchdog-rehearsal-drill",
+                    "metrics": {
+                        "alert_chain_mttr_seconds": float(210 + (index * 11)),
+                        "mttr_target_seconds": 300.0,
+                    },
+                    "generated_at_utc": (
+                        base_time + timedelta(days=index)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        report_paths.append(report_path)
+
+    output_file = workspace / "watchdog-rehearsal-mttr-calibration.json"
+    policy_file = workspace / "watchdog-rehearsal-mttr-policy.json"
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "watchdog-rehearsal-mttr-calibrate.py"),
+        "--label",
+        "pytest-watchdog-rehearsal-mttr-calibration",
+        "--report-files",
+        ",".join(str(path.resolve()) for path in report_paths),
+        "--min-samples",
+        "10",
+        "--max-samples",
+        "14",
+        "--output-file",
+        str(output_file.resolve()),
+        "--policy-output-file",
+        str(policy_file.resolve()),
+        "--write-updates",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["sample_values_total"] == 12
+    assert payload["metrics"]["sample_requirements_met"] == 1
+    assert float(payload["metrics"]["recommended_target_seconds"]) > 300.0
+    assert output_file.exists()
+    assert policy_file.exists()
+
+    wrapper = (project_root / "scripts" / "run-watchdog-rehearsal-mttr-calibrate.ps1").read_text(encoding="utf-8")
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    assert "watchdog-rehearsal-mttr-calibrate.py" in wrapper
+    assert "--min-samples" in wrapper
+    assert "--max-samples" in wrapper
+    assert "--write-updates" in wrapper
+    assert "run-watchdog-rehearsal-mttr-calibrate.ps1" in readme
+    assert "10-14 daily samples" in readme
 
     shutil.rmtree(workspace, ignore_errors=True)
 

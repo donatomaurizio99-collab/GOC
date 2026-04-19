@@ -4,6 +4,7 @@ param(
     [string]$BranchProtectionReportFile = "artifacts\\master-branch-protection-drift-guard-readiness.json",
     [string]$GuardHealthReportFile = "artifacts\\master-guard-workflow-health-check-readiness.json",
     [string]$GuardBurninReportFile = "artifacts\\master-guard-burnin-check-readiness.json",
+    [string]$WatchdogRehearsalGuardReportFile = "artifacts\\master-watchdog-rehearsal-slo-guard-readiness.json",
     [string]$OutputFile = "artifacts\\master-production-readiness-gate.json",
     [switch]$AllowNotReady
 )
@@ -20,6 +21,7 @@ $args = @(
     "--branch-protection-report-file", $BranchProtectionReportFile,
     "--guard-health-report-file", $GuardHealthReportFile,
     "--guard-burnin-report-file", $GuardBurninReportFile,
+    "--watchdog-rehearsal-guard-report-file", $WatchdogRehearsalGuardReportFile,
     "--output-file", $OutputFile
 )
 if ($AllowNotReady) {

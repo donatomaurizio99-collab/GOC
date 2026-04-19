@@ -446,6 +446,11 @@ def _signal_alert_state(
         latest_run_conclusion = str(latest_run.get("conclusion") or "")
         latest_run_age_hours = metrics.get("latest_run_age_hours")
         max_age_hours = metrics.get("max_age_hours")
+        mttr_seconds = metrics.get("mttr_seconds")
+        mttr_target_seconds = metrics.get("mttr_target_seconds")
+        mttr_report_loaded = bool(metrics.get("mttr_report_loaded"))
+        mttr_report_source = str(metrics.get("mttr_report_source") or "none")
+        mttr_report_load_error = str(metrics.get("mttr_report_load_error") or "")
         breach_reason = str(decision.get("breach_reason") or "none")
         alert_triggered = bool(decision.get("watchdog_rehearsal_slo_breached"))
 
@@ -462,6 +467,16 @@ def _signal_alert_state(
             if latest_run_age_hours is not None
             else "unknown"
         )
+        mttr_text = (
+            f"{float(mttr_seconds):.3f}s"
+            if mttr_seconds is not None
+            else "unknown"
+        )
+        mttr_target_text = (
+            f"{float(mttr_target_seconds):.3f}s"
+            if mttr_target_seconds is not None
+            else "unknown"
+        )
 
         summary = [
             f"- Rehearsal drill SLO breached: {'yes' if alert_triggered else 'no'}",
@@ -469,6 +484,13 @@ def _signal_alert_state(
             f"- Latest rehearsal run: {latest_run_text}",
             f"- Latest rehearsal run status: {latest_run_status or 'unknown'} / {latest_run_conclusion or 'unknown'}",
             f"- Latest rehearsal run age: {age_text} (threshold={max_age_hours}h)",
+            f"- Latest alert-chain MTTR: {mttr_text} (target={mttr_target_text})",
+            f"- MTTR evidence loaded: {'yes' if mttr_report_loaded else 'no'} (source={mttr_report_source})",
+            (
+                f"- MTTR evidence load error: {mttr_report_load_error}"
+                if mttr_report_load_error
+                else "- MTTR evidence load error: none"
+            ),
             f"- Recommended action: {decision.get('recommended_action') or 'watchdog_rehearsal_slo_healthy'}",
         ]
         return alert_triggered, summary, branch, {}

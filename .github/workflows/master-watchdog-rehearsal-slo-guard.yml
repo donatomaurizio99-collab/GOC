@@ -13,6 +13,14 @@ on:
         description: "Maximum completed runs fetched from watchdog rehearsal drill workflow"
         required: false
         default: "20"
+      mttr_target_seconds:
+        description: "Maximum alert-chain MTTR (seconds) from latest rehearsal drill evidence"
+        required: false
+        default: "300"
+      drill_artifact_name:
+        description: "Artifact name containing latest rehearsal drill JSON evidence"
+        required: false
+        default: "master-guard-workflow-health-rehearsal-drill"
       allow_breach:
         description: "Do not fail workflow when drill SLO breach is detected"
         required: false
@@ -54,21 +62,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO_FULL: ${{ github.repository }}
           MAX_AGE_HOURS: ${{ github.event.inputs.max_age_hours || '192' }}
+          MTTR_TARGET_SECONDS: ${{ github.event.inputs.mttr_target_seconds || '300' }}
           PER_PAGE: ${{ github.event.inputs.per_page || '20' }}
+          DRILL_ARTIFACT_NAME: ${{ github.event.inputs.drill_artifact_name || 'master-guard-workflow-health-rehearsal-drill' }}
           ALLOW_BREACH: ${{ github.event.inputs.allow_breach || 'false' }}
         run: |
           if ($env:ALLOW_BREACH -eq "true") {
             .\scripts\run-master-watchdog-rehearsal-slo-guard.ps1 `
               -Repo "$env:REPO_FULL" `
               -MaxAgeHours "$env:MAX_AGE_HOURS" `
+              -MttrTargetSeconds "$env:MTTR_TARGET_SECONDS" `
               -PerPage "$env:PER_PAGE" `
+              -DrillArtifactName "$env:DRILL_ARTIFACT_NAME" `
               -OutputFile "artifacts\master-watchdog-rehearsal-slo-guard.json" `
               -AllowBreach
           } else {
             .\scripts\run-master-watchdog-rehearsal-slo-guard.ps1 `
               -Repo "$env:REPO_FULL" `
               -MaxAgeHours "$env:MAX_AGE_HOURS" `
+              -MttrTargetSeconds "$env:MTTR_TARGET_SECONDS" `
               -PerPage "$env:PER_PAGE" `
+              -DrillArtifactName "$env:DRILL_ARTIFACT_NAME" `
               -OutputFile "artifacts\master-watchdog-rehearsal-slo-guard.json"
           }
 
