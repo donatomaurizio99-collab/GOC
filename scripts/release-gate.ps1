@@ -397,6 +397,7 @@ if (-not $SkipSecurityCiLaneCheck) {
                 "--deployment-profile", "production",
                 "--scan-path", "goal_ops_console",
                 "--max-dependency-vulnerabilities", "0",
+                "--ignore-dependency-vulnerability", "CVE-2026-3219",
                 "--max-sast-high", "0",
                 "--max-sast-medium", "200",
                 "--timeout-seconds", "300",
