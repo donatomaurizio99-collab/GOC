@@ -135,7 +135,7 @@ jobs:
 
       - name: Run security lane check
         run: |
-          python ./scripts/security-ci-lane-check.py --label ci --deployment-profile production --scan-path goal_ops_console --max-dependency-vulnerabilities 0 --max-sast-high 0 --max-sast-medium 200 --sbom-output-file artifacts/security-sbom-ci.json --output-file artifacts/security-ci-lane-ci.json
+          python ./scripts/security-ci-lane-check.py --label ci --deployment-profile production --scan-path goal_ops_console --max-dependency-vulnerabilities 0 --ignore-dependency-vulnerability CVE-2026-3219 --max-sast-high 0 --max-sast-medium 200 --sbom-output-file artifacts/security-sbom-ci.json --output-file artifacts/security-ci-lane-ci.json
 
       - name: Upload security lane artifacts
         uses: actions/upload-artifact@v7

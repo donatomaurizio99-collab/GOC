@@ -3,6 +3,7 @@ param(
     [string]$DeploymentProfile = "production",
     [string]$ScanPath = "goal_ops_console",
     [int]$MaxDependencyVulnerabilities = 0,
+    [string[]]$IgnoreDependencyVulnerability = @(),
     [int]$MaxSastHigh = 0,
     [int]$MaxSastMedium = 200,
     [int]$TimeoutSeconds = 180,
@@ -35,6 +36,11 @@ $arguments = @(
     "--sbom-output-file", $SbomOutputFile,
     "--output-file", $OutputFile
 )
+foreach ($vulnerabilityId in $IgnoreDependencyVulnerability) {
+    if (-not [string]::IsNullOrWhiteSpace($vulnerabilityId)) {
+        $arguments += @("--ignore-dependency-vulnerability", $vulnerabilityId)
+    }
+}
 if ($SkipDependencyAudit) {
     $arguments += "--skip-dependency-audit"
 }

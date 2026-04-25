@@ -18,7 +18,19 @@ def _read_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _extract_dependency_vulnerability_count(payload: Any) -> int:
+def _normalize_vulnerability_id(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _extract_vulnerability_ids(vulnerability: dict[str, Any]) -> set[str]:
+    ids = {_normalize_vulnerability_id(vulnerability.get("id"))}
+    aliases = vulnerability.get("aliases")
+    if isinstance(aliases, list):
+        ids.update(_normalize_vulnerability_id(alias) for alias in aliases)
+    return {item for item in ids if item}
+
+
+def _summarize_dependency_vulnerabilities(payload: Any, ignored_vulnerability_ids: set[str]) -> dict[str, int]:
     dependencies: list[dict[str, Any]] = []
     if isinstance(payload, list):
         dependencies = [item for item in payload if isinstance(item, dict)]
@@ -28,13 +40,24 @@ def _extract_dependency_vulnerability_count(payload: Any) -> int:
             dependencies = [item for item in maybe_dependencies if isinstance(item, dict)]
 
     vulnerability_count = 0
+    ignored_vulnerability_count = 0
     for dependency in dependencies:
         vulns = dependency.get("vulns")
         if not isinstance(vulns, list):
             vulns = dependency.get("vulnerabilities")
         if isinstance(vulns, list):
-            vulnerability_count += len(vulns)
-    return vulnerability_count
+            for vulnerability in vulns:
+                if not isinstance(vulnerability, dict):
+                    vulnerability_count += 1
+                    continue
+                if _extract_vulnerability_ids(vulnerability) & ignored_vulnerability_ids:
+                    ignored_vulnerability_count += 1
+                else:
+                    vulnerability_count += 1
+    return {
+        "vulnerability_count": vulnerability_count,
+        "ignored_vulnerability_count": ignored_vulnerability_count,
+    }
 
 
 def _extract_bandit_counts(payload: Any) -> dict[str, int]:
@@ -169,9 +192,15 @@ def run_check(
     dependency_audit_json_file: Path | None,
     sast_json_file: Path | None,
     sbom_output_file: Path,
+    ignored_dependency_vulnerabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     profile = str(deployment_profile).strip().lower() or "production"
+    ignored_dependency_vulnerability_ids = {
+        _normalize_vulnerability_id(item) for item in (ignored_dependency_vulnerabilities or [])
+    }
+    ignored_dependency_vulnerability_ids.discard("")
+    ignored_dependency_vulnerability_display = sorted(ignored_dependency_vulnerability_ids)
 
     dependency_report: dict[str, Any] = {
         "enabled": not skip_dependency_audit,
@@ -181,6 +210,8 @@ def run_check(
         "source": "command",
         "return_code": None,
         "vulnerability_count": 0,
+        "ignored_vulnerability_count": 0,
+        "ignored_vulnerability_ids": ignored_dependency_vulnerability_display,
         "error": None,
     }
     sast_report: dict[str, Any] = {
@@ -208,7 +239,9 @@ def run_check(
         if dependency_audit_json_file is not None:
             dependency_report["source"] = "file"
             payload = _read_json_file(dependency_audit_json_file)
-            dependency_report["vulnerability_count"] = _extract_dependency_vulnerability_count(payload)
+            summary = _summarize_dependency_vulnerabilities(payload, ignored_dependency_vulnerability_ids)
+            dependency_report["vulnerability_count"] = summary["vulnerability_count"]
+            dependency_report["ignored_vulnerability_count"] = summary["ignored_vulnerability_count"]
         else:
             command = [python_exe, "-m", "pip_audit", "-f", "json"]
             try:
@@ -220,7 +253,9 @@ def run_check(
                 dependency_report["executed"] = True
                 dependency_report["return_code"] = int(completed.returncode)
                 if error is None and payload is not None:
-                    dependency_report["vulnerability_count"] = _extract_dependency_vulnerability_count(payload)
+                    summary = _summarize_dependency_vulnerabilities(payload, ignored_dependency_vulnerability_ids)
+                    dependency_report["vulnerability_count"] = summary["vulnerability_count"]
+                    dependency_report["ignored_vulnerability_count"] = summary["ignored_vulnerability_count"]
                 else:
                     stderr = str(completed.stderr or "").strip()
                     if "No module named pip_audit" in stderr:
@@ -302,6 +337,7 @@ def run_check(
                 int(dependency_report["vulnerability_count"]) <= max(0, int(max_dependency_vulnerabilities)),
                 (
                     f"vulnerability_count={dependency_report['vulnerability_count']}, "
+                    f"ignored_vulnerability_count={dependency_report['ignored_vulnerability_count']}, "
                     f"max={max_dependency_vulnerabilities}"
                 ),
             )
@@ -367,6 +403,7 @@ def run_check(
             "python_exe": str(python_exe),
             "scan_path": str(scan_path),
             "max_dependency_vulnerabilities": int(max_dependency_vulnerabilities),
+            "ignored_dependency_vulnerabilities": ignored_dependency_vulnerability_display,
             "max_sast_high": int(max_sast_high),
             "max_sast_medium": int(max_sast_medium),
             "skip_dependency_audit": bool(skip_dependency_audit),
@@ -385,6 +422,7 @@ def run_check(
             "criteria_failed": len(failed),
             "criteria_passed": len(criteria) - len(failed),
             "dependency_vulnerability_count": int(dependency_report["vulnerability_count"]),
+            "dependency_ignored_vulnerability_count": int(dependency_report["ignored_vulnerability_count"]),
             "sast_high_count": int(sast_report["high_count"]),
             "sast_medium_count": int(sast_report["medium_count"]),
             "sast_low_count": int(sast_report["low_count"]),
@@ -414,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--deployment-profile", default="production")
     parser.add_argument("--scan-path", default="goal_ops_console")
     parser.add_argument("--max-dependency-vulnerabilities", type=int, default=0)
+    parser.add_argument("--ignore-dependency-vulnerability", action="append", default=[])
     parser.add_argument("--max-sast-high", type=int, default=0)
     parser.add_argument("--max-sast-medium", type=int, default=200)
     parser.add_argument("--timeout-seconds", type=int, default=180)
@@ -466,6 +505,7 @@ def main(argv: list[str] | None = None) -> int:
         dependency_audit_json_file=dependency_audit_json_file,
         sast_json_file=sast_json_file,
         sbom_output_file=sbom_output_file,
+        ignored_dependency_vulnerabilities=[str(item) for item in args.ignore_dependency_vulnerability],
     )
 
     if args.output_file:

@@ -4097,6 +4097,83 @@ def test_127_security_ci_lane_check_fails_when_dependency_budget_exceeded():
     shutil.rmtree(workspace, ignore_errors=True)
 
 
+def test_127b_security_ci_lane_check_can_ignore_known_dependency_vulnerability_alias():
+    workspace = _local_test_dir("pytest-security-ci-lane-check-ignore-known").resolve()
+    project_root = Path(__file__).resolve().parents[1]
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    dependency_file = artifacts_dir / "dependency-audit.json"
+    sast_file = artifacts_dir / "sast-bandit.json"
+    output_file = artifacts_dir / "security-ci-lane-report.json"
+
+    dependency_file.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "pip",
+                    "version": "26.0.1",
+                    "vulns": [
+                        {
+                            "id": "PYSEC-2026-3219",
+                            "aliases": ["CVE-2026-3219"],
+                            "fix_versions": [],
+                        }
+                    ],
+                }
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    sast_file.write_text(
+        json.dumps({"results": [], "metrics": {}}, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        str(project_root / "scripts" / "security-ci-lane-check.py"),
+        "--label",
+        "pytest-drill",
+        "--deployment-profile",
+        "production",
+        "--scan-path",
+        "goal_ops_console",
+        "--max-dependency-vulnerabilities",
+        "0",
+        "--ignore-dependency-vulnerability",
+        "CVE-2026-3219",
+        "--max-sast-high",
+        "0",
+        "--max-sast-medium",
+        "0",
+        "--dependency-audit-json-file",
+        str(dependency_file.resolve()),
+        "--sast-json-file",
+        str(sast_file.resolve()),
+        "--sbom-output-file",
+        str((artifacts_dir / "security-sbom.json").resolve()),
+        "--output-file",
+        str(output_file.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads([line.strip() for line in completed.stdout.splitlines() if line.strip()][-1])
+    assert payload["success"] is True
+    assert payload["metrics"]["dependency_vulnerability_count"] == 0
+    assert payload["metrics"]["dependency_ignored_vulnerability_count"] == 1
+    assert payload["dependency_audit"]["ignored_vulnerability_ids"] == ["cve-2026-3219"]
+
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
 def test_128_alert_routing_oncall_check_reports_success_with_mock_critical():
     workspace = _local_test_dir("pytest-alert-routing-oncall-check-success").resolve()
     project_root = Path(__file__).resolve().parents[1]
