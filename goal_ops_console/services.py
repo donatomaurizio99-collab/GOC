@@ -9,10 +9,11 @@ from goal_ops_console.execution_layer import ExecutionLayer
 from goal_ops_console.failure_intelligence import FailureIntelligence
 from goal_ops_console.invariant_monitor import InvariantMonitor
 from goal_ops_console.observability import ObservabilityService
+from goal_ops_console.planner import Planner
 from goal_ops_console.runtime_guard import RuntimeGuard
 from goal_ops_console.scheduler import SchedulerService
 from goal_ops_console.state_manager import StateManager
-from goal_ops_console.stubs import PermissionManager, Planner, QdrantClientStub
+from goal_ops_console.stubs import PermissionManager, QdrantClientStub
 from goal_ops_console.workflow_catalog import WorkflowCatalog
 
 
