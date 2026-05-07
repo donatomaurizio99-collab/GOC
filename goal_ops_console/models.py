@@ -84,6 +84,17 @@ class PlannerPreviewResponse(BaseModel):
     suggestions: list[PlannerTaskSuggestion]
 
 
+class PlannerTaskCreateRequest(BaseModel):
+    suggestion_index: int = Field(ge=0)
+
+
+class PlannerTaskCreateResponse(BaseModel):
+    goal_id: str
+    suggestion_index: int
+    suggestion: PlannerTaskSuggestion
+    task: dict[str, Any]
+
+
 class TaskCreateRequest(BaseModel):
     goal_id: str
     title: str = Field(min_length=1, max_length=200)

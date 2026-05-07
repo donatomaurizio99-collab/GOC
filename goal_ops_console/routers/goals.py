@@ -1,6 +1,12 @@
 from fastapi import APIRouter, Depends
 
-from goal_ops_console.models import GoalCreateRequest, PlannerPreviewResponse
+from goal_ops_console.models import (
+    DomainError,
+    GoalCreateRequest,
+    PlannerPreviewResponse,
+    PlannerTaskCreateRequest,
+    PlannerTaskCreateResponse,
+)
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -34,6 +40,29 @@ def get_goal(goal_id: str, services: AppServices = Depends(get_services)) -> dic
 def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
     goal = services.state_manager.get_goal(goal_id)
     return services.planner.create_plan(goal)
+
+
+@router.post("/{goal_id}/plan/tasks", status_code=201, response_model=PlannerTaskCreateResponse)
+def create_task_from_plan_suggestion(
+    goal_id: str,
+    request: PlannerTaskCreateRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    goal = services.state_manager.get_goal(goal_id)
+    plan = services.planner.create_plan(goal)
+    suggestions = plan["suggestions"]
+    if request.suggestion_index >= len(suggestions):
+        raise DomainError(
+            f"Planner suggestion index {request.suggestion_index} not found for goal {goal_id}"
+        )
+    suggestion = suggestions[request.suggestion_index]
+    task = services.execution_layer.create_task(goal_id=goal_id, title=suggestion["title"])
+    return {
+        "goal_id": goal_id,
+        "suggestion_index": request.suggestion_index,
+        "suggestion": suggestion,
+        "task": task,
+    }
 
 
 @router.post("/{goal_id}/activate")

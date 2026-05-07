@@ -1373,26 +1373,25 @@ async function runPlannerPreview(goalId) {
   updateSelectedGoalLabel();
 }
 
-function getPlannerSuggestion(indexValue) {
-  const suggestions = Array.isArray(plannerPreview?.suggestions) ? plannerPreview.suggestions : [];
+function parsePlannerSuggestionIndex(indexValue) {
   const index = Number.parseInt(indexValue, 10);
+  const suggestions = Array.isArray(plannerPreview?.suggestions) ? plannerPreview.suggestions : [];
   if (!Number.isInteger(index) || index < 0 || index >= suggestions.length) {
     throw new Error("Planner suggestion is no longer available. Run Plan Preview again.");
   }
-  return suggestions[index];
+  return index;
 }
 
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
   }
-  const suggestion = getPlannerSuggestion(indexValue);
+  const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
   ensureMutationAllowed("Planner task creation");
-  await api("/tasks", {
+  await api(`/goals/${encodeURIComponent(plannerPreview.goal_id)}/plan/tasks`, {
     method: "POST",
     body: JSON.stringify({
-      goal_id: plannerPreview.goal_id,
-      title: suggestion.title,
+      suggestion_index: suggestionIndex,
     }),
   });
   selectedGoalId = plannerPreview.goal_id;
