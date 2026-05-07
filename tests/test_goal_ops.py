@@ -15626,3 +15626,26 @@ def test_271_goal_plan_preview_does_not_create_tasks(client):
     assert response.status_code == 200
     assert before == []
     assert after == []
+
+
+def test_272_goal_plan_preview_suggestion_can_be_created_as_one_task(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Create one supervised task", "urgency": 0.7, "value": 0.7, "deadline_score": 0.3},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    selected = preview["suggestions"][0]
+    other_titles = {suggestion["title"] for suggestion in preview["suggestions"][1:]}
+
+    response = client.post(
+        "/tasks",
+        json={"goal_id": goal["goal_id"], "title": selected["title"]},
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 201
+    assert response.json()["title"] == selected["title"]
+    assert len(tasks) == 1
+    assert tasks[0]["goal_id"] == goal["goal_id"]
+    assert tasks[0]["title"] == selected["title"]
+    assert tasks[0]["title"] not in other_titles
