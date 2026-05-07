@@ -513,7 +513,7 @@ function renderPlannerPreview(preview) {
   if (!preview) {
     container.innerHTML = `
       <span class="meta">Planner Preview</span>
-      <p class="meta">Select a goal and use Plan Preview to generate deterministic task suggestions. Suggestions are read-only until you create tasks explicitly.</p>
+      <p class="meta">Select a goal and use Plan Preview to generate deterministic task suggestions. Use Create task on a suggestion to add exactly one task.</p>
     `;
     return;
   }
@@ -523,7 +523,7 @@ function renderPlannerPreview(preview) {
     <h3>${escapeHtml(preview.goal_title)}</h3>
     <div class="meta">${escapeHtml(preview.goal_id)} · ${suggestions.length} suggested tasks · no tasks created automatically</div>
     <div class="stack-list" style="margin-top:0.75rem;">
-      ${suggestions.map((item) => `
+      ${suggestions.map((item, index) => `
         <article class="entity-card">
           <div class="entity-header">
             <div>
@@ -533,10 +533,14 @@ function renderPlannerPreview(preview) {
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
           <p class="meta">${escapeHtml(item.description)}</p>
+          <div class="actions">
+            <button type="button" class="secondary" data-mutation-control="true" data-plan-suggestion-index="${index}">Create task</button>
+          </div>
         </article>
       `).join("")}
     </div>
   `;
+  applyMutationControlState();
 }
 
 function renderTaskButtons(task) {
@@ -1369,6 +1373,37 @@ async function runPlannerPreview(goalId) {
   updateSelectedGoalLabel();
 }
 
+function getPlannerSuggestion(indexValue) {
+  const suggestions = Array.isArray(plannerPreview?.suggestions) ? plannerPreview.suggestions : [];
+  const index = Number.parseInt(indexValue, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= suggestions.length) {
+    throw new Error("Planner suggestion is no longer available. Run Plan Preview again.");
+  }
+  return suggestions[index];
+}
+
+async function createTaskFromPlannerSuggestion(indexValue) {
+  if (!plannerPreview?.goal_id) {
+    throw new Error("Run Plan Preview before creating a suggested task.");
+  }
+  const suggestion = getPlannerSuggestion(indexValue);
+  ensureMutationAllowed("Planner task creation");
+  await api("/tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      goal_id: plannerPreview.goal_id,
+      title: suggestion.title,
+    }),
+  });
+  selectedGoalId = plannerPreview.goal_id;
+  document.getElementById("task-goal-id").value = plannerPreview.goal_id;
+  document.getElementById("event-correlation-id").value = plannerPreview.goal_id;
+  document.getElementById("trace-goal-id").value = plannerPreview.goal_id;
+  document.getElementById("fault-goal-id").value = plannerPreview.goal_id;
+  await refreshAll();
+  setActiveJump("tasks-section");
+}
+
 function parseWorkflowPayload(text) {
   if (!text.trim()) {
     return {};
@@ -1730,6 +1765,7 @@ document.addEventListener("click", async (event) => {
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
   const planGoal = event.target.dataset.planGoal;
+  const planSuggestionIndex = event.target.dataset.planSuggestionIndex;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
 
@@ -1770,6 +1806,11 @@ document.addEventListener("click", async (event) => {
     if (planGoal) {
       await runPlannerPreview(planGoal);
       setActiveJump("goals-section");
+    }
+
+    if (planSuggestionIndex !== undefined) {
+      showError("task-error", null);
+      await createTaskFromPlannerSuggestion(planSuggestionIndex);
     }
 
     if (taskAction && taskId) {
