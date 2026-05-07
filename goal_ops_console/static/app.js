@@ -33,6 +33,7 @@ const VISUAL_PRESETS = [
 ];
 
 let selectedGoalId = "";
+let plannerPreview = null;
 let defaultConsumerId = "goal_ops_console";
 let autoRefreshEnabled = true;
 let autoRefreshHandle = null;
@@ -491,7 +492,7 @@ function renderGoalButtons(goal) {
     archived: [["trace", "Trace"]],
   };
   const actions = actionsByState[goal.state] || [["trace", "Trace"]];
-  return actions.map(([action, label]) => {
+  const actionButtons = actions.map(([action, label]) => {
     if (action === "trace") {
       return `<button class="secondary" data-correlation="${goal.goal_id}">${label}</button>`;
     }
@@ -499,7 +500,43 @@ function renderGoalButtons(goal) {
       `<button class="secondary" data-mutation-control="true" data-goal-action="${action}" `
       + `data-goal-id="${goal.goal_id}">${label}</button>`
     );
-  }).join("");
+  });
+  actionButtons.push(
+    `<button class="secondary" data-plan-goal="${goal.goal_id}">Plan Preview</button>`,
+  );
+  return actionButtons.join("");
+}
+
+function renderPlannerPreview(preview) {
+  const container = document.getElementById("planner-preview");
+  if (!container) return;
+  if (!preview) {
+    container.innerHTML = `
+      <span class="meta">Planner Preview</span>
+      <p class="meta">Select a goal and use Plan Preview to generate deterministic task suggestions. Suggestions are read-only until you create tasks explicitly.</p>
+    `;
+    return;
+  }
+  const suggestions = preview.suggestions || [];
+  container.innerHTML = `
+    <span class="meta">Planner Preview · ${escapeHtml(preview.source)}</span>
+    <h3>${escapeHtml(preview.goal_title)}</h3>
+    <div class="meta">${escapeHtml(preview.goal_id)} · ${suggestions.length} suggested tasks · no tasks created automatically</div>
+    <div class="stack-list" style="margin-top:0.75rem;">
+      ${suggestions.map((item) => `
+        <article class="entity-card">
+          <div class="entity-header">
+            <div>
+              <div class="entity-title">${escapeHtml(item.title)}</div>
+              <div class="meta">${escapeHtml(item.source)}</div>
+            </div>
+            <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
+          </div>
+          <p class="meta">${escapeHtml(item.description)}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderTaskButtons(task) {
@@ -561,6 +598,7 @@ function renderGoals(goals) {
       </div>`
     : `<div class="meta">${filteredEmptyMessage("No goals yet.")}</div>`;
   document.getElementById("goals-table").innerHTML = content;
+  renderPlannerPreview(plannerPreview);
   applyMutationControlState();
 }
 
@@ -1316,6 +1354,21 @@ async function runOperatorAction(action) {
   await refreshAll();
 }
 
+async function runPlannerPreview(goalId) {
+  if (!goalId) {
+    throw new Error("Select a goal before requesting a plan preview.");
+  }
+  const preview = await api(`/goals/${encodeURIComponent(goalId)}/plan`, { method: "POST" });
+  plannerPreview = preview;
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  renderPlannerPreview(plannerPreview);
+  updateSelectedGoalLabel();
+}
+
 function parseWorkflowPayload(text) {
   if (!text.trim()) {
     return {};
@@ -1676,6 +1729,7 @@ document.addEventListener("click", async (event) => {
   const workflowCancel = event.target.dataset.workflowCancel;
   const correlation = event.target.dataset.correlation;
   const selectGoal = event.target.dataset.selectGoal;
+  const planGoal = event.target.dataset.planGoal;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
 
@@ -1711,6 +1765,11 @@ document.addEventListener("click", async (event) => {
       document.getElementById("trace-goal-id").value = goalId;
       document.getElementById("fault-goal-id").value = goalId;
       await refreshAll();
+    }
+
+    if (planGoal) {
+      await runPlannerPreview(planGoal);
+      setActiveJump("goals-section");
     }
 
     if (taskAction && taskId) {
@@ -1759,7 +1818,7 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction
+        : goalAction || planGoal
           ? "goal-error"
           : "task-error";
     showError(target, error);

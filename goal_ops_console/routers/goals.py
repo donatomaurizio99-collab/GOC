@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from goal_ops_console.models import GoalCreateRequest
+from goal_ops_console.models import GoalCreateRequest, PlannerPreviewResponse
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -28,6 +28,12 @@ def create_goal(
 @router.get("/{goal_id}")
 def get_goal(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
     return services.state_manager.get_goal(goal_id)
+
+
+@router.post("/{goal_id}/plan", response_model=PlannerPreviewResponse)
+def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
+    goal = services.state_manager.get_goal(goal_id)
+    return services.planner.create_plan(goal)
 
 
 @router.post("/{goal_id}/activate")

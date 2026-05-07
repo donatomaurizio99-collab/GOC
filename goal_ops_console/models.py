@@ -70,6 +70,20 @@ class GoalCreateRequest(BaseModel):
     deadline_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class PlannerTaskSuggestion(BaseModel):
+    title: str
+    description: str
+    priority_hint: str
+    source: str
+
+
+class PlannerPreviewResponse(BaseModel):
+    goal_id: str
+    goal_title: str
+    source: str
+    suggestions: list[PlannerTaskSuggestion]
+
+
 class TaskCreateRequest(BaseModel):
     goal_id: str
     title: str = Field(min_length=1, max_length=200)

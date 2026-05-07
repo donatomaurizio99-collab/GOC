@@ -15564,3 +15564,65 @@ def test_267_master_release_gate_runtime_slo_guard_workflow_wrapper_and_docs_wir
 
     assert "master-release-gate-runtime-slo-guard.yml" in readme
     assert "run-master-release-gate-runtime-slo-guard.ps1" in readme
+
+
+def test_268_goal_plan_preview_returns_deterministic_suggestions(client):
+    goal = client.post(
+        "/goals",
+        json={
+            "title": "Launch supervised planner",
+            "description": "Help operators preview safe next steps.",
+            "urgency": 0.8,
+            "value": 0.7,
+            "deadline_score": 0.6,
+        },
+    ).json()
+
+    first = client.post(f"/goals/{goal['goal_id']}/plan")
+    second = client.post(f"/goals/{goal['goal_id']}/plan")
+
+    assert first.status_code == 200
+    assert first.json() == second.json()
+    payload = first.json()
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["goal_title"] == "Launch supervised planner"
+    assert payload["source"] == "deterministic_planner"
+    assert 3 <= len(payload["suggestions"]) <= 5
+
+
+def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Review release readiness", "urgency": 0.3, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+
+    payload = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    for suggestion in payload["suggestions"]:
+        assert set(suggestion) == {"title", "description", "priority_hint", "source"}
+        assert suggestion["title"]
+        assert suggestion["description"]
+        assert suggestion["priority_hint"] in {"low", "medium", "high"}
+        assert suggestion["source"] == "deterministic_planner"
+
+
+def test_270_goal_plan_preview_unknown_goal_returns_404(client):
+    response = client.post("/goals/missing-goal/plan")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Goal missing-goal not found"
+
+
+def test_271_goal_plan_preview_does_not_create_tasks(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Keep preview read only", "urgency": 0.6, "value": 0.4, "deadline_score": 0.1},
+    ).json()
+    before = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    response = client.post(f"/goals/{goal['goal_id']}/plan")
+    after = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 200
+    assert before == []
+    assert after == []
