@@ -15671,3 +15671,40 @@ def test_274_goal_plan_task_create_invalid_suggestion_index_returns_400(client):
     assert response.status_code == 400
     assert response.json()["detail"] == f"Planner suggestion index 99 not found for goal {goal['goal_id']}"
     assert tasks == []
+
+
+def test_275_goal_plan_task_create_rejects_duplicate_suggestion(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Prevent duplicate planner task", "urgency": 0.7, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+
+    first = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    second = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert "Planner suggestion already exists as task" in second.json()["detail"]
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == first.json()["suggestion"]["title"]
+
+
+def test_276_goal_plan_task_create_allows_different_suggestion(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Allow separate planner tasks", "urgency": 0.7, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    first = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    second = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 1})
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert len(tasks) == 2
+    assert {task["title"] for task in tasks} == {
+        preview["suggestions"][0]["title"],
+        preview["suggestions"][1]["title"],
+    }

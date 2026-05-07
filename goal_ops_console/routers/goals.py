@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from goal_ops_console.models import (
+    ConflictError,
     DomainError,
     GoalCreateRequest,
     PlannerPreviewResponse,
@@ -56,6 +57,18 @@ def create_task_from_plan_suggestion(
             f"Planner suggestion index {request.suggestion_index} not found for goal {goal_id}"
         )
     suggestion = suggestions[request.suggestion_index]
+    duplicate = next(
+        (
+            task
+            for task in services.execution_layer.list_tasks(goal_id=goal_id)
+            if task["title"] == suggestion["title"]
+        ),
+        None,
+    )
+    if duplicate is not None:
+        raise ConflictError(
+            f"Planner suggestion already exists as task {duplicate['task_id']} for goal {goal_id}"
+        )
     task = services.execution_layer.create_task(goal_id=goal_id, title=suggestion["title"])
     return {
         "goal_id": goal_id,
