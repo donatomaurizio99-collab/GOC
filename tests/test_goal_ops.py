@@ -16169,6 +16169,25 @@ def test_272o3_goal_planner_review_inbox_next_suggestion_empty_when_reviewed(cli
     assert item["next_suggestion"] is None
 
 
+def test_272o4_planner_review_inbox_open_next_review_focus_contract():
+    project_root = Path(__file__).resolve().parents[1]
+    app_js = (project_root / "goal_ops_console" / "static" / "app.js").read_text(encoding="utf-8")
+    template = (project_root / "goal_ops_console" / "templates" / "index.html").read_text(encoding="utf-8")
+    system_router = (project_root / "goal_ops_console" / "routers" / "system.py").read_text(encoding="utf-8")
+
+    assert "function nextPlannerReviewItem()" in app_js
+    assert "function firstPendingPlannerSuggestionIndex(suggestions)" in app_js
+    assert "nextReviewItem?.next_suggestion?.suggestion_index" in app_js
+    assert "runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true })" in app_js
+    assert "data-planner-suggestion-index" in app_js
+    assert "scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex)" in app_js
+    assert "Opened next review target" in app_js
+    assert "planner-suggestion-focus" in app_js
+    assert ".planner-suggestion-focus" in template
+    assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
+    assert '"static_asset_version": _static_asset_version()' in system_router
+
+
 def test_272p_goal_planner_review_inbox_empty_state(client):
     response = client.get("/goals/planner/reviews")
 

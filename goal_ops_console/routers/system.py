@@ -1,3 +1,4 @@
+import hashlib
 import json
 import platform
 from datetime import UTC, datetime
@@ -21,6 +22,14 @@ router = APIRouter(tags=["system"])
 
 def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _static_asset_version() -> str:
+    app_js = Path(__file__).resolve().parents[1] / "static" / "app.js"
+    try:
+        return hashlib.sha256(app_js.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return SPEC_VERSION
 
 
 def _build_health_payload(services: AppServices) -> dict[str, Any]:
@@ -501,7 +510,7 @@ def dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"spec_version": SPEC_VERSION},
+        context={"spec_version": SPEC_VERSION, "static_asset_version": _static_asset_version()},
     )
 
 

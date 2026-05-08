@@ -583,6 +583,14 @@
       border-color: rgba(196, 106, 45, 0.45);
       box-shadow: 0 0 0 2px rgba(196, 106, 45, 0.12);
     }
+    .planner-suggestion-focus {
+      border-color: rgba(27, 102, 97, 0.46);
+      box-shadow: 0 0 0 3px rgba(27, 102, 97, 0.13), 0 18px 36px rgba(27, 102, 97, 0.12);
+      background: linear-gradient(135deg, rgba(230, 247, 242, 0.9), rgba(255, 255, 255, 0.82));
+    }
+    .planner-review-focus-label {
+      color: #1b6661;
+    }
     .entity-header {
       display: flex;
       justify-content: space-between;
@@ -1058,6 +1066,6 @@
                \-> failed -> running|exhausted|poison</pre>
     </section>
   </main>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v={{ static_asset_version }}"></script>
 </body>
 </html>
