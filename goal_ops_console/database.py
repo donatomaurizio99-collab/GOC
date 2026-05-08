@@ -362,6 +362,36 @@ VALUES (4, 'task_planner_suggestion_rationale', datetime('now'));
 COMMIT;
 """,
     ),
+    (
+        5,
+        """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS planner_suggestion_reviews (
+  goal_id                    TEXT NOT NULL,
+  suggestion_index           INTEGER NOT NULL,
+  decision                   TEXT NOT NULL,
+  comment                    TEXT,
+  task_id                    TEXT,
+  planner_source             TEXT NOT NULL,
+  suggestion_title           TEXT NOT NULL,
+  suggestion_description     TEXT NOT NULL,
+  suggestion_rationale       TEXT NOT NULL,
+  suggestion_priority_hint   TEXT NOT NULL,
+  operator_override          TEXT,
+  created_at                 TEXT NOT NULL,
+  updated_at                 TEXT NOT NULL,
+  PRIMARY KEY(goal_id, suggestion_index),
+  FOREIGN KEY(goal_id) REFERENCES goals(goal_id),
+  FOREIGN KEY(task_id) REFERENCES tasks(task_id),
+  CHECK(decision IN ('created', 'deferred', 'rejected'))
+);
+CREATE INDEX IF NOT EXISTS idx_planner_suggestion_reviews_goal_updated
+ON planner_suggestion_reviews(goal_id, updated_at DESC);
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (5, 'planner_suggestion_reviews', datetime('now'));
+COMMIT;
+""",
+    ),
 )
 T = TypeVar("T")
 

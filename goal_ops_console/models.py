@@ -78,6 +78,10 @@ class PlannerTaskSuggestion(BaseModel):
     source: str
     task_exists: bool = False
     existing_task_id: str | None = None
+    review_decision: Literal["pending", "created", "deferred", "rejected"] = "pending"
+    review_comment: str | None = None
+    review_task_id: str | None = None
+    reviewed_at: str | None = None
 
 
 class PlannerPreviewResponse(BaseModel):
@@ -103,12 +107,42 @@ class PlannerBulkTaskCreateRequest(BaseModel):
     overrides: dict[int, PlannerTaskSuggestionOverride] = Field(default_factory=dict)
 
 
+class PlannerSuggestionReview(BaseModel):
+    goal_id: str
+    suggestion_index: int
+    decision: Literal["created", "deferred", "rejected"]
+    comment: str | None = None
+    task_id: str | None = None
+    planner_source: str
+    suggestion_title: str
+    suggestion_description: str
+    suggestion_rationale: str
+    suggestion_priority_hint: str
+    operator_override: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+
+
+class PlannerReviewDecisionRequest(BaseModel):
+    suggestion_index: int = Field(ge=0)
+    decision: Literal["deferred", "rejected"]
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class PlannerReviewDecisionResponse(BaseModel):
+    goal_id: str
+    suggestion_index: int
+    suggestion: PlannerTaskSuggestion
+    review: PlannerSuggestionReview
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int
     suggestion: PlannerTaskSuggestion
     applied_suggestion: PlannerTaskSuggestion
     operator_override: dict[str, Any] | None = None
+    review: PlannerSuggestionReview | None = None
     task: dict[str, Any]
 
 
