@@ -507,6 +507,24 @@ function renderGoalButtons(goal) {
   return actionButtons.join("");
 }
 
+function renderPlannerSuggestionStatus(item) {
+  if (!item.task_exists) {
+    return `<div class="meta">${escapeHtml(item.source)}</div>`;
+  }
+  const existingTask = item.existing_task_id ? ` as ${escapeHtml(item.existing_task_id)}` : "";
+  return `<div class="meta">${escapeHtml(item.source)} &middot; Already created${existingTask}</div>`;
+}
+
+function renderPlannerSuggestionAction(item, index) {
+  if (item.task_exists) {
+    return `<button type="button" class="secondary" disabled>Already created</button>`;
+  }
+  return (
+    `<button type="button" class="secondary" data-mutation-control="true" `
+    + `data-plan-suggestion-index="${index}">Create task</button>`
+  );
+}
+
 function renderPlannerPreview(preview) {
   const container = document.getElementById("planner-preview");
   if (!container) return;
@@ -528,13 +546,13 @@ function renderPlannerPreview(preview) {
           <div class="entity-header">
             <div>
               <div class="entity-title">${escapeHtml(item.title)}</div>
-              <div class="meta">${escapeHtml(item.source)}</div>
+              ${renderPlannerSuggestionStatus(item)}
             </div>
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
           <p class="meta">${escapeHtml(item.description)}</p>
           <div class="actions">
-            <button type="button" class="secondary" data-mutation-control="true" data-plan-suggestion-index="${index}">Create task</button>
+            ${renderPlannerSuggestionAction(item, index)}
           </div>
         </article>
       `).join("")}
@@ -1409,19 +1427,21 @@ async function createTaskFromPlannerSuggestion(indexValue) {
     throw new Error("Run Plan Preview before creating a suggested task.");
   }
   const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
+  const goalId = plannerPreview.goal_id;
   ensureMutationAllowed("Planner task creation");
-  await api(`/goals/${encodeURIComponent(plannerPreview.goal_id)}/plan/tasks`, {
+  await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks`, {
     method: "POST",
     body: JSON.stringify({
       suggestion_index: suggestionIndex,
     }),
   });
-  selectedGoalId = plannerPreview.goal_id;
-  document.getElementById("task-goal-id").value = plannerPreview.goal_id;
-  document.getElementById("event-correlation-id").value = plannerPreview.goal_id;
-  document.getElementById("trace-goal-id").value = plannerPreview.goal_id;
-  document.getElementById("fault-goal-id").value = plannerPreview.goal_id;
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
+  await runPlannerPreview(goalId);
   setActiveJump("tasks-section");
 }
 
