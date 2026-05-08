@@ -16265,6 +16265,158 @@ def test_272u_goal_planner_review_inbox_rejects_invalid_filter_values(client):
     assert invalid_sort.status_code == 422
 
 
+def test_272ua_goal_planner_deferred_followups_returns_deferred_items(client):
+    alpha_goal = client.post(
+        "/goals",
+        json={"title": "Alpha deferred followups", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    beta_goal = client.post(
+        "/goals",
+        json={"title": "Beta deferred followups", "urgency": 0.5, "value": 0.8, "deadline_score": 0.1},
+    ).json()
+    alpha_preview = client.post(f"/goals/{alpha_goal['goal_id']}/plan").json()
+    beta_preview = client.post(f"/goals/{beta_goal['goal_id']}/plan").json()
+
+    client.post(
+        f"/goals/{alpha_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Wait for owner input."},
+    )
+    client.post(
+        f"/goals/{alpha_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 1, "decision": "deferred"},
+    )
+    client.post(
+        f"/goals/{alpha_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 2, "decision": "rejected", "comment": "Not useful now."},
+    )
+    client.post(f"/goals/{beta_goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    client.post(
+        f"/goals/{beta_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 1, "decision": "deferred", "comment": "Sequence after launch."},
+    )
+
+    response = client.get("/goals/planner/reviews/followups")
+    payload = response.json()
+    items_by_key = {(item["goal_id"], item["suggestion_index"]): item for item in payload["items"]}
+
+    assert response.status_code == 200
+    assert payload["summary"] == {"total_followups": 3, "goals_with_followups": 2}
+    assert set(items_by_key) == {
+        (alpha_goal["goal_id"], 0),
+        (alpha_goal["goal_id"], 1),
+        (beta_goal["goal_id"], 1),
+    }
+    assert client.get(f"/tasks?goal_id={alpha_goal['goal_id']}").json() == []
+    assert len(client.get(f"/tasks?goal_id={beta_goal['goal_id']}").json()) == 1
+
+    alpha_item = items_by_key[(alpha_goal["goal_id"], 0)]
+    alpha_suggestion = alpha_preview["suggestions"][0]
+    assert alpha_item["goal_title"] == alpha_goal["title"]
+    assert alpha_item["state"] == alpha_goal["state"]
+    assert alpha_item["source"] == "deterministic_planner"
+    assert alpha_item["suggestion_title"] == alpha_suggestion["title"]
+    assert alpha_item["suggestion_description"] == alpha_suggestion["description"]
+    assert alpha_item["suggestion_rationale"] == alpha_suggestion["rationale"]
+    assert alpha_item["priority_hint"] == alpha_suggestion["priority_hint"]
+    assert alpha_item["comment"] == "Wait for owner input."
+    assert alpha_item["deferred_at"]
+
+    beta_item = items_by_key[(beta_goal["goal_id"], 1)]
+    beta_suggestion = beta_preview["suggestions"][1]
+    assert beta_item["suggestion_title"] == beta_suggestion["title"]
+    assert beta_item["comment"] == "Sequence after launch."
+
+
+def test_272ub_goal_planner_deferred_followups_empty_and_read_only(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Empty deferred followups", "urgency": 0.6, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    before_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    response = client.get("/goals/planner/reviews/followups")
+    after_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    reviews = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()["reviews"]
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "summary": {"total_followups": 0, "goals_with_followups": 0},
+        "items": [],
+    }
+    assert before_tasks == []
+    assert after_tasks == []
+    assert reviews == []
+
+
+def test_272uc_goal_planner_deferred_followups_sort_newest_then_title(client):
+    older_goal = client.post(
+        "/goals",
+        json={"title": "Zulu same deferred", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    tie_first_goal = client.post(
+        "/goals",
+        json={"title": "Alpha same deferred", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    newest_goal = client.post(
+        "/goals",
+        json={"title": "Newest deferred", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+
+    for goal in [older_goal, tie_first_goal, newest_goal]:
+        client.post(
+            f"/goals/{goal['goal_id']}/plan/reviews",
+            json={"suggestion_index": 0, "decision": "deferred"},
+        )
+
+    db = client.app.state.services.db
+    db.execute(
+        "UPDATE planner_suggestion_reviews SET updated_at = ? WHERE goal_id = ?",
+        "2026-01-02 00:00:00",
+        older_goal["goal_id"],
+    )
+    db.execute(
+        "UPDATE planner_suggestion_reviews SET updated_at = ? WHERE goal_id = ?",
+        "2026-01-02 00:00:00",
+        tie_first_goal["goal_id"],
+    )
+    db.execute(
+        "UPDATE planner_suggestion_reviews SET updated_at = ? WHERE goal_id = ?",
+        "2026-01-03 00:00:00",
+        newest_goal["goal_id"],
+    )
+
+    payload = client.get("/goals/planner/reviews/followups").json()
+
+    assert [item["goal_title"] for item in payload["items"]] == [
+        newest_goal["title"],
+        tie_first_goal["title"],
+        older_goal["title"],
+    ]
+
+
+def test_272ud_goal_planner_deferred_followups_updates_after_reopen(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reopen deferred followup", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+
+    before = client.get("/goals/planner/reviews/followups").json()
+    reopened = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    after = client.get("/goals/planner/reviews/followups").json()
+
+    assert before["summary"] == {"total_followups": 1, "goals_with_followups": 1}
+    assert before["items"][0]["goal_id"] == goal["goal_id"]
+    assert reopened.status_code == 200
+    assert after == {
+        "summary": {"total_followups": 0, "goals_with_followups": 0},
+        "items": [],
+    }
+
+
 def test_272v_goal_plan_bulk_review_defers_selected_without_tasks(client):
     goal = client.post(
         "/goals",

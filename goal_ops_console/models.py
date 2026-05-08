@@ -222,6 +222,30 @@ class PlannerReviewInboxResponse(BaseModel):
     items: list[PlannerReviewInboxItem]
 
 
+class PlannerDeferredFollowupItem(BaseModel):
+    goal_id: str
+    goal_title: str
+    state: str
+    source: str
+    suggestion_index: int
+    suggestion_title: str
+    suggestion_description: str
+    suggestion_rationale: str
+    priority_hint: str
+    comment: str | None = None
+    deferred_at: str
+
+
+class PlannerDeferredFollowupSummary(BaseModel):
+    total_followups: int
+    goals_with_followups: int
+
+
+class PlannerDeferredFollowupResponse(BaseModel):
+    summary: PlannerDeferredFollowupSummary
+    items: list[PlannerDeferredFollowupItem]
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int

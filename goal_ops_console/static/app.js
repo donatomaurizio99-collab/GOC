@@ -50,6 +50,7 @@ const MUTATION_LOCK_FALLBACK_MESSAGE = (
 const viewCache = {
   goals: [],
   plannerReviewInbox: null,
+  plannerDeferredFollowups: null,
   tasks: [],
   workflows: [],
   workflowRuns: [],
@@ -456,6 +457,7 @@ function setAutoRefresh(enabled) {
 function rerenderFilteredViews() {
   renderGoals(viewCache.goals);
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
+  renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
   renderTasks(viewCache.tasks);
   renderWorkflows(viewCache.workflows, viewCache.workflowRuns);
   renderEvents(viewCache.events);
@@ -790,6 +792,71 @@ function renderPlannerReviewInbox(payload) {
       <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending_suggestions || 0}</strong></div>
       <div class="entity-metric"><span class="meta">Created</span><strong>${summary.created || 0}</strong></div>
       <div class="entity-metric"><span class="meta">Deferred</span><strong>${summary.deferred || 0}</strong></div>
+    </div>
+    <div class="stack-list" style="margin-top:0.75rem;">${itemMarkup}</div>
+  `;
+}
+
+function plannerDeferredFollowupVisibleItems(payload) {
+  return filterRows(payload?.items || [], (item) => [
+    item.goal_id,
+    item.goal_title,
+    item.state,
+    item.suggestion_title,
+    item.suggestion_description,
+    item.suggestion_rationale,
+    item.priority_hint,
+    item.comment || "",
+    item.deferred_at,
+  ]);
+}
+
+function renderPlannerDeferredFollowups(payload) {
+  const container = document.getElementById("planner-deferred-followups");
+  if (!container) return;
+  if (!payload) {
+    container.innerHTML = `
+      <span class="meta">Deferred Follow-ups</span>
+      <p class="meta">Deferred planner suggestions are loading.</p>
+    `;
+    return;
+  }
+  const summary = payload.summary || {};
+  const items = plannerDeferredFollowupVisibleItems(payload);
+  const itemMarkup = items.length
+    ? items.map((item) => {
+      const comment = item.comment ? `<div class="meta">Comment: ${escapeHtml(item.comment)}</div>` : "";
+      return `
+        <article class="entity-card ${selectedGoalId === item.goal_id ? "selected" : ""}">
+          <div class="entity-header">
+            <div>
+              <div class="entity-title">${escapeHtml(item.suggestion_title)}</div>
+              <div class="meta">
+                ${escapeHtml(item.goal_title)}
+                &middot; #${Number(item.suggestion_index) + 1}
+                &middot; ${escapeHtml(item.deferred_at)}
+              </div>
+            </div>
+            <span class="pill ${stateClass(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
+          </div>
+          <p class="meta">${escapeHtml(item.suggestion_description)}</p>
+          <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.suggestion_rationale)}</p>
+          ${comment}
+          <div class="actions" style="margin-top:0.75rem;">
+            <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="meta">${filteredEmptyMessage("No deferred planner follow-ups yet.")}</div>`;
+  container.innerHTML = `
+    <span class="meta">Deferred Follow-ups &middot; ${summary.total_followups || 0} suggestions</span>
+    <div class="actions" style="margin-top:0.75rem;">
+      <button type="button" class="secondary" data-plan-followups-refresh="true">Refresh follow-ups</button>
+    </div>
+    <div class="entity-grid" style="margin-top:0.75rem;">
+      <div class="entity-metric"><span class="meta">Follow-ups</span><strong>${summary.total_followups || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Goals</span><strong>${summary.goals_with_followups || 0}</strong></div>
     </div>
     <div class="stack-list" style="margin-top:0.75rem;">${itemMarkup}</div>
   `;
@@ -1510,6 +1577,12 @@ async function refreshPlannerReviewInbox() {
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
 }
 
+async function refreshPlannerDeferredFollowups() {
+  const payload = await api("/goals/planner/reviews/followups");
+  viewCache.plannerDeferredFollowups = payload;
+  renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
+}
+
 async function refreshWorkflows() {
   const [workflowPayload, runPayload] = await Promise.all([
     api("/workflows"),
@@ -1636,6 +1709,7 @@ async function refreshAll() {
   await Promise.all([
     refreshGoals(),
     refreshPlannerReviewInbox(),
+    refreshPlannerDeferredFollowups(),
     refreshTasks(),
     refreshWorkflows(),
     refreshEvents(),
@@ -1657,6 +1731,7 @@ function startAutoRefreshLoop() {
     }
     refreshGoals().catch(() => {});
     refreshPlannerReviewInbox().catch(() => {});
+    refreshPlannerDeferredFollowups().catch(() => {});
     refreshTasks().catch(() => {});
     refreshWorkflows().catch(() => {});
     refreshEvents().catch(() => {});
@@ -1723,6 +1798,8 @@ async function runPlannerPreview(goalId) {
   document.getElementById("trace-goal-id").value = goalId;
   document.getElementById("fault-goal-id").value = goalId;
   renderPlannerPreview(plannerPreview);
+  renderPlannerReviewInbox(viewCache.plannerReviewInbox);
+  renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
   updateSelectedGoalLabel();
 }
 
@@ -2212,7 +2289,7 @@ document.getElementById("flow-trace-form").addEventListener("submit", async (eve
 });
 
 document.getElementById("refresh-goals").addEventListener("click", async () => {
-  await Promise.all([refreshGoals(), refreshPlannerReviewInbox()]);
+  await Promise.all([refreshGoals(), refreshPlannerReviewInbox(), refreshPlannerDeferredFollowups()]);
 });
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-workflows").addEventListener("click", refreshWorkflows);
@@ -2320,6 +2397,7 @@ document.addEventListener("click", async (event) => {
   const planBulkCreate = event.target.dataset.planBulkCreate;
   const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
+  const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
   const planNextReview = event.target.dataset.planNextReview;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
@@ -2366,6 +2444,10 @@ document.addEventListener("click", async (event) => {
     if (planInboxStatus) {
       plannerReviewInboxStatus = planInboxStatus;
       await refreshPlannerReviewInbox();
+    }
+
+    if (planFollowupsRefresh) {
+      await refreshPlannerDeferredFollowups();
     }
 
     if (planNextReview) {
@@ -2448,7 +2530,7 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal || planInboxStatus || planNextReview
+        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planNextReview
           ? "goal-error"
           : "task-error";
     showError(target, error);
