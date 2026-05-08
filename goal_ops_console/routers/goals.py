@@ -14,6 +14,7 @@ from goal_ops_console.models import (
     PlannerPreviewResponse,
     PlannerReviewDecisionRequest,
     PlannerReviewDecisionResponse,
+    PlannerReviewListResponse,
     PlannerReviewReopenResponse,
     PlannerTaskCreateRequest,
     PlannerTaskCreateResponse,
@@ -164,6 +165,35 @@ def _planner_reviews_by_index(goal_id: str, services: AppServices) -> dict[int, 
     return {int(row["suggestion_index"]): _planner_review_from_row(row) for row in rows}
 
 
+def _planner_review_summary(plan: dict) -> dict:
+    summary = {
+        "total_suggestions": len(plan["suggestions"]),
+        "pending": 0,
+        "created": 0,
+        "deferred": 0,
+        "rejected": 0,
+    }
+    for suggestion in plan["suggestions"]:
+        decision = suggestion["review_decision"]
+        summary[decision] += 1
+    return summary
+
+
+def _planner_review_list(goal_id: str, services: AppServices) -> dict:
+    plan = _preview_goal_plan(goal_id, services)
+    reviews = sorted(
+        _planner_reviews_by_index(goal_id, services).values(),
+        key=lambda review: review["suggestion_index"],
+    )
+    return {
+        "goal_id": plan["goal_id"],
+        "goal_title": plan["goal_title"],
+        "source": plan["source"],
+        "summary": _planner_review_summary(plan),
+        "reviews": reviews,
+    }
+
+
 def _get_planner_review(goal_id: str, suggestion_index: int, services: AppServices) -> dict | None:
     row = services.db.fetch_one(
         """SELECT goal_id,
@@ -312,6 +342,14 @@ def _reopen_planner_review(goal_id: str, suggestion_index: int, services: AppSer
 @router.post("/{goal_id}/plan", response_model=PlannerPreviewResponse)
 def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
     return _preview_goal_plan(goal_id, services)
+
+
+@router.get("/{goal_id}/plan/reviews", response_model=PlannerReviewListResponse)
+def list_plan_suggestion_reviews(
+    goal_id: str,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_review_list(goal_id, services)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)

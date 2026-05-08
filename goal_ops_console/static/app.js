@@ -612,6 +612,59 @@ function renderPlannerSuggestionReviewControls(item, index) {
   `;
 }
 
+function plannerReviewSummaryFromSuggestions(suggestions) {
+  return (suggestions || []).reduce((summary, item) => {
+    const decision = plannerSuggestionDecision(item);
+    summary.total_suggestions += 1;
+    if (decision in summary) {
+      summary[decision] += 1;
+    }
+    return summary;
+  }, {
+    total_suggestions: 0,
+    pending: 0,
+    created: 0,
+    deferred: 0,
+    rejected: 0,
+  });
+}
+
+function plannerReviewQueue(preview) {
+  return preview.review_queue || {
+    summary: plannerReviewSummaryFromSuggestions(preview.suggestions || []),
+    reviews: [],
+  };
+}
+
+function renderPlannerReviewSummary(preview) {
+  const queue = plannerReviewQueue(preview);
+  const summary = queue.summary || plannerReviewSummaryFromSuggestions(preview.suggestions || []);
+  const reviews = queue.reviews || [];
+  const reviewItems = reviews.length
+    ? reviews.map((review) => {
+      const taskId = review.task_id ? ` | task ${escapeHtml(review.task_id)}` : "";
+      const comment = review.comment ? ` | ${escapeHtml(review.comment)}` : "";
+      return (
+        `<div class="meta">#${Number(review.suggestion_index) + 1} `
+        + `${escapeHtml(review.decision)} | ${escapeHtml(review.suggestion_title)}`
+        + `${taskId}${comment}</div>`
+      );
+    }).join("")
+    : `<div class="meta">No saved review decisions yet.</div>`;
+  return `
+    <div class="entity-grid" style="margin-top:0.75rem;">
+      <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending}</strong></div>
+      <div class="entity-metric"><span class="meta">Created</span><strong>${summary.created}</strong></div>
+      <div class="entity-metric"><span class="meta">Deferred</span><strong>${summary.deferred}</strong></div>
+      <div class="entity-metric"><span class="meta">Rejected</span><strong>${summary.rejected}</strong></div>
+    </div>
+    <details style="margin-top:0.75rem;">
+      <summary class="meta">Saved review decisions (${reviews.length})</summary>
+      <div class="stack-list" style="margin-top:0.5rem;">${reviewItems}</div>
+    </details>
+  `;
+}
+
 function renderPlannerPreview(preview) {
   const container = document.getElementById("planner-preview");
   if (!container) return;
@@ -627,9 +680,10 @@ function renderPlannerPreview(preview) {
     !item.task_exists && plannerSuggestionDecision(item) === "pending"
   )).length;
   container.innerHTML = `
-    <span class="meta">Planner Preview · ${escapeHtml(preview.source)}</span>
+    <span class="meta">Planner Preview &middot; ${escapeHtml(preview.source)}</span>
     <h3>${escapeHtml(preview.goal_title)}</h3>
-    <div class="meta">${escapeHtml(preview.goal_id)} · ${suggestions.length} suggested tasks · no tasks created automatically</div>
+    <div class="meta">${escapeHtml(preview.goal_id)} &middot; ${suggestions.length} suggested tasks &middot; no tasks created automatically</div>
+    ${renderPlannerReviewSummary(preview)}
     <div class="actions" style="margin-top:0.75rem;">
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-create="true" ${selectableCount ? "" : "disabled"}>Create selected tasks</button>
       <span class="meta">${selectableCount} selectable suggestions</span>
@@ -1511,7 +1565,8 @@ async function runPlannerPreview(goalId) {
     throw new Error("Select a goal before requesting a plan preview.");
   }
   const preview = await api(`/goals/${encodeURIComponent(goalId)}/plan`, { method: "POST" });
-  plannerPreview = preview;
+  const reviewQueue = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews`);
+  plannerPreview = { ...preview, review_queue: reviewQueue };
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;

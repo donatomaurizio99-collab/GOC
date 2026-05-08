@@ -143,6 +143,22 @@ class PlannerReviewReopenResponse(BaseModel):
     cleared_review: PlannerSuggestionReview
 
 
+class PlannerReviewSummary(BaseModel):
+    total_suggestions: int
+    pending: int
+    created: int
+    deferred: int
+    rejected: int
+
+
+class PlannerReviewListResponse(BaseModel):
+    goal_id: str
+    goal_title: str
+    source: str
+    summary: PlannerReviewSummary
+    reviews: list[PlannerSuggestionReview]
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int

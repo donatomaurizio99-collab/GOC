@@ -15982,6 +15982,81 @@ def test_272k_goal_plan_review_reopen_missing_decision_returns_404(client):
     assert tasks == []
 
 
+def test_272l_goal_plan_review_list_returns_summary_and_saved_decisions(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Summarize planner reviews", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    total = len(preview["suggestions"])
+
+    deferred = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Wait for dependency."},
+    ).json()
+    rejected = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 1, "decision": "rejected", "comment": "Not aligned."},
+    ).json()
+    created = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 2}).json()
+
+    response = client.get(f"/goals/{goal['goal_id']}/plan/reviews")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["goal_title"] == goal["title"]
+    assert payload["source"] == "deterministic_planner"
+    assert payload["summary"] == {
+        "total_suggestions": total,
+        "pending": total - 3,
+        "created": 1,
+        "deferred": 1,
+        "rejected": 1,
+    }
+    assert [review["suggestion_index"] for review in payload["reviews"]] == [0, 1, 2]
+    assert [review["decision"] for review in payload["reviews"]] == ["deferred", "rejected", "created"]
+    assert payload["reviews"][0]["updated_at"] == deferred["review"]["updated_at"]
+    assert payload["reviews"][1]["updated_at"] == rejected["review"]["updated_at"]
+    assert payload["reviews"][2]["task_id"] == created["task"]["task_id"]
+
+
+def test_272m_goal_plan_review_list_unknown_goal_returns_404(client):
+    response = client.get("/goals/missing-goal/plan/reviews")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Goal missing-goal not found"
+
+
+def test_272n_goal_plan_review_list_updates_after_reopen(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Summarize reopened planner review", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    total = len(preview["suggestions"])
+
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+    before = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()
+    reopened = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    after = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()
+
+    assert before["summary"]["deferred"] == 1
+    assert len(before["reviews"]) == 1
+    assert reopened.status_code == 200
+    assert after["summary"] == {
+        "total_suggestions": total,
+        "pending": total,
+        "created": 0,
+        "deferred": 0,
+        "rejected": 0,
+    }
+    assert after["reviews"] == []
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 
