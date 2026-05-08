@@ -508,16 +508,28 @@ function renderGoalButtons(goal) {
 }
 
 function renderPlannerSuggestionStatus(item) {
-  if (!item.task_exists) {
-    return `<div class="meta">${escapeHtml(item.source)}</div>`;
+  const decision = plannerSuggestionDecision(item);
+  if (item.task_exists || decision === "created") {
+    const taskId = item.existing_task_id || item.review_task_id;
+    const existingTask = taskId ? ` as ${escapeHtml(taskId)}` : "";
+    return `<div class="meta">${escapeHtml(item.source)} &middot; Already created${existingTask}</div>`;
   }
-  const existingTask = item.existing_task_id ? ` as ${escapeHtml(item.existing_task_id)}` : "";
-  return `<div class="meta">${escapeHtml(item.source)} &middot; Already created${existingTask}</div>`;
+  if (decision === "deferred" || decision === "rejected") {
+    return (
+      `<div class="meta">${escapeHtml(item.source)} &middot; Review: `
+      + `${escapeHtml(decision)}</div>`
+    );
+  }
+  return `<div class="meta">${escapeHtml(item.source)} &middot; Ready for review</div>`;
 }
 
 function renderPlannerSuggestionAction(item, index) {
-  if (item.task_exists) {
+  const decision = plannerSuggestionDecision(item);
+  if (item.task_exists || decision === "created") {
     return `<button type="button" class="secondary" disabled>Already created</button>`;
+  }
+  if (decision === "deferred" || decision === "rejected") {
+    return `<button type="button" class="secondary" disabled>${escapeHtml(decision)}</button>`;
   }
   return (
     `<button type="button" class="secondary" data-mutation-control="true" `
@@ -526,7 +538,8 @@ function renderPlannerSuggestionAction(item, index) {
 }
 
 function renderPlannerSuggestionSelection(item, index) {
-  if (item.task_exists) {
+  const decision = plannerSuggestionDecision(item);
+  if (item.task_exists || decision !== "pending") {
     return "";
   }
   return (
@@ -536,7 +549,8 @@ function renderPlannerSuggestionSelection(item, index) {
 }
 
 function renderPlannerSuggestionEditor(item, index) {
-  if (item.task_exists) {
+  const decision = plannerSuggestionDecision(item);
+  if (item.task_exists || decision !== "pending") {
     return "";
   }
   return `
@@ -558,6 +572,40 @@ function renderPlannerSuggestionEditor(item, index) {
       Review description
       <textarea data-plan-description-index="${index}" rows="3">${escapeHtml(item.description)}</textarea>
     </label>
+  `;
+}
+
+function plannerSuggestionDecision(item) {
+  if (item.review_decision) {
+    return item.review_decision;
+  }
+  return item.task_exists ? "created" : "pending";
+}
+
+function renderPlannerSuggestionReviewControls(item, index) {
+  const decision = plannerSuggestionDecision(item);
+  if (decision === "deferred" || decision === "rejected") {
+    const comment = item.review_comment
+      ? `<div class="meta">Comment: ${escapeHtml(item.review_comment)}</div>`
+      : "";
+    return `
+      <div class="entity-divider"></div>
+      <div class="meta">Review decision: ${escapeHtml(decision)}</div>
+      ${comment}
+    `;
+  }
+  if (item.task_exists || decision === "created") {
+    return "";
+  }
+  return `
+    <label class="meta" style="display:block;margin-top:0.75rem;">
+      Review comment (optional)
+      <textarea data-plan-review-comment-index="${index}" rows="2" placeholder="Why defer or reject this suggestion?"></textarea>
+    </label>
+    <div class="actions">
+      <button type="button" class="secondary" data-mutation-control="true" data-plan-review-index="${index}" data-plan-review-decision="deferred">Defer</button>
+      <button type="button" class="secondary" data-mutation-control="true" data-plan-review-index="${index}" data-plan-review-decision="rejected">Reject</button>
+    </div>
   `;
 }
 
@@ -594,6 +642,7 @@ function renderPlannerPreview(preview) {
           <p class="meta">${escapeHtml(item.description)}</p>
           <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.rationale)}</p>
           ${renderPlannerSuggestionEditor(item, index)}
+          ${renderPlannerSuggestionReviewControls(item, index)}
           ${renderPlannerSuggestionSelection(item, index)}
           <div class="actions">
             ${renderPlannerSuggestionAction(item, index)}
@@ -1513,11 +1562,51 @@ function collectPlannerSuggestionOverrides(indexes) {
   }, {});
 }
 
+function ensurePlannerSuggestionReadyForCreate(suggestion) {
+  const decision = plannerSuggestionDecision(suggestion);
+  if (decision === "deferred" || decision === "rejected") {
+    throw new Error(`Planner suggestion was already ${decision}. Run Plan Preview again or choose another suggestion.`);
+  }
+}
+
+function collectPlannerReviewComment(index) {
+  return document.querySelector(`[data-plan-review-comment-index="${index}"]`)?.value.trim() || null;
+}
+
+async function reviewPlannerSuggestion(indexValue, decision) {
+  if (!plannerPreview?.goal_id) {
+    throw new Error("Run Plan Preview before reviewing a suggested task.");
+  }
+  const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
+  const goalId = plannerPreview.goal_id;
+  ensureMutationAllowed(`Planner review ${decision}`);
+  const comment = collectPlannerReviewComment(suggestionIndex);
+  const response = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews`, {
+    method: "POST",
+    body: JSON.stringify({
+      suggestion_index: suggestionIndex,
+      decision,
+      ...(comment ? { comment } : {}),
+    }),
+  });
+  document.getElementById("system-feedback").textContent = (
+    `Planner suggestion #${response.suggestion_index + 1} marked ${response.review.decision}.`
+  );
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  await refreshAll();
+  await runPlannerPreview(goalId);
+}
+
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
   }
   const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
+  ensurePlannerSuggestionReadyForCreate(plannerPreview.suggestions[suggestionIndex]);
   const goalId = plannerPreview.goal_id;
   const override = collectPlannerSuggestionOverride(suggestionIndex);
   ensureMutationAllowed("Planner task creation");
@@ -1550,6 +1639,7 @@ async function createTasksFromSelectedPlannerSuggestions() {
   if (!suggestionIndexes.length) {
     throw new Error("Select at least one planner suggestion before bulk creation.");
   }
+  suggestionIndexes.forEach((index) => ensurePlannerSuggestionReadyForCreate(plannerPreview.suggestions[index]));
   const goalId = plannerPreview.goal_id;
   const overrides = collectPlannerSuggestionOverrides(suggestionIndexes);
   ensureMutationAllowed("Bulk planner task creation");
@@ -1936,6 +2026,8 @@ document.addEventListener("click", async (event) => {
   const selectGoal = event.target.dataset.selectGoal;
   const planGoal = event.target.dataset.planGoal;
   const planSuggestionIndex = event.target.dataset.planSuggestionIndex;
+  const planReviewIndex = event.target.dataset.planReviewIndex;
+  const planReviewDecision = event.target.dataset.planReviewDecision;
   const planBulkCreate = event.target.dataset.planBulkCreate;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
@@ -1982,6 +2074,11 @@ document.addEventListener("click", async (event) => {
     if (planSuggestionIndex !== undefined) {
       showError("task-error", null);
       await createTaskFromPlannerSuggestion(planSuggestionIndex);
+    }
+
+    if (planReviewIndex !== undefined && planReviewDecision) {
+      showError("task-error", null);
+      await reviewPlannerSuggestion(planReviewIndex, planReviewDecision);
     }
 
     if (planBulkCreate) {

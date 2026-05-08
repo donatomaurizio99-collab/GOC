@@ -1213,6 +1213,31 @@ def test_53c_task_planner_rationale_schema_migration(services):
     assert "planner_suggestion_rationale" in columns
 
 
+def test_53d_planner_review_decisions_schema_migration(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 5"
+    )
+    columns = {
+        column["name"]
+        for column in services.db.fetch_all("PRAGMA table_info(planner_suggestion_reviews)")
+    }
+
+    assert row is not None
+    assert row["name"] == "planner_suggestion_reviews"
+    assert {
+        "goal_id",
+        "suggestion_index",
+        "decision",
+        "comment",
+        "task_id",
+        "suggestion_title",
+        "suggestion_description",
+        "suggestion_rationale",
+        "suggestion_priority_hint",
+        "operator_override",
+    }.issubset(columns)
+
+
 def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
     first = client.post(
         "/workflows/maintenance.retention_cleanup/start",
@@ -15647,6 +15672,10 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
             "source",
             "task_exists",
             "existing_task_id",
+            "review_decision",
+            "review_comment",
+            "review_task_id",
+            "reviewed_at",
         }
         assert suggestion["title"]
         assert suggestion["description"]
@@ -15655,6 +15684,10 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
         assert suggestion["source"] == "deterministic_planner"
         assert suggestion["task_exists"] is False
         assert suggestion["existing_task_id"] is None
+        assert suggestion["review_decision"] == "pending"
+        assert suggestion["review_comment"] is None
+        assert suggestion["review_task_id"] is None
+        assert suggestion["reviewed_at"] is None
 
 
 def test_269b_goal_plan_preview_rationale_mentions_goal_signals(client):
@@ -15726,6 +15759,9 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
     assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
+    assert payload["review"]["decision"] == "created"
+    assert payload["review"]["task_id"] == payload["task"]["task_id"]
+    assert payload["review"]["suggestion_rationale"] == selected["rationale"]
     assert len(tasks) == 1
     assert tasks[0]["goal_id"] == goal["goal_id"]
     assert tasks[0]["title"] == selected["title"]
@@ -15751,8 +15787,11 @@ def test_272b_goal_plan_preview_marks_existing_suggestion_after_task_create(clie
     assert before["suggestions"][0]["existing_task_id"] is None
     assert after["suggestions"][0]["task_exists"] is True
     assert after["suggestions"][0]["existing_task_id"] == created["task"]["task_id"]
+    assert after["suggestions"][0]["review_decision"] == "created"
+    assert after["suggestions"][0]["review_task_id"] == created["task"]["task_id"]
     assert after["suggestions"][1]["task_exists"] is False
     assert after["suggestions"][1]["existing_task_id"] is None
+    assert after["suggestions"][1]["review_decision"] == "pending"
 
 
 def test_272c_goal_plan_task_create_applies_operator_override_with_original_provenance(client):
@@ -15789,10 +15828,102 @@ def test_272c_goal_plan_task_create_applies_operator_override_with_original_prov
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
     assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
     assert payload["task"]["planner_operator_overrides"] == override
+    assert payload["review"]["decision"] == "created"
+    assert payload["review"]["operator_override"] == override
     assert len(tasks) == 1
     assert tasks[0]["title"] == override["title"]
     assert tasks[0]["planner_suggestion_rationale"] == selected["rationale"]
     assert tasks[0]["planner_operator_overrides"] == override
+
+
+def test_272d_goal_plan_review_defer_persists_decision_without_creating_task(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Defer planner suggestion", "urgency": 0.4, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Wait for owner input."},
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    after = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["review"]["decision"] == "deferred"
+    assert payload["review"]["comment"] == "Wait for owner input."
+    assert payload["review"]["task_id"] is None
+    assert tasks == []
+    assert after["suggestions"][0]["review_decision"] == "deferred"
+    assert after["suggestions"][0]["review_comment"] == "Wait for owner input."
+    assert after["suggestions"][0]["task_exists"] is False
+
+
+def test_272e_goal_plan_review_reject_blocks_later_task_create(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reject planner suggestion", "urgency": 0.4, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+
+    rejected = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "rejected", "comment": "Not useful now."},
+    )
+    create = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert rejected.status_code == 201
+    assert create.status_code == 409
+    assert "already has review decision rejected" in create.json()["detail"]
+    assert tasks == []
+
+
+def test_272f_goal_plan_review_invalid_index_writes_nothing(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reject invalid review index", "urgency": 0.4, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 99, "decision": "rejected"},
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Planner suggestion index 99 not found for goal {goal['goal_id']}"
+    assert tasks == []
+
+
+def test_272g_goal_plan_review_unknown_goal_returns_404(client):
+    response = client.post(
+        "/goals/missing-goal/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Goal missing-goal not found"
+
+
+def test_272h_goal_plan_review_duplicate_decision_returns_409(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reject duplicate review", "urgency": 0.4, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+
+    first = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+    second = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "rejected"},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert "already has review decision deferred" in second.json()["detail"]
 
 
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
@@ -15941,6 +16072,33 @@ def test_276c2_goal_plan_bulk_task_create_uses_overrides_and_skips_applied_dupli
     assert tasks[0]["title"] == shared_title
     assert tasks[0]["planner_suggestion_rationale"]
     assert tasks[0]["planner_operator_overrides"] == {"title": shared_title}
+
+
+def test_276c3_goal_plan_bulk_task_create_skips_deferred_reviews(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk skips deferred planner review", "urgency": 0.7, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    deferred = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": [0, 1]},
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 201
+    assert [item["suggestion_index"] for item in payload["created"]] == [1]
+    assert len(payload["skipped_duplicates"]) == 1
+    assert payload["skipped_duplicates"][0]["suggestion_index"] == 0
+    assert payload["skipped_duplicates"][0]["review"]["decision"] == "deferred"
+    assert payload["skipped_duplicates"][0]["review"]["updated_at"] == deferred["review"]["updated_at"]
+    assert payload["skipped_duplicates"][0]["reason"] == "review_deferred"
+    assert len(tasks) == 1
 
 
 def test_276d_goal_plan_bulk_task_create_invalid_index_does_not_create_tasks(client):
