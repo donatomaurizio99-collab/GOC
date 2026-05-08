@@ -43,6 +43,7 @@ let globalFilterTerm = "";
 let jumpScrollScheduled = false;
 let plannerReviewInboxStatus = "needs_review";
 let plannerReviewInboxSort = "needs_review";
+let focusedPlannerSuggestionIndex = null;
 const MUTATION_LOCK_FALLBACK_MESSAGE = (
   "Mutating operations are blocked while runtime is in critical protection mode."
 );
@@ -655,9 +656,40 @@ function plannerReviewInboxVisibleItems(payload) {
   ]);
 }
 
-function nextPlannerReviewGoalId() {
+function nextPlannerReviewItem() {
   return plannerReviewInboxVisibleItems(viewCache.plannerReviewInbox)
-    .find((item) => item.needs_review)?.goal_id || "";
+    .find((item) => item.needs_review) || null;
+}
+
+function normalizePlannerSuggestionFocus(indexValue, suggestions) {
+  const index = Number.parseInt(indexValue, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= (suggestions || []).length) {
+    return null;
+  }
+  const suggestion = suggestions[index];
+  if (suggestion?.task_exists || plannerSuggestionDecision(suggestion) !== "pending") {
+    return null;
+  }
+  return index;
+}
+
+function firstPendingPlannerSuggestionIndex(suggestions) {
+  const index = (suggestions || []).findIndex((suggestion) => (
+    !suggestion?.task_exists && plannerSuggestionDecision(suggestion) === "pending"
+  ));
+  return index >= 0 ? index : null;
+}
+
+function scrollPlannerSuggestionIntoView(index) {
+  if (!Number.isInteger(index)) {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector(`[data-planner-suggestion-index="${index}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
 }
 
 function renderPlannerReviewSummary(preview) {
@@ -923,8 +955,18 @@ function renderPlannerPreview(preview) {
       <textarea data-plan-bulk-review-comment="true" rows="2" placeholder="Shared note for Defer selected or Reject selected"></textarea>
     </label>
     <div class="stack-list" style="margin-top:0.75rem;">
-      ${suggestions.map((item, index) => `
-        <article class="entity-card">
+      ${suggestions.map((item, index) => {
+        const isFocusedReviewTarget = focusedPlannerSuggestionIndex === index
+          && !item.task_exists
+          && plannerSuggestionDecision(item) === "pending";
+        const focusMarker = isFocusedReviewTarget
+          ? `<div class="meta planner-review-focus-label"><strong>Next review target</strong> from Review Inbox.</div>`
+          : "";
+        return `
+        <article
+          class="entity-card ${isFocusedReviewTarget ? "planner-suggestion-focus" : ""}"
+          data-planner-suggestion-index="${escapeHtml(String(index))}"
+        >
           <div class="entity-header">
             <div>
               <div class="entity-title">${escapeHtml(item.title)}</div>
@@ -932,6 +974,7 @@ function renderPlannerPreview(preview) {
             </div>
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
+          ${focusMarker}
           <p class="meta">${escapeHtml(item.description)}</p>
           <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.rationale)}</p>
           ${renderPlannerSuggestionEditor(item, index)}
@@ -941,7 +984,8 @@ function renderPlannerPreview(preview) {
             ${renderPlannerSuggestionAction(item, index)}
           </div>
         </article>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
   applyMutationControlState();
@@ -1814,7 +1858,7 @@ async function runOperatorAction(action) {
   await refreshAll();
 }
 
-async function runPlannerPreview(goalId) {
+async function runPlannerPreview(goalId, options = {}) {
   if (!goalId) {
     throw new Error("Select a goal before requesting a plan preview.");
   }
@@ -1822,6 +1866,13 @@ async function runPlannerPreview(goalId) {
   const reviewQueue = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews`);
   const reviewAudit = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews/audit`);
   plannerPreview = { ...preview, review_queue: reviewQueue, review_audit: reviewAudit };
+  focusedPlannerSuggestionIndex = normalizePlannerSuggestionFocus(
+    options.focusSuggestionIndex,
+    plannerPreview.suggestions,
+  );
+  if (focusedPlannerSuggestionIndex === null && options.focusNextPending) {
+    focusedPlannerSuggestionIndex = firstPendingPlannerSuggestionIndex(plannerPreview.suggestions);
+  }
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;
@@ -1831,6 +1882,7 @@ async function runPlannerPreview(goalId) {
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
   renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
   updateSelectedGoalLabel();
+  scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex);
 }
 
 function parsePlannerSuggestionIndex(indexValue) {
@@ -2514,11 +2566,18 @@ document.addEventListener("click", async (event) => {
     }
 
     if (planNextReview) {
-      const nextGoalId = nextPlannerReviewGoalId();
+      const nextReviewItem = nextPlannerReviewItem();
+      const nextGoalId = nextReviewItem?.goal_id || "";
       if (!nextGoalId) {
         throw new Error("No planner review item is available in the current inbox view.");
       }
-      await runPlannerPreview(nextGoalId);
+      const focusSuggestionIndex = nextReviewItem?.next_suggestion?.suggestion_index;
+      await runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true });
+      if (Number.isInteger(focusedPlannerSuggestionIndex)) {
+        document.getElementById("system-feedback").textContent = (
+          `Opened next review target: suggestion #${focusedPlannerSuggestionIndex + 1}.`
+        );
+      }
       setActiveJump("goals-section");
     }
 
