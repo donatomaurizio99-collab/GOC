@@ -159,6 +159,30 @@ class PlannerReviewListResponse(BaseModel):
     reviews: list[PlannerSuggestionReview]
 
 
+class PlannerReviewInboxItem(BaseModel):
+    goal_id: str
+    goal_title: str
+    state: str
+    source: str
+    summary: PlannerReviewSummary
+    last_reviewed_at: str | None = None
+    needs_review: bool
+
+
+class PlannerReviewInboxSummary(BaseModel):
+    total_goals: int
+    goals_needing_review: int
+    pending_suggestions: int
+    created: int
+    deferred: int
+    rejected: int
+
+
+class PlannerReviewInboxResponse(BaseModel):
+    summary: PlannerReviewInboxSummary
+    items: list[PlannerReviewInboxItem]
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int

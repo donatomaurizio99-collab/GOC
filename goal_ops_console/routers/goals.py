@@ -14,6 +14,7 @@ from goal_ops_console.models import (
     PlannerPreviewResponse,
     PlannerReviewDecisionRequest,
     PlannerReviewDecisionResponse,
+    PlannerReviewInboxResponse,
     PlannerReviewListResponse,
     PlannerReviewReopenResponse,
     PlannerTaskCreateRequest,
@@ -194,6 +195,43 @@ def _planner_review_list(goal_id: str, services: AppServices) -> dict:
     }
 
 
+def _planner_review_inbox_item(goal: dict, services: AppServices) -> dict:
+    review_list = _planner_review_list(goal["goal_id"], services)
+    summary = review_list["summary"]
+    reviews = review_list["reviews"]
+    return {
+        "goal_id": review_list["goal_id"],
+        "goal_title": review_list["goal_title"],
+        "state": goal["state"],
+        "source": review_list["source"],
+        "summary": summary,
+        "last_reviewed_at": max((review["updated_at"] for review in reviews), default=None),
+        "needs_review": summary["pending"] > 0,
+    }
+
+
+def _planner_review_inbox(services: AppServices) -> dict:
+    items = [_planner_review_inbox_item(goal, services) for goal in services.state_manager.list_goals()]
+    items.sort(
+        key=lambda item: (
+            0 if item["needs_review"] else 1,
+            item["last_reviewed_at"] or "",
+            item["goal_title"].lower(),
+        )
+    )
+    return {
+        "summary": {
+            "total_goals": len(items),
+            "goals_needing_review": sum(1 for item in items if item["needs_review"]),
+            "pending_suggestions": sum(item["summary"]["pending"] for item in items),
+            "created": sum(item["summary"]["created"] for item in items),
+            "deferred": sum(item["summary"]["deferred"] for item in items),
+            "rejected": sum(item["summary"]["rejected"] for item in items),
+        },
+        "items": items,
+    }
+
+
 def _get_planner_review(goal_id: str, suggestion_index: int, services: AppServices) -> dict | None:
     row = services.db.fetch_one(
         """SELECT goal_id,
@@ -350,6 +388,11 @@ def list_plan_suggestion_reviews(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return _planner_review_list(goal_id, services)
+
+
+@router.get("/planner/reviews", response_model=PlannerReviewInboxResponse)
+def list_planner_review_inbox(services: AppServices = Depends(get_services)) -> dict:
+    return _planner_review_inbox(services)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)
