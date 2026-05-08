@@ -680,6 +680,13 @@ function firstPendingPlannerSuggestionIndex(suggestions) {
   return index >= 0 ? index : null;
 }
 
+function plannerReviewContinuityMessage(prefix) {
+  if (Number.isInteger(focusedPlannerSuggestionIndex)) {
+    return `${prefix} Next review target: suggestion #${focusedPlannerSuggestionIndex + 1}.`;
+  }
+  return `${prefix} Review complete.`;
+}
+
 function scrollPlannerSuggestionIntoView(index) {
   if (!Number.isInteger(index)) {
     return;
@@ -938,6 +945,15 @@ function renderPlannerPreview(preview) {
   const selectableCount = suggestions.filter((item) => (
     !item.task_exists && plannerSuggestionDecision(item) === "pending"
   )).length;
+  const reviewComplete = suggestions.length > 0 && selectableCount === 0;
+  const completionBanner = reviewComplete
+    ? `
+      <div class="card planner-review-complete" role="status">
+        <strong>Review complete</strong>
+        <span class="meta">All planner suggestions are reviewed or already created.</span>
+      </div>
+    `
+    : "";
   container.innerHTML = `
     <span class="meta">Planner Preview &middot; ${escapeHtml(preview.source)}</span>
     <h3>${escapeHtml(preview.goal_title)}</h3>
@@ -954,13 +970,14 @@ function renderPlannerPreview(preview) {
       Batch review comment (optional)
       <textarea data-plan-bulk-review-comment="true" rows="2" placeholder="Shared note for Defer selected or Reject selected"></textarea>
     </label>
+    ${completionBanner}
     <div class="stack-list" style="margin-top:0.75rem;">
       ${suggestions.map((item, index) => {
         const isFocusedReviewTarget = focusedPlannerSuggestionIndex === index
           && !item.task_exists
           && plannerSuggestionDecision(item) === "pending";
         const focusMarker = isFocusedReviewTarget
-          ? `<div class="meta planner-review-focus-label"><strong>Next review target</strong> from Review Inbox.</div>`
+          ? `<div class="meta planner-review-focus-label"><strong>Next review target</strong> Continue with this pending suggestion.</div>`
           : "";
         return `
         <article
@@ -1975,7 +1992,7 @@ async function reviewPlannerSuggestion(indexValue, decision) {
       ...(comment ? { comment } : {}),
     }),
   });
-  document.getElementById("system-feedback").textContent = (
+  const feedbackPrefix = (
     `Planner suggestion #${response.suggestion_index + 1} marked ${response.review.decision}.`
   );
   selectedGoalId = goalId;
@@ -1984,7 +2001,8 @@ async function reviewPlannerSuggestion(indexValue, decision) {
   document.getElementById("trace-goal-id").value = goalId;
   document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
-  await runPlannerPreview(goalId);
+  await runPlannerPreview(goalId, { focusNextPending: true });
+  document.getElementById("system-feedback").textContent = plannerReviewContinuityMessage(feedbackPrefix);
 }
 
 async function reviewSelectedPlannerSuggestions(decision) {
@@ -2010,7 +2028,7 @@ async function reviewSelectedPlannerSuggestions(decision) {
       ...(comment ? { comment } : {}),
     }),
   });
-  document.getElementById("system-feedback").textContent = (
+  const feedbackPrefix = (
     `Bulk planner review completed: ${response.reviews.length} suggestions marked ${response.decision}.`
   );
   selectedGoalId = goalId;
@@ -2019,7 +2037,8 @@ async function reviewSelectedPlannerSuggestions(decision) {
   document.getElementById("trace-goal-id").value = goalId;
   document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
-  await runPlannerPreview(goalId);
+  await runPlannerPreview(goalId, { focusNextPending: true });
+  document.getElementById("system-feedback").textContent = plannerReviewContinuityMessage(feedbackPrefix);
   setActiveJump("goals-section");
 }
 
@@ -2088,7 +2107,7 @@ async function createTaskFromPlannerSuggestion(indexValue) {
       ...(override ? { override } : {}),
     }),
   });
-  document.getElementById("system-feedback").textContent = (
+  const feedbackPrefix = (
     `Created planner task ${response.task.task_id}`
     + `${override ? " with operator edits." : "."}`
   );
@@ -2098,8 +2117,9 @@ async function createTaskFromPlannerSuggestion(indexValue) {
   document.getElementById("trace-goal-id").value = goalId;
   document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
-  await runPlannerPreview(goalId);
-  setActiveJump("tasks-section");
+  await runPlannerPreview(goalId, { focusNextPending: true });
+  document.getElementById("system-feedback").textContent = plannerReviewContinuityMessage(feedbackPrefix);
+  setActiveJump("goals-section");
 }
 
 async function createTasksFromSelectedPlannerSuggestions() {
@@ -2121,7 +2141,7 @@ async function createTasksFromSelectedPlannerSuggestions() {
       overrides,
     }),
   });
-  document.getElementById("system-feedback").textContent = (
+  const feedbackPrefix = (
     `Bulk planner create completed: ${response.created.length} created, `
     + `${response.skipped_duplicates.length} duplicates skipped.`
   );
@@ -2131,8 +2151,9 @@ async function createTasksFromSelectedPlannerSuggestions() {
   document.getElementById("trace-goal-id").value = goalId;
   document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
-  await runPlannerPreview(goalId);
-  setActiveJump("tasks-section");
+  await runPlannerPreview(goalId, { focusNextPending: true });
+  document.getElementById("system-feedback").textContent = plannerReviewContinuityMessage(feedbackPrefix);
+  setActiveJump("goals-section");
 }
 
 function parseWorkflowPayload(text) {
