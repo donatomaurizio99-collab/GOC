@@ -173,6 +173,31 @@ class PlannerReviewListResponse(BaseModel):
     reviews: list[PlannerSuggestionReview]
 
 
+class PlannerReviewAuditEntry(BaseModel):
+    seq: int
+    event_id: str
+    event_type: Literal["planner.suggestion_reviewed", "planner.suggestion_review_reopened"]
+    action: Literal["reviewed", "reopened"]
+    goal_id: str
+    suggestion_index: int
+    suggestion_title: str
+    decision: Literal["created", "deferred", "rejected"] | None = None
+    cleared_decision: Literal["created", "deferred", "rejected"] | None = None
+    comment: str | None = None
+    cleared_comment: str | None = None
+    task_id: str | None = None
+    source: str
+    emitted_at: str
+
+
+class PlannerReviewAuditResponse(BaseModel):
+    goal_id: str
+    goal_title: str
+    source: str
+    summary: PlannerReviewSummary
+    entries: list[PlannerReviewAuditEntry]
+
+
 class PlannerReviewInboxItem(BaseModel):
     goal_id: str
     goal_title: str

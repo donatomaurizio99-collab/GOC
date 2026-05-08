@@ -683,6 +683,44 @@ function renderPlannerReviewSummary(preview) {
   `;
 }
 
+function plannerReviewAudit(preview) {
+  return preview.review_audit || {
+    entries: [],
+  };
+}
+
+function renderPlannerReviewAuditEntry(entry) {
+  const suggestionNumber = Number(entry.suggestion_index) + 1;
+  const title = entry.suggestion_title || `Suggestion #${suggestionNumber}`;
+  const taskId = entry.task_id ? ` | task ${escapeHtml(entry.task_id)}` : "";
+  if (entry.action === "reopened") {
+    const comment = entry.cleared_comment ? ` | ${escapeHtml(entry.cleared_comment)}` : "";
+    return (
+      `<div class="meta">#${suggestionNumber} reopened from ${escapeHtml(entry.cleared_decision || "reviewed")} `
+      + `| ${escapeHtml(title)} | ${escapeHtml(entry.emitted_at)}${comment}</div>`
+    );
+  }
+  const comment = entry.comment ? ` | ${escapeHtml(entry.comment)}` : "";
+  return (
+    `<div class="meta">#${suggestionNumber} ${escapeHtml(entry.decision || "reviewed")} `
+    + `| ${escapeHtml(title)} | ${escapeHtml(entry.emitted_at)}${taskId}${comment}</div>`
+  );
+}
+
+function renderPlannerReviewAudit(preview) {
+  const audit = plannerReviewAudit(preview);
+  const entries = audit.entries || [];
+  const auditItems = entries.length
+    ? entries.map((entry) => renderPlannerReviewAuditEntry(entry)).join("")
+    : `<div class="meta">No planner review history yet.</div>`;
+  return `
+    <details style="margin-top:0.75rem;">
+      <summary class="meta">Review history (${entries.length})</summary>
+      <div class="stack-list" style="margin-top:0.5rem;">${auditItems}</div>
+    </details>
+  `;
+}
+
 function renderPlannerReviewInbox(payload) {
   const container = document.getElementById("planner-review-inbox");
   if (!container) return;
@@ -776,6 +814,7 @@ function renderPlannerPreview(preview) {
     <h3>${escapeHtml(preview.goal_title)}</h3>
     <div class="meta">${escapeHtml(preview.goal_id)} &middot; ${suggestions.length} suggested tasks &middot; no tasks created automatically</div>
     ${renderPlannerReviewSummary(preview)}
+    ${renderPlannerReviewAudit(preview)}
     <div class="actions" style="margin-top:0.75rem;">
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-create="true" ${selectableCount ? "" : "disabled"}>Create selected tasks</button>
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-review-decision="deferred" ${selectableCount ? "" : "disabled"}>Defer selected</button>
@@ -1676,7 +1715,8 @@ async function runPlannerPreview(goalId) {
   }
   const preview = await api(`/goals/${encodeURIComponent(goalId)}/plan`, { method: "POST" });
   const reviewQueue = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews`);
-  plannerPreview = { ...preview, review_queue: reviewQueue };
+  const reviewAudit = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews/audit`);
+  plannerPreview = { ...preview, review_queue: reviewQueue, review_audit: reviewAudit };
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;
