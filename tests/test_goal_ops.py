@@ -15604,6 +15604,8 @@ def test_268_goal_plan_preview_returns_deterministic_suggestions(client):
     assert payload["goal_title"] == "Launch supervised planner"
     assert payload["source"] == "deterministic_planner"
     assert 3 <= len(payload["suggestions"]) <= 5
+    assert all(suggestion["task_exists"] is False for suggestion in payload["suggestions"])
+    assert all(suggestion["existing_task_id"] is None for suggestion in payload["suggestions"])
 
 
 def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
@@ -15615,11 +15617,20 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
     payload = client.post(f"/goals/{goal['goal_id']}/plan").json()
 
     for suggestion in payload["suggestions"]:
-        assert set(suggestion) == {"title", "description", "priority_hint", "source"}
+        assert set(suggestion) == {
+            "title",
+            "description",
+            "priority_hint",
+            "source",
+            "task_exists",
+            "existing_task_id",
+        }
         assert suggestion["title"]
         assert suggestion["description"]
         assert suggestion["priority_hint"] in {"low", "medium", "high"}
         assert suggestion["source"] == "deterministic_planner"
+        assert suggestion["task_exists"] is False
+        assert suggestion["existing_task_id"] is None
 
 
 def test_270_goal_plan_preview_unknown_goal_returns_404(client):
@@ -15642,6 +15653,8 @@ def test_271_goal_plan_preview_does_not_create_tasks(client):
     assert response.status_code == 200
     assert before == []
     assert after == []
+    assert all(suggestion["task_exists"] is False for suggestion in response.json()["suggestions"])
+    assert all(suggestion["existing_task_id"] is None for suggestion in response.json()["suggestions"])
 
 
 def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
@@ -15661,6 +15674,8 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert payload["goal_id"] == goal["goal_id"]
     assert payload["suggestion_index"] == 0
     assert payload["suggestion"] == selected
+    assert payload["suggestion"]["task_exists"] is False
+    assert payload["suggestion"]["existing_task_id"] is None
     assert payload["task"]["title"] == selected["title"]
     assert payload["task"]["planner_source"] == selected["source"]
     assert payload["task"]["planner_suggestion_index"] == 0
@@ -15674,6 +15689,24 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert tasks[0]["planner_suggestion_index"] == 0
     assert tasks[0]["planner_priority_hint"] == selected["priority_hint"]
     assert tasks[0]["planner_suggestion_description"] == selected["description"]
+
+
+def test_272b_goal_plan_preview_marks_existing_suggestion_after_task_create(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Mark planner duplicate", "urgency": 0.7, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    before = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    created = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0}).json()
+    after = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    assert before["suggestions"][0]["task_exists"] is False
+    assert before["suggestions"][0]["existing_task_id"] is None
+    assert after["suggestions"][0]["task_exists"] is True
+    assert after["suggestions"][0]["existing_task_id"] == created["task"]["task_id"]
+    assert after["suggestions"][1]["task_exists"] is False
+    assert after["suggestions"][1]["existing_task_id"] is None
 
 
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):

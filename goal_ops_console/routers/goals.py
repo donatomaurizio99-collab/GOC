@@ -37,10 +37,23 @@ def get_goal(goal_id: str, services: AppServices = Depends(get_services)) -> dic
     return services.state_manager.get_goal(goal_id)
 
 
+def _preview_goal_plan(goal_id: str, services: AppServices) -> dict:
+    goal = services.state_manager.get_goal(goal_id)
+    plan = services.planner.create_plan(goal)
+    existing_by_title = {}
+    for task in services.execution_layer.list_tasks(goal_id=goal_id):
+        existing_by_title.setdefault(task["title"], task)
+
+    for suggestion in plan["suggestions"]:
+        existing = existing_by_title.get(suggestion["title"])
+        suggestion["task_exists"] = existing is not None
+        suggestion["existing_task_id"] = existing["task_id"] if existing is not None else None
+    return plan
+
+
 @router.post("/{goal_id}/plan", response_model=PlannerPreviewResponse)
 def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
-    goal = services.state_manager.get_goal(goal_id)
-    return services.planner.create_plan(goal)
+    return _preview_goal_plan(goal_id, services)
 
 
 @router.post("/{goal_id}/plan/tasks", status_code=201, response_model=PlannerTaskCreateResponse)
@@ -49,25 +62,16 @@ def create_task_from_plan_suggestion(
     request: PlannerTaskCreateRequest,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    goal = services.state_manager.get_goal(goal_id)
-    plan = services.planner.create_plan(goal)
+    plan = _preview_goal_plan(goal_id, services)
     suggestions = plan["suggestions"]
     if request.suggestion_index >= len(suggestions):
         raise DomainError(
             f"Planner suggestion index {request.suggestion_index} not found for goal {goal_id}"
         )
     suggestion = suggestions[request.suggestion_index]
-    duplicate = next(
-        (
-            task
-            for task in services.execution_layer.list_tasks(goal_id=goal_id)
-            if task["title"] == suggestion["title"]
-        ),
-        None,
-    )
-    if duplicate is not None:
+    if suggestion["task_exists"]:
         raise ConflictError(
-            f"Planner suggestion already exists as task {duplicate['task_id']} for goal {goal_id}"
+            f"Planner suggestion already exists as task {suggestion['existing_task_id']} for goal {goal_id}"
         )
     task = services.execution_layer.create_task(
         goal_id=goal_id,

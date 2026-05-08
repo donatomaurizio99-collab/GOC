@@ -75,6 +75,8 @@ class PlannerTaskSuggestion(BaseModel):
     description: str
     priority_hint: str
     source: str
+    task_exists: bool = False
+    existing_task_id: str | None = None
 
 
 class PlannerPreviewResponse(BaseModel):
