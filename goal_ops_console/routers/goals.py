@@ -13,6 +13,7 @@ from goal_ops_console.models import (
     PlannerBulkReviewDecisionResponse,
     PlannerBulkTaskCreateRequest,
     PlannerBulkTaskCreateResponse,
+    PlannerDeferredFollowupResponse,
     PlannerPreviewResponse,
     PlannerReviewAuditResponse,
     PlannerReviewDecisionRequest,
@@ -326,6 +327,50 @@ def _planner_review_inbox(services: AppServices, status: str = "all", sort: str 
     }
 
 
+def _planner_deferred_followup_item(goal: dict, review: dict) -> dict:
+    return {
+        "goal_id": goal["goal_id"],
+        "goal_title": goal["title"],
+        "state": goal["state"],
+        "source": review["planner_source"],
+        "suggestion_index": review["suggestion_index"],
+        "suggestion_title": review["suggestion_title"],
+        "suggestion_description": review["suggestion_description"],
+        "suggestion_rationale": review["suggestion_rationale"],
+        "priority_hint": review["suggestion_priority_hint"],
+        "comment": review["comment"],
+        "deferred_at": review["updated_at"],
+    }
+
+
+def _sort_planner_deferred_followups(items: list[dict]) -> list[dict]:
+    sorted_items = sorted(
+        items,
+        key=lambda item: (item["goal_title"].lower(), item["suggestion_index"]),
+    )
+    sorted_items.sort(key=lambda item: item["deferred_at"], reverse=True)
+    return sorted_items
+
+
+def _planner_deferred_followups(services: AppServices) -> dict:
+    items = []
+    for goal in services.state_manager.list_goals():
+        reviews = _planner_reviews_by_index(goal["goal_id"], services).values()
+        items.extend(
+            _planner_deferred_followup_item(goal, review)
+            for review in reviews
+            if review["decision"] == "deferred"
+        )
+    items = _sort_planner_deferred_followups(items)
+    return {
+        "summary": {
+            "total_followups": len(items),
+            "goals_with_followups": len({item["goal_id"] for item in items}),
+        },
+        "items": items,
+    }
+
+
 def _get_planner_review(goal_id: str, suggestion_index: int, services: AppServices) -> dict | None:
     row = services.db.fetch_one(
         """SELECT goal_id,
@@ -556,6 +601,13 @@ def list_planner_review_inbox(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return _planner_review_inbox(services, status=status, sort=sort)
+
+
+@router.get("/planner/reviews/followups", response_model=PlannerDeferredFollowupResponse)
+def list_planner_deferred_followups(
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_deferred_followups(services)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)
