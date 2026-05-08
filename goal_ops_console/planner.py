@@ -15,6 +15,7 @@ class Planner:
         deadline_score = _score(goal.get("deadline_score"))
         priority_hint = _priority_hint(max(urgency, value, deadline_score))
         context = description or f"Goal context is currently limited to the title: {title}."
+        signal_summary = _signal_summary(urgency=urgency, value=value, deadline_score=deadline_score)
 
         suggestions = [
             _suggestion(
@@ -22,6 +23,10 @@ class Planner:
                 description=(
                     "Define the smallest observable outcome, owner expectation, and stop condition "
                     f"before execution starts. Context: {context}"
+                ),
+                rationale=(
+                    "Start here because supervised execution needs a visible success boundary before "
+                    f"tasks are created. Goal signals: {signal_summary}."
                 ),
                 priority_hint=priority_hint,
             ),
@@ -31,6 +36,10 @@ class Planner:
                     "List blockers, required inputs, and any approval points so the operator can keep "
                     "the plan supervised and reversible."
                 ),
+                rationale=(
+                    "This protects the operator from hidden blockers and makes approval points explicit "
+                    "before the first execution step."
+                ),
                 priority_hint=_priority_hint(max(urgency, deadline_score)),
             ),
             _suggestion(
@@ -39,6 +48,10 @@ class Planner:
                     "Choose the smallest implementation step that produces evidence without committing "
                     "the whole goal to an irreversible path."
                 ),
+                rationale=(
+                    "A reversible first step turns the goal into observable evidence while keeping the "
+                    "plan easy to pause, edit, or roll back."
+                ),
                 priority_hint=_priority_hint(max(value, urgency)),
             ),
             _suggestion(
@@ -46,6 +59,10 @@ class Planner:
                 description=(
                     "Check the result against the success criteria, record evidence, and decide whether "
                     "the goal should continue, pause, or escalate."
+                ),
+                rationale=(
+                    "Validation closes the supervised loop by comparing actual evidence with the success "
+                    "criteria before more work is created."
                 ),
                 priority_hint=_priority_hint(max(value, deadline_score)),
             ),
@@ -59,6 +76,10 @@ class Planner:
                         "Handle deadline-sensitive blockers first and confirm whether scope must be "
                         "reduced to protect the goal outcome."
                     ),
+                    rationale=(
+                        "High urgency or deadline pressure means constraints should be resolved before "
+                        "normal sequencing continues."
+                    ),
                     priority_hint="high",
                 ),
             )
@@ -71,10 +92,11 @@ class Planner:
         }
 
 
-def _suggestion(*, title: str, description: str, priority_hint: str) -> dict[str, str]:
+def _suggestion(*, title: str, description: str, rationale: str, priority_hint: str) -> dict[str, str]:
     return {
         "title": title,
         "description": description,
+        "rationale": rationale,
         "priority_hint": priority_hint,
         "source": Planner.source,
     }
@@ -99,3 +121,11 @@ def _priority_hint(score: float) -> str:
     if score >= 0.4:
         return "medium"
     return "low"
+
+
+def _signal_summary(*, urgency: float, value: float, deadline_score: float) -> str:
+    return (
+        f"urgency={_priority_hint(urgency)}, "
+        f"value={_priority_hint(value)}, "
+        f"deadline={_priority_hint(deadline_score)}"
+    )

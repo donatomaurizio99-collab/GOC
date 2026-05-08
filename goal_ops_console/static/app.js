@@ -592,6 +592,7 @@ function renderPlannerPreview(preview) {
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
           <p class="meta">${escapeHtml(item.description)}</p>
+          <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.rationale)}</p>
           ${renderPlannerSuggestionEditor(item, index)}
           ${renderPlannerSuggestionSelection(item, index)}
           <div class="actions">

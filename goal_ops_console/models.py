@@ -73,6 +73,7 @@ class GoalCreateRequest(BaseModel):
 class PlannerTaskSuggestion(BaseModel):
     title: str
     description: str
+    rationale: str
     priority_hint: str
     source: str
     task_exists: bool = False
