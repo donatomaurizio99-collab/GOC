@@ -1175,6 +1175,22 @@ def test_53_schema_migrations_record_workflow_hardening(services):
     assert row["name"] == "workflow_runs_hardening"
 
 
+def test_53_task_planner_provenance_schema_migration(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 2"
+    )
+    columns = {column["name"] for column in services.db.fetch_all("PRAGMA table_info(tasks)")}
+
+    assert row is not None
+    assert row["name"] == "task_planner_provenance"
+    assert {
+        "planner_source",
+        "planner_suggestion_index",
+        "planner_priority_hint",
+        "planner_suggestion_description",
+    }.issubset(columns)
+
+
 def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
     first = client.post(
         "/workflows/maintenance.retention_cleanup/start",
@@ -15646,10 +15662,18 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert payload["suggestion_index"] == 0
     assert payload["suggestion"] == selected
     assert payload["task"]["title"] == selected["title"]
+    assert payload["task"]["planner_source"] == selected["source"]
+    assert payload["task"]["planner_suggestion_index"] == 0
+    assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
+    assert payload["task"]["planner_suggestion_description"] == selected["description"]
     assert len(tasks) == 1
     assert tasks[0]["goal_id"] == goal["goal_id"]
     assert tasks[0]["title"] == selected["title"]
     assert tasks[0]["title"] not in other_titles
+    assert tasks[0]["planner_source"] == selected["source"]
+    assert tasks[0]["planner_suggestion_index"] == 0
+    assert tasks[0]["planner_priority_hint"] == selected["priority_hint"]
+    assert tasks[0]["planner_suggestion_description"] == selected["description"]
 
 
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
@@ -15708,3 +15732,22 @@ def test_276_goal_plan_task_create_allows_different_suggestion(client):
         preview["suggestions"][0]["title"],
         preview["suggestions"][1]["title"],
     }
+
+
+def test_277_manual_task_create_has_no_planner_provenance(client):
+    goal = create_active_goal(client, "Manual task provenance")
+
+    response = client.post("/tasks", json={"goal_id": goal["goal_id"], "title": "Manual task"})
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    task = response.json()
+
+    assert response.status_code == 201
+    assert task["planner_source"] is None
+    assert task["planner_suggestion_index"] is None
+    assert task["planner_priority_hint"] is None
+    assert task["planner_suggestion_description"] is None
+    assert len(tasks) == 1
+    assert tasks[0]["planner_source"] is None
+    assert tasks[0]["planner_suggestion_index"] is None
+    assert tasks[0]["planner_priority_hint"] is None
+    assert tasks[0]["planner_suggestion_description"] is None

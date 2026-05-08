@@ -69,7 +69,14 @@ def create_task_from_plan_suggestion(
         raise ConflictError(
             f"Planner suggestion already exists as task {duplicate['task_id']} for goal {goal_id}"
         )
-    task = services.execution_layer.create_task(goal_id=goal_id, title=suggestion["title"])
+    task = services.execution_layer.create_task(
+        goal_id=goal_id,
+        title=suggestion["title"],
+        planner_source=suggestion["source"],
+        planner_suggestion_index=request.suggestion_index,
+        planner_priority_hint=suggestion["priority_hint"],
+        planner_suggestion_description=suggestion["description"],
+    )
     return {
         "goal_id": goal_id,
         "suggestion_index": request.suggestion_index,
