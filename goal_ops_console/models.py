@@ -136,6 +136,13 @@ class PlannerReviewDecisionResponse(BaseModel):
     review: PlannerSuggestionReview
 
 
+class PlannerReviewReopenResponse(BaseModel):
+    goal_id: str
+    suggestion_index: int
+    suggestion: PlannerTaskSuggestion
+    cleared_review: PlannerSuggestionReview
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int

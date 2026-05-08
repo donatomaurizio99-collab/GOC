@@ -15926,6 +15926,62 @@ def test_272h_goal_plan_review_duplicate_decision_returns_409(client):
     assert "already has review decision deferred" in second.json()["detail"]
 
 
+def test_272i_goal_plan_review_reopen_clears_decision_and_allows_task_create(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Reopen deferred planner review", "urgency": 0.5, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+
+    deferred = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Needs sequencing."},
+    ).json()
+    reopened = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    after_reopen = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    created = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert reopened.status_code == 200
+    payload = reopened.json()
+    assert payload["cleared_review"]["decision"] == "deferred"
+    assert payload["cleared_review"]["comment"] == deferred["review"]["comment"]
+    assert payload["suggestion"]["review_decision"] == "pending"
+    assert payload["suggestion"]["review_comment"] is None
+    assert after_reopen["suggestions"][0]["review_decision"] == "pending"
+    assert created.status_code == 201
+    assert created.json()["review"]["decision"] == "created"
+    assert len(tasks) == 1
+
+
+def test_272j_goal_plan_review_reopen_created_decision_returns_409(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Cannot reopen created planner review", "urgency": 0.5, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    created = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0}).json()
+
+    response = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 409
+    assert created["task"]["task_id"] in response.json()["detail"]
+    assert len(tasks) == 1
+
+
+def test_272k_goal_plan_review_reopen_missing_decision_returns_404(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Missing planner review reopen", "urgency": 0.5, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+
+    response = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == f"Planner suggestion 0 has no review decision for goal {goal['goal_id']}"
+    assert tasks == []
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 
