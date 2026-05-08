@@ -1,7 +1,7 @@
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from goal_ops_console.database import now_utc
 from goal_ops_console.models import (
@@ -14,6 +14,7 @@ from goal_ops_console.models import (
     PlannerBulkTaskCreateRequest,
     PlannerBulkTaskCreateResponse,
     PlannerPreviewResponse,
+    PlannerReviewAuditResponse,
     PlannerReviewDecisionRequest,
     PlannerReviewDecisionResponse,
     PlannerReviewInboxResponse,
@@ -26,6 +27,11 @@ from goal_ops_console.models import (
 from goal_ops_console.services import AppServices, get_services
 
 router = APIRouter(prefix="/goals", tags=["goals"])
+
+_PLANNER_REVIEW_AUDIT_EVENT_TYPES = (
+    "planner.suggestion_reviewed",
+    "planner.suggestion_review_reopened",
+)
 
 
 @router.get("")
@@ -194,6 +200,72 @@ def _planner_review_list(goal_id: str, services: AppServices) -> dict:
         "source": plan["source"],
         "summary": _planner_review_summary(plan),
         "reviews": reviews,
+    }
+
+
+def _planner_review_event_payload(row: Any) -> dict:
+    raw_payload = row["payload"]
+    payload = json.loads(raw_payload) if raw_payload else {}
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    return data if isinstance(data, dict) else {}
+
+
+def _planner_review_audit_entry(row: Any, goal_id: str, plan: dict) -> dict | None:
+    data = _planner_review_event_payload(row)
+    raw_suggestion_index = data.get("suggestion_index")
+    if not isinstance(raw_suggestion_index, int) or raw_suggestion_index < 0:
+        return None
+
+    suggestion = plan["suggestions"][raw_suggestion_index] if raw_suggestion_index < len(plan["suggestions"]) else {}
+    event_type = row["event_type"]
+    is_reopen = event_type == "planner.suggestion_review_reopened"
+    decision = None if is_reopen else data.get("decision")
+    cleared_decision = data.get("cleared_decision") if is_reopen else None
+    comment = None if is_reopen else data.get("comment")
+    cleared_comment = data.get("cleared_comment") if is_reopen else None
+    return {
+        "seq": row["seq"],
+        "event_id": row["event_id"],
+        "event_type": event_type,
+        "action": "reopened" if is_reopen else "reviewed",
+        "goal_id": data.get("goal_id") or goal_id,
+        "suggestion_index": raw_suggestion_index,
+        "suggestion_title": suggestion.get("title") or f"Suggestion #{raw_suggestion_index + 1}",
+        "decision": decision,
+        "cleared_decision": cleared_decision,
+        "comment": comment,
+        "cleared_comment": cleared_comment,
+        "task_id": None if is_reopen else data.get("task_id"),
+        "source": data.get("source") or suggestion.get("source") or plan["source"],
+        "emitted_at": row["emitted_at"],
+    }
+
+
+def _planner_review_audit(goal_id: str, services: AppServices, *, limit: int = 100) -> dict:
+    plan = _preview_goal_plan(goal_id, services)
+    placeholders = ", ".join("?" for _ in _PLANNER_REVIEW_AUDIT_EVENT_TYPES)
+    rows = services.db.fetch_all(
+        f"""SELECT seq, event_id, event_type, entity_id, correlation_id, payload, emitted_at
+            FROM events
+            WHERE entity_id = ?
+              AND event_type IN ({placeholders})
+            ORDER BY seq DESC
+            LIMIT ?""",
+        goal_id,
+        *_PLANNER_REVIEW_AUDIT_EVENT_TYPES,
+        limit,
+    )
+    entries = [
+        entry
+        for entry in (_planner_review_audit_entry(row, goal_id, plan) for row in rows)
+        if entry is not None
+    ]
+    return {
+        "goal_id": plan["goal_id"],
+        "goal_title": plan["goal_title"],
+        "source": plan["source"],
+        "summary": _planner_review_summary(plan),
+        "entries": entries,
     }
 
 
@@ -466,6 +538,15 @@ def list_plan_suggestion_reviews(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return _planner_review_list(goal_id, services)
+
+
+@router.get("/{goal_id}/plan/reviews/audit", response_model=PlannerReviewAuditResponse)
+def list_plan_suggestion_review_audit(
+    goal_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_review_audit(goal_id, services, limit=limit)
 
 
 @router.get("/planner/reviews", response_model=PlannerReviewInboxResponse)

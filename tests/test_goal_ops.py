@@ -16360,6 +16360,107 @@ def test_272y_goal_plan_bulk_review_duplicate_indexes_write_nothing(client):
     assert reviews == []
 
 
+def test_272z_goal_plan_review_audit_lists_decision_timeline(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Audit planner review history", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    total = len(client.post(f"/goals/{goal['goal_id']}/plan").json()["suggestions"])
+
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Wait for sequencing."},
+    )
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [1, 2], "decision": "rejected", "comment": "Batch no-go."},
+    )
+    reopened = client.delete(f"/goals/{goal['goal_id']}/plan/reviews/0")
+    created = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+
+    response = client.get(f"/goals/{goal['goal_id']}/plan/reviews/audit")
+    payload = response.json()
+    entries = payload["entries"]
+
+    assert response.status_code == 200
+    assert reopened.status_code == 200
+    assert created.status_code == 201
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["goal_title"] == goal["title"]
+    assert payload["source"] == "deterministic_planner"
+    assert payload["summary"] == {
+        "total_suggestions": total,
+        "pending": total - 3,
+        "created": 1,
+        "deferred": 0,
+        "rejected": 2,
+    }
+    assert [entry["seq"] for entry in entries] == sorted((entry["seq"] for entry in entries), reverse=True)
+    assert [entry["event_type"] for entry in entries].count("planner.suggestion_reviewed") == 4
+    assert [entry["event_type"] for entry in entries].count("planner.suggestion_review_reopened") == 1
+    assert entries[0]["action"] == "reviewed"
+    assert entries[0]["decision"] == "created"
+    assert entries[0]["suggestion_index"] == 0
+    assert entries[0]["task_id"] == created.json()["task"]["task_id"]
+    assert entries[1]["action"] == "reopened"
+    assert entries[1]["cleared_decision"] == "deferred"
+    assert entries[1]["cleared_comment"] == "Wait for sequencing."
+    assert entries[-1]["decision"] == "deferred"
+    assert entries[-1]["comment"] == "Wait for sequencing."
+    assert {
+        (entry["suggestion_index"], entry["decision"], entry["comment"])
+        for entry in entries
+        if entry["decision"] == "rejected"
+    } == {
+        (1, "rejected", "Batch no-go."),
+        (2, "rejected", "Batch no-go."),
+    }
+    assert all(entry["suggestion_title"] for entry in entries)
+    assert all(entry["source"] == "deterministic_planner" for entry in entries)
+
+
+def test_272za_goal_plan_review_audit_limit_returns_newest_entries(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Limit planner review audit", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [0, 1, 2], "decision": "deferred", "comment": "Batch hold."},
+    )
+
+    full = client.get(f"/goals/{goal['goal_id']}/plan/reviews/audit").json()["entries"]
+    limited = client.get(f"/goals/{goal['goal_id']}/plan/reviews/audit?limit=2")
+
+    assert limited.status_code == 200
+    assert limited.json()["entries"] == full[:2]
+
+
+def test_272zb_goal_plan_review_audit_empty_and_read_only(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Empty planner review audit", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    before_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    response = client.get(f"/goals/{goal['goal_id']}/plan/reviews/audit")
+    after_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    reviews = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()["reviews"]
+
+    assert response.status_code == 200
+    assert response.json()["entries"] == []
+    assert before_tasks == []
+    assert after_tasks == []
+    assert reviews == []
+
+
+def test_272zc_goal_plan_review_audit_unknown_goal_returns_404(client):
+    response = client.get("/goals/missing-goal/plan/reviews/audit")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Goal missing-goal not found"
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 
