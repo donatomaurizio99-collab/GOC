@@ -15767,6 +15767,76 @@ def test_276_goal_plan_task_create_allows_different_suggestion(client):
     }
 
 
+def test_276b_goal_plan_bulk_task_create_creates_selected_suggestions(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk create planner tasks", "urgency": 0.7, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": [0, 1]},
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    after = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    assert response.status_code == 201
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["requested_suggestion_indexes"] == [0, 1]
+    assert payload["skipped_duplicates"] == []
+    assert [item["suggestion_index"] for item in payload["created"]] == [0, 1]
+    assert {item["task"]["title"] for item in payload["created"]} == {
+        preview["suggestions"][0]["title"],
+        preview["suggestions"][1]["title"],
+    }
+    assert len(tasks) == 2
+    assert {task["planner_suggestion_index"] for task in tasks} == {0, 1}
+    assert after["suggestions"][0]["task_exists"] is True
+    assert after["suggestions"][1]["task_exists"] is True
+
+
+def test_276c_goal_plan_bulk_task_create_skips_existing_duplicates(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk skip duplicate planner task", "urgency": 0.7, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    existing = client.post(f"/goals/{goal['goal_id']}/plan/tasks", json={"suggestion_index": 0}).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": [0, 1]},
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 201
+    assert [item["suggestion_index"] for item in payload["created"]] == [1]
+    assert len(payload["skipped_duplicates"]) == 1
+    assert payload["skipped_duplicates"][0]["suggestion_index"] == 0
+    assert payload["skipped_duplicates"][0]["existing_task_id"] == existing["task"]["task_id"]
+    assert payload["skipped_duplicates"][0]["reason"] == "already_exists"
+    assert len(tasks) == 2
+
+
+def test_276d_goal_plan_bulk_task_create_invalid_index_does_not_create_tasks(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk reject invalid planner index", "urgency": 0.4, "value": 0.4, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": [0, 99]},
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Planner suggestion index 99 not found for goal {goal['goal_id']}"
+    assert tasks == []
+
+
 def test_277_manual_task_create_has_no_planner_provenance(client):
     goal = create_active_goal(client, "Manual task provenance")
 
