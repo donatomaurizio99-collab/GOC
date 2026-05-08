@@ -99,6 +99,7 @@ def _create_task_from_suggestion(
         planner_suggestion_index=suggestion_index,
         planner_priority_hint=original_suggestion["priority_hint"],
         planner_suggestion_description=original_suggestion["description"],
+        planner_suggestion_rationale=original_suggestion["rationale"],
         planner_operator_overrides=operator_override,
     )
 

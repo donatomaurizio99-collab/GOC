@@ -38,6 +38,7 @@ class ExecutionLayer:
         planner_suggestion_index: int | None = None,
         planner_priority_hint: str | None = None,
         planner_suggestion_description: str | None = None,
+        planner_suggestion_rationale: str | None = None,
         planner_operator_overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         goal = self.state_manager.get_goal(goal_id)
@@ -53,6 +54,7 @@ class ExecutionLayer:
                 "source": planner_source,
                 "suggestion_index": planner_suggestion_index,
                 "priority_hint": planner_priority_hint,
+                "rationale": planner_suggestion_rationale,
             }
             if planner_operator_overrides is not None:
                 event_payload["planner"]["operator_overrides"] = planner_operator_overrides
@@ -65,9 +67,10 @@ class ExecutionLayer:
             tx.execute(
                 "INSERT INTO tasks "
                 "(task_id, goal_id, title, planner_source, planner_suggestion_index, "
-                "planner_priority_hint, planner_suggestion_description, planner_operator_overrides, "
+                "planner_priority_hint, planner_suggestion_description, planner_suggestion_rationale, "
+                "planner_operator_overrides, "
                 "created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 task_id,
                 goal_id,
                 title,
@@ -75,6 +78,7 @@ class ExecutionLayer:
                 planner_suggestion_index,
                 planner_priority_hint,
                 planner_suggestion_description,
+                planner_suggestion_rationale,
                 planner_operator_overrides_json,
                 timestamp,
                 timestamp,
@@ -113,6 +117,7 @@ class ExecutionLayer:
                        t.planner_suggestion_index,
                        t.planner_priority_hint,
                        t.planner_suggestion_description,
+                       t.planner_suggestion_rationale,
                        t.planner_operator_overrides,
                        ts.correlation_id,
                        ts.status,
@@ -139,6 +144,7 @@ class ExecutionLayer:
                       t.planner_suggestion_index,
                       t.planner_priority_hint,
                       t.planner_suggestion_description,
+                      t.planner_suggestion_rationale,
                       t.planner_operator_overrides,
                       ts.correlation_id,
                       ts.status,

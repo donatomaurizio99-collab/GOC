@@ -1202,6 +1202,17 @@ def test_53b_task_planner_operator_override_schema_migration(services):
     assert "planner_operator_overrides" in columns
 
 
+def test_53c_task_planner_rationale_schema_migration(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 4"
+    )
+    columns = {column["name"] for column in services.db.fetch_all("PRAGMA table_info(tasks)")}
+
+    assert row is not None
+    assert row["name"] == "task_planner_suggestion_rationale"
+    assert "planner_suggestion_rationale" in columns
+
+
 def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
     first = client.post(
         "/workflows/maintenance.retention_cleanup/start",
@@ -15714,6 +15725,7 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert payload["task"]["planner_suggestion_index"] == 0
     assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
+    assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
     assert len(tasks) == 1
     assert tasks[0]["goal_id"] == goal["goal_id"]
     assert tasks[0]["title"] == selected["title"]
@@ -15722,6 +15734,7 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert tasks[0]["planner_suggestion_index"] == 0
     assert tasks[0]["planner_priority_hint"] == selected["priority_hint"]
     assert tasks[0]["planner_suggestion_description"] == selected["description"]
+    assert tasks[0]["planner_suggestion_rationale"] == selected["rationale"]
 
 
 def test_272b_goal_plan_preview_marks_existing_suggestion_after_task_create(client):
@@ -15774,9 +15787,11 @@ def test_272c_goal_plan_task_create_applies_operator_override_with_original_prov
     assert payload["task"]["planner_suggestion_index"] == 0
     assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
+    assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
     assert payload["task"]["planner_operator_overrides"] == override
     assert len(tasks) == 1
     assert tasks[0]["title"] == override["title"]
+    assert tasks[0]["planner_suggestion_rationale"] == selected["rationale"]
     assert tasks[0]["planner_operator_overrides"] == override
 
 
@@ -15924,6 +15939,7 @@ def test_276c2_goal_plan_bulk_task_create_uses_overrides_and_skips_applied_dupli
     }
     assert len(tasks) == 1
     assert tasks[0]["title"] == shared_title
+    assert tasks[0]["planner_suggestion_rationale"]
     assert tasks[0]["planner_operator_overrides"] == {"title": shared_title}
 
 
@@ -15976,10 +15992,12 @@ def test_277_manual_task_create_has_no_planner_provenance(client):
     assert task["planner_suggestion_index"] is None
     assert task["planner_priority_hint"] is None
     assert task["planner_suggestion_description"] is None
+    assert task["planner_suggestion_rationale"] is None
     assert task["planner_operator_overrides"] is None
     assert len(tasks) == 1
     assert tasks[0]["planner_source"] is None
     assert tasks[0]["planner_suggestion_index"] is None
     assert tasks[0]["planner_priority_hint"] is None
     assert tasks[0]["planner_suggestion_description"] is None
+    assert tasks[0]["planner_suggestion_rationale"] is None
     assert tasks[0]["planner_operator_overrides"] is None
