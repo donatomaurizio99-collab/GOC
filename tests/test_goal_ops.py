@@ -15631,6 +15631,7 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
         assert set(suggestion) == {
             "title",
             "description",
+            "rationale",
             "priority_hint",
             "source",
             "task_exists",
@@ -15638,10 +15639,31 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
         }
         assert suggestion["title"]
         assert suggestion["description"]
+        assert suggestion["rationale"]
         assert suggestion["priority_hint"] in {"low", "medium", "high"}
         assert suggestion["source"] == "deterministic_planner"
         assert suggestion["task_exists"] is False
         assert suggestion["existing_task_id"] is None
+
+
+def test_269b_goal_plan_preview_rationale_mentions_goal_signals(client):
+    goal = client.post(
+        "/goals",
+        json={
+            "title": "Explain planner reasoning",
+            "urgency": 0.8,
+            "value": 0.5,
+            "deadline_score": 0.2,
+        },
+    ).json()
+
+    payload = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    first_rationale = payload["suggestions"][0]["rationale"]
+    assert "Goal signals:" in first_rationale
+    assert "urgency=high" in first_rationale
+    assert "value=medium" in first_rationale
+    assert "deadline=low" in first_rationale
 
 
 def test_270_goal_plan_preview_unknown_goal_returns_404(client):
