@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 
@@ -210,15 +210,35 @@ def _planner_review_inbox_item(goal: dict, services: AppServices) -> dict:
     }
 
 
-def _planner_review_inbox(services: AppServices) -> dict:
-    items = [_planner_review_inbox_item(goal, services) for goal in services.state_manager.list_goals()]
-    items.sort(
+def _filter_planner_review_inbox_items(items: list[dict], status: str) -> list[dict]:
+    if status == "needs_review":
+        return [item for item in items if item["needs_review"]]
+    if status == "reviewed":
+        return [item for item in items if not item["needs_review"]]
+    return items
+
+
+def _sort_planner_review_inbox_items(items: list[dict], sort: str) -> list[dict]:
+    if sort == "goal_title":
+        return sorted(items, key=lambda item: item["goal_title"].lower())
+    if sort == "last_reviewed_at":
+        sorted_items = sorted(items, key=lambda item: item["goal_title"].lower())
+        sorted_items.sort(key=lambda item: item["last_reviewed_at"] or "", reverse=True)
+        return sorted_items
+    return sorted(
+        items,
         key=lambda item: (
             0 if item["needs_review"] else 1,
             item["last_reviewed_at"] or "",
             item["goal_title"].lower(),
-        )
+        ),
     )
+
+
+def _planner_review_inbox(services: AppServices, status: str = "all", sort: str = "needs_review") -> dict:
+    items = [_planner_review_inbox_item(goal, services) for goal in services.state_manager.list_goals()]
+    items = _filter_planner_review_inbox_items(items, status)
+    items = _sort_planner_review_inbox_items(items, sort)
     return {
         "summary": {
             "total_goals": len(items),
@@ -391,8 +411,12 @@ def list_plan_suggestion_reviews(
 
 
 @router.get("/planner/reviews", response_model=PlannerReviewInboxResponse)
-def list_planner_review_inbox(services: AppServices = Depends(get_services)) -> dict:
-    return _planner_review_inbox(services)
+def list_planner_review_inbox(
+    status: Literal["all", "needs_review", "reviewed"] = "all",
+    sort: Literal["needs_review", "last_reviewed_at", "goal_title"] = "needs_review",
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_review_inbox(services, status=status, sort=sort)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)

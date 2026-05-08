@@ -16177,6 +16177,94 @@ def test_272r_goal_planner_review_inbox_updates_after_reopen(client):
     assert after["last_reviewed_at"] is None
 
 
+def test_272s_goal_planner_review_inbox_filters_status(client):
+    pending_goal = client.post(
+        "/goals",
+        json={"title": "Alpha pending inbox filter", "urgency": 0.6, "value": 0.5, "deadline_score": 0.2},
+    ).json()
+    reviewed_goal = client.post(
+        "/goals",
+        json={"title": "Beta reviewed inbox filter", "urgency": 0.7, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    mixed_goal = client.post(
+        "/goals",
+        json={"title": "Gamma mixed inbox filter", "urgency": 0.7, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    pending_total = len(client.post(f"/goals/{pending_goal['goal_id']}/plan").json()["suggestions"])
+    reviewed_total = len(client.post(f"/goals/{reviewed_goal['goal_id']}/plan").json()["suggestions"])
+    mixed_total = len(client.post(f"/goals/{mixed_goal['goal_id']}/plan").json()["suggestions"])
+
+    client.post(
+        f"/goals/{reviewed_goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": list(range(reviewed_total)), "overrides": {}},
+    )
+    client.post(
+        f"/goals/{mixed_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+
+    needs_review = client.get("/goals/planner/reviews?status=needs_review&sort=goal_title").json()
+    reviewed = client.get("/goals/planner/reviews?status=reviewed&sort=goal_title").json()
+
+    assert [item["goal_id"] for item in needs_review["items"]] == [pending_goal["goal_id"], mixed_goal["goal_id"]]
+    assert needs_review["summary"] == {
+        "total_goals": 2,
+        "goals_needing_review": 2,
+        "pending_suggestions": pending_total + mixed_total - 1,
+        "created": 0,
+        "deferred": 1,
+        "rejected": 0,
+    }
+    assert [item["goal_id"] for item in reviewed["items"]] == [reviewed_goal["goal_id"]]
+    assert reviewed["summary"] == {
+        "total_goals": 1,
+        "goals_needing_review": 0,
+        "pending_suggestions": 0,
+        "created": reviewed_total,
+        "deferred": 0,
+        "rejected": 0,
+    }
+
+
+def test_272t_goal_planner_review_inbox_sorts_for_triage(client):
+    never_reviewed = client.post(
+        "/goals",
+        json={"title": "Zulu never reviewed", "urgency": 0.6, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    alphabetic_first = client.post(
+        "/goals",
+        json={"title": "Alpha never reviewed", "urgency": 0.6, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+    recently_reviewed = client.post(
+        "/goals",
+        json={"title": "Middle recently reviewed", "urgency": 0.6, "value": 0.6, "deadline_score": 0.2},
+    ).json()
+
+    client.post(
+        f"/goals/{recently_reviewed['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+
+    by_title = client.get("/goals/planner/reviews?status=all&sort=goal_title").json()
+    by_last_reviewed = client.get("/goals/planner/reviews?status=all&sort=last_reviewed_at").json()
+
+    assert [item["goal_title"] for item in by_title["items"]] == [
+        alphabetic_first["title"],
+        recently_reviewed["title"],
+        never_reviewed["title"],
+    ]
+    assert by_last_reviewed["items"][0]["goal_id"] == recently_reviewed["goal_id"]
+    assert by_last_reviewed["items"][0]["last_reviewed_at"] is not None
+
+
+def test_272u_goal_planner_review_inbox_rejects_invalid_filter_values(client):
+    invalid_status = client.get("/goals/planner/reviews?status=stale")
+    invalid_sort = client.get("/goals/planner/reviews?sort=priority")
+
+    assert invalid_status.status_code == 422
+    assert invalid_sort.status_code == 422
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 

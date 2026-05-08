@@ -41,6 +41,8 @@ let densityMode = "comfy";
 let visualMode = "warm";
 let globalFilterTerm = "";
 let jumpScrollScheduled = false;
+let plannerReviewInboxStatus = "needs_review";
+let plannerReviewInboxSort = "needs_review";
 const MUTATION_LOCK_FALLBACK_MESSAGE = (
   "Mutating operations are blocked while runtime is in critical protection mode."
 );
@@ -638,6 +640,20 @@ function plannerReviewQueue(preview) {
   };
 }
 
+function plannerReviewInboxVisibleItems(payload) {
+  return filterRows(payload?.items || [], (item) => [
+    item.goal_id,
+    item.goal_title,
+    item.state,
+    item.needs_review ? "needs review" : "reviewed",
+  ]);
+}
+
+function nextPlannerReviewGoalId() {
+  return plannerReviewInboxVisibleItems(viewCache.plannerReviewInbox)
+    .find((item) => item.needs_review)?.goal_id || "";
+}
+
 function renderPlannerReviewSummary(preview) {
   const queue = plannerReviewQueue(preview);
   const summary = queue.summary || plannerReviewSummaryFromSuggestions(preview.suggestions || []);
@@ -678,12 +694,16 @@ function renderPlannerReviewInbox(payload) {
     return;
   }
   const summary = payload.summary || {};
-  const items = filterRows(payload.items || [], (item) => [
-    item.goal_id,
-    item.goal_title,
-    item.state,
-    item.needs_review ? "needs review" : "reviewed",
-  ]);
+  const items = plannerReviewInboxVisibleItems(payload);
+  const nextReviewItem = items.find((item) => item.needs_review);
+  const statusButtons = [
+    ["needs_review", "Needs review"],
+    ["reviewed", "Reviewed"],
+    ["all", "All"],
+  ].map(([status, label]) => (
+    `<button type="button" class="secondary ${plannerReviewInboxStatus === status ? "active" : ""}" `
+    + `data-plan-inbox-status="${status}">${label}</button>`
+  )).join("");
   const itemMarkup = items.length
     ? items.map((item) => {
       const reviewState = item.needs_review ? "Needs review" : "Reviewed";
@@ -713,6 +733,20 @@ function renderPlannerReviewInbox(payload) {
     : `<div class="meta">${filteredEmptyMessage("No planner review items yet.")}</div>`;
   container.innerHTML = `
     <span class="meta">Planner Review Inbox &middot; ${summary.total_goals || 0} goals</span>
+    <div class="actions" style="margin-top:0.75rem;">
+      ${statusButtons}
+      <label class="meta">
+        Sort
+        <select data-plan-inbox-sort="true">
+          <option value="needs_review" ${plannerReviewInboxSort === "needs_review" ? "selected" : ""}>Needs review first</option>
+          <option value="last_reviewed_at" ${plannerReviewInboxSort === "last_reviewed_at" ? "selected" : ""}>Last reviewed</option>
+          <option value="goal_title" ${plannerReviewInboxSort === "goal_title" ? "selected" : ""}>Goal title</option>
+        </select>
+      </label>
+      <button type="button" class="secondary" data-plan-next-review="true" ${nextReviewItem ? "" : "disabled"}>
+        Open next review
+      </button>
+    </div>
     <div class="entity-grid" style="margin-top:0.75rem;">
       <div class="entity-metric"><span class="meta">Needs Review</span><strong>${summary.goals_needing_review || 0}</strong></div>
       <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending_suggestions || 0}</strong></div>
@@ -1422,7 +1456,11 @@ async function refreshGoals() {
 }
 
 async function refreshPlannerReviewInbox() {
-  const inbox = await api("/goals/planner/reviews");
+  const params = new URLSearchParams({
+    status: plannerReviewInboxStatus,
+    sort: plannerReviewInboxSort,
+  });
+  const inbox = await api(`/goals/planner/reviews?${params.toString()}`);
   viewCache.plannerReviewInbox = inbox;
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
 }
@@ -2181,6 +2219,8 @@ document.addEventListener("click", async (event) => {
   const planReviewDecision = event.target.dataset.planReviewDecision;
   const planReviewReopenIndex = event.target.dataset.planReviewReopenIndex;
   const planBulkCreate = event.target.dataset.planBulkCreate;
+  const planInboxStatus = event.target.dataset.planInboxStatus;
+  const planNextReview = event.target.dataset.planNextReview;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
 
@@ -2220,6 +2260,20 @@ document.addEventListener("click", async (event) => {
 
     if (planGoal) {
       await runPlannerPreview(planGoal);
+      setActiveJump("goals-section");
+    }
+
+    if (planInboxStatus) {
+      plannerReviewInboxStatus = planInboxStatus;
+      await refreshPlannerReviewInbox();
+    }
+
+    if (planNextReview) {
+      const nextGoalId = nextPlannerReviewGoalId();
+      if (!nextGoalId) {
+        throw new Error("No planner review item is available in the current inbox view.");
+      }
+      await runPlannerPreview(nextGoalId);
       setActiveJump("goals-section");
     }
 
@@ -2289,10 +2343,22 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal
+        : goalAction || planGoal || planInboxStatus || planNextReview
           ? "goal-error"
           : "task-error";
     showError(target, error);
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  if (!event.target.dataset.planInboxSort) {
+    return;
+  }
+  plannerReviewInboxSort = event.target.value || "needs_review";
+  try {
+    await refreshPlannerReviewInbox();
+  } catch (error) {
+    showError("goal-error", error);
   }
 });
 
