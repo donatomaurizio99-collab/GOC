@@ -844,6 +844,13 @@ function renderPlannerDeferredFollowups(payload) {
           ${comment}
           <div class="actions" style="margin-top:0.75rem;">
             <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
+            <button
+              type="button"
+              class="secondary"
+              data-mutation-control="true"
+              data-plan-followup-reopen-goal="${escapeHtml(item.goal_id)}"
+              data-plan-followup-reopen-index="${escapeHtml(String(item.suggestion_index ?? ""))}"
+            >Reopen review</button>
           </div>
         </article>
       `;
@@ -860,6 +867,7 @@ function renderPlannerDeferredFollowups(payload) {
     </div>
     <div class="stack-list" style="margin-top:0.75rem;">${itemMarkup}</div>
   `;
+  applyMutationControlState();
 }
 
 function renderPlannerPreview(preview) {
@@ -1964,6 +1972,32 @@ async function reopenPlannerSuggestionReview(indexValue) {
   await runPlannerPreview(goalId);
 }
 
+async function reopenPlannerDeferredFollowup(goalId, indexValue) {
+  if (!goalId) {
+    throw new Error("Deferred follow-up is missing a goal id.");
+  }
+  const suggestionIndex = Number.parseInt(indexValue, 10);
+  if (!Number.isInteger(suggestionIndex) || suggestionIndex < 0) {
+    throw new Error("Deferred follow-up is missing a valid suggestion index.");
+  }
+  ensureMutationAllowed("Planner follow-up reopen");
+  const response = await api(
+    `/goals/${encodeURIComponent(goalId)}/plan/reviews/${encodeURIComponent(suggestionIndex)}`,
+    { method: "DELETE" },
+  );
+  document.getElementById("system-feedback").textContent = (
+    `Planner follow-up #${response.suggestion_index + 1} reopened from ${response.cleared_review.decision}.`
+  );
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  await refreshAll();
+  await runPlannerPreview(goalId);
+  setActiveJump("goals-section");
+}
+
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
@@ -2398,6 +2432,8 @@ document.addEventListener("click", async (event) => {
   const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
   const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
+  const planFollowupReopenGoal = event.target.dataset.planFollowupReopenGoal;
+  const planFollowupReopenIndex = event.target.dataset.planFollowupReopenIndex;
   const planNextReview = event.target.dataset.planNextReview;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
@@ -2448,6 +2484,11 @@ document.addEventListener("click", async (event) => {
 
     if (planFollowupsRefresh) {
       await refreshPlannerDeferredFollowups();
+    }
+
+    if (planFollowupReopenGoal && planFollowupReopenIndex !== undefined) {
+      showError("goal-error", null);
+      await reopenPlannerDeferredFollowup(planFollowupReopenGoal, planFollowupReopenIndex);
     }
 
     if (planNextReview) {
@@ -2530,7 +2571,7 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planNextReview
+        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planFollowupReopenGoal || planNextReview
           ? "goal-error"
           : "task-error";
     showError(target, error);
