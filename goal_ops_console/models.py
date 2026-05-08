@@ -198,6 +198,15 @@ class PlannerReviewAuditResponse(BaseModel):
     entries: list[PlannerReviewAuditEntry]
 
 
+class PlannerReviewInboxNextSuggestion(BaseModel):
+    suggestion_index: int
+    title: str
+    description: str
+    rationale: str
+    priority_hint: str
+    source: str
+
+
 class PlannerReviewInboxItem(BaseModel):
     goal_id: str
     goal_title: str
@@ -206,6 +215,7 @@ class PlannerReviewInboxItem(BaseModel):
     summary: PlannerReviewSummary
     last_reviewed_at: str | None = None
     needs_review: bool
+    next_suggestion: PlannerReviewInboxNextSuggestion | None = None
 
 
 class PlannerReviewInboxSummary(BaseModel):

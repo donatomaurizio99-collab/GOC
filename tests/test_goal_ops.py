@@ -16117,6 +16117,56 @@ def test_272o_goal_planner_review_inbox_returns_goal_rollup(client):
     assert items_by_goal[mixed_goal["goal_id"]]["last_reviewed_at"] is not None
     assert items_by_goal[reviewed_goal["goal_id"]]["summary"]["pending"] == 0
     assert items_by_goal[reviewed_goal["goal_id"]]["needs_review"] is False
+    assert items_by_goal[reviewed_goal["goal_id"]]["next_suggestion"] is None
+
+
+def test_272o2_goal_planner_review_inbox_exposes_next_pending_suggestion(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Inbox next planner suggestion", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Sequence later."},
+    )
+
+    response = client.get("/goals/planner/reviews")
+    item = response.json()["items"][0]
+    expected = preview["suggestions"][1]
+
+    assert response.status_code == 200
+    assert item["goal_id"] == goal["goal_id"]
+    assert item["needs_review"] is True
+    assert item["next_suggestion"] == {
+        "suggestion_index": 1,
+        "title": expected["title"],
+        "description": expected["description"],
+        "rationale": expected["rationale"],
+        "priority_hint": expected["priority_hint"],
+        "source": expected["source"],
+    }
+    assert client.get(f"/tasks?goal_id={goal['goal_id']}").json() == []
+
+
+def test_272o3_goal_planner_review_inbox_next_suggestion_empty_when_reviewed(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Inbox fully reviewed planner suggestions", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    total = len(client.post(f"/goals/{goal['goal_id']}/plan").json()["suggestions"])
+
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": list(range(total)), "overrides": {}},
+    )
+
+    item = client.get("/goals/planner/reviews").json()["items"][0]
+
+    assert item["needs_review"] is False
+    assert item["summary"]["pending"] == 0
+    assert item["next_suggestion"] is None
 
 
 def test_272p_goal_planner_review_inbox_empty_state(client):

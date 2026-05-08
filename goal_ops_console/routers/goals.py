@@ -270,18 +270,36 @@ def _planner_review_audit(goal_id: str, services: AppServices, *, limit: int = 1
     }
 
 
+def _planner_review_inbox_next_suggestion(plan: dict) -> dict | None:
+    for suggestion_index, suggestion in enumerate(plan["suggestions"]):
+        if suggestion["review_decision"] == "pending":
+            return {
+                "suggestion_index": suggestion_index,
+                "title": suggestion["title"],
+                "description": suggestion["description"],
+                "rationale": suggestion["rationale"],
+                "priority_hint": suggestion["priority_hint"],
+                "source": suggestion["source"],
+            }
+    return None
+
+
 def _planner_review_inbox_item(goal: dict, services: AppServices) -> dict:
-    review_list = _planner_review_list(goal["goal_id"], services)
-    summary = review_list["summary"]
-    reviews = review_list["reviews"]
+    plan = _preview_goal_plan(goal["goal_id"], services)
+    reviews = sorted(
+        _planner_reviews_by_index(goal["goal_id"], services).values(),
+        key=lambda review: review["suggestion_index"],
+    )
+    summary = _planner_review_summary(plan)
     return {
-        "goal_id": review_list["goal_id"],
-        "goal_title": review_list["goal_title"],
+        "goal_id": plan["goal_id"],
+        "goal_title": plan["goal_title"],
         "state": goal["state"],
-        "source": review_list["source"],
+        "source": plan["source"],
         "summary": summary,
         "last_reviewed_at": max((review["updated_at"] for review in reviews), default=None),
         "needs_review": summary["pending"] > 0,
+        "next_suggestion": _planner_review_inbox_next_suggestion(plan),
     }
 
 

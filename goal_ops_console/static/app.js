@@ -648,6 +648,10 @@ function plannerReviewInboxVisibleItems(payload) {
     item.goal_title,
     item.state,
     item.needs_review ? "needs review" : "reviewed",
+    item.next_suggestion?.title || "",
+    item.next_suggestion?.description || "",
+    item.next_suggestion?.rationale || "",
+    item.next_suggestion?.priority_hint || "",
   ]);
 }
 
@@ -749,6 +753,23 @@ function renderPlannerReviewInbox(payload) {
       const reviewState = item.needs_review ? "Needs review" : "Reviewed";
       const lastReviewed = item.last_reviewed_at || "no saved decisions";
       const itemSummary = item.summary || {};
+      const nextSuggestion = item.next_suggestion
+        ? `
+          <div class="card" style="background:rgba(255,255,255,0.48);">
+            <div class="entity-header">
+              <div>
+                <div class="meta">Next pending suggestion #${Number(item.next_suggestion.suggestion_index) + 1}</div>
+                <div class="entity-title">${escapeHtml(item.next_suggestion.title)}</div>
+              </div>
+              <span class="pill ${stateClass(item.next_suggestion.priority_hint)}">
+                ${escapeHtml(item.next_suggestion.priority_hint)}
+              </span>
+            </div>
+            <p class="meta">${escapeHtml(item.next_suggestion.description)}</p>
+            <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.next_suggestion.rationale)}</p>
+          </div>
+        `
+        : `<div class="meta">No pending planner suggestions.</div>`;
       return `
         <article class="entity-card ${selectedGoalId === item.goal_id ? "selected" : ""}">
           <div class="entity-header">
@@ -764,6 +785,7 @@ function renderPlannerReviewInbox(payload) {
             <div class="entity-metric"><span class="meta">Deferred</span><strong>${itemSummary.deferred || 0}</strong></div>
             <div class="entity-metric"><span class="meta">Rejected</span><strong>${itemSummary.rejected || 0}</strong></div>
           </div>
+          ${nextSuggestion}
           <div class="actions" style="margin-top:0.75rem;">
             <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
           </div>
