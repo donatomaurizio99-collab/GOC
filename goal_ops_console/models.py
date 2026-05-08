@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -86,18 +86,28 @@ class PlannerPreviewResponse(BaseModel):
     suggestions: list[PlannerTaskSuggestion]
 
 
+class PlannerTaskSuggestionOverride(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=1_000)
+    priority_hint: Literal["low", "medium", "high"] | None = None
+
+
 class PlannerTaskCreateRequest(BaseModel):
     suggestion_index: int = Field(ge=0)
+    override: PlannerTaskSuggestionOverride | None = None
 
 
 class PlannerBulkTaskCreateRequest(BaseModel):
     suggestion_indexes: list[int] = Field(min_length=1, max_length=5)
+    overrides: dict[int, PlannerTaskSuggestionOverride] = Field(default_factory=dict)
 
 
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int
     suggestion: PlannerTaskSuggestion
+    applied_suggestion: PlannerTaskSuggestion
+    operator_override: dict[str, Any] | None = None
     task: dict[str, Any]
 
 

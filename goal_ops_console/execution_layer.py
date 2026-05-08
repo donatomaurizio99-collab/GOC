@@ -1,3 +1,4 @@
+import json
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -37,6 +38,7 @@ class ExecutionLayer:
         planner_suggestion_index: int | None = None,
         planner_priority_hint: str | None = None,
         planner_suggestion_description: str | None = None,
+        planner_operator_overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         goal = self.state_manager.get_goal(goal_id)
         if goal["state"] in {"archived", "cancelled"}:
@@ -52,12 +54,20 @@ class ExecutionLayer:
                 "suggestion_index": planner_suggestion_index,
                 "priority_hint": planner_priority_hint,
             }
+            if planner_operator_overrides is not None:
+                event_payload["planner"]["operator_overrides"] = planner_operator_overrides
+        planner_operator_overrides_json = (
+            json.dumps(planner_operator_overrides, sort_keys=True)
+            if planner_operator_overrides is not None
+            else None
+        )
         with self.db.transaction() as tx:
             tx.execute(
                 "INSERT INTO tasks "
                 "(task_id, goal_id, title, planner_source, planner_suggestion_index, "
-                "planner_priority_hint, planner_suggestion_description, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "planner_priority_hint, planner_suggestion_description, planner_operator_overrides, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 task_id,
                 goal_id,
                 title,
@@ -65,6 +75,7 @@ class ExecutionLayer:
                 planner_suggestion_index,
                 planner_priority_hint,
                 planner_suggestion_description,
+                planner_operator_overrides_json,
                 timestamp,
                 timestamp,
             )
@@ -102,6 +113,7 @@ class ExecutionLayer:
                        t.planner_suggestion_index,
                        t.planner_priority_hint,
                        t.planner_suggestion_description,
+                       t.planner_operator_overrides,
                        ts.correlation_id,
                        ts.status,
                        ts.retry_count,
@@ -116,7 +128,7 @@ class ExecutionLayer:
                 ORDER BY ts.created_at ASC""",
             *params,
         )
-        return [dict(row) for row in rows]
+        return [self._task_from_row(row) for row in rows]
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         row = self.db.fetch_one(
@@ -127,6 +139,7 @@ class ExecutionLayer:
                       t.planner_suggestion_index,
                       t.planner_priority_hint,
                       t.planner_suggestion_description,
+                      t.planner_operator_overrides,
                       ts.correlation_id,
                       ts.status,
                       ts.retry_count,
@@ -142,7 +155,17 @@ class ExecutionLayer:
         )
         if row is None:
             raise NotFoundError(f"Task {task_id} not found")
-        return dict(row)
+        return self._task_from_row(row)
+
+    @staticmethod
+    def _task_from_row(row: Any) -> dict[str, Any]:
+        task = dict(row)
+        raw_overrides = task.get("planner_operator_overrides")
+        if isinstance(raw_overrides, str) and raw_overrides:
+            task["planner_operator_overrides"] = json.loads(raw_overrides)
+        else:
+            task["planner_operator_overrides"] = None
+        return task
 
     def simulate_success(self, task_id: str) -> dict[str, Any]:
         with self.db.transaction() as tx:
