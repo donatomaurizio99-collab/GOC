@@ -592,6 +592,9 @@ function renderPlannerSuggestionReviewControls(item, index) {
       <div class="entity-divider"></div>
       <div class="meta">Review decision: ${escapeHtml(decision)}</div>
       ${comment}
+      <div class="actions">
+        <button type="button" class="secondary" data-mutation-control="true" data-plan-review-reopen-index="${index}">Reopen review</button>
+      </div>
     `;
   }
   if (item.task_exists || decision === "created") {
@@ -620,7 +623,9 @@ function renderPlannerPreview(preview) {
     return;
   }
   const suggestions = preview.suggestions || [];
-  const selectableCount = suggestions.filter((item) => !item.task_exists).length;
+  const selectableCount = suggestions.filter((item) => (
+    !item.task_exists && plannerSuggestionDecision(item) === "pending"
+  )).length;
   container.innerHTML = `
     <span class="meta">Planner Preview · ${escapeHtml(preview.source)}</span>
     <h3>${escapeHtml(preview.goal_title)}</h3>
@@ -1601,6 +1606,29 @@ async function reviewPlannerSuggestion(indexValue, decision) {
   await runPlannerPreview(goalId);
 }
 
+async function reopenPlannerSuggestionReview(indexValue) {
+  if (!plannerPreview?.goal_id) {
+    throw new Error("Run Plan Preview before reopening a suggested task review.");
+  }
+  const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
+  const goalId = plannerPreview.goal_id;
+  ensureMutationAllowed("Planner review reopen");
+  const response = await api(
+    `/goals/${encodeURIComponent(goalId)}/plan/reviews/${encodeURIComponent(suggestionIndex)}`,
+    { method: "DELETE" },
+  );
+  document.getElementById("system-feedback").textContent = (
+    `Planner suggestion #${response.suggestion_index + 1} reopened from ${response.cleared_review.decision}.`
+  );
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  await refreshAll();
+  await runPlannerPreview(goalId);
+}
+
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
@@ -2028,6 +2056,7 @@ document.addEventListener("click", async (event) => {
   const planSuggestionIndex = event.target.dataset.planSuggestionIndex;
   const planReviewIndex = event.target.dataset.planReviewIndex;
   const planReviewDecision = event.target.dataset.planReviewDecision;
+  const planReviewReopenIndex = event.target.dataset.planReviewReopenIndex;
   const planBulkCreate = event.target.dataset.planBulkCreate;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
@@ -2079,6 +2108,11 @@ document.addEventListener("click", async (event) => {
     if (planReviewIndex !== undefined && planReviewDecision) {
       showError("task-error", null);
       await reviewPlannerSuggestion(planReviewIndex, planReviewDecision);
+    }
+
+    if (planReviewReopenIndex !== undefined) {
+      showError("task-error", null);
+      await reopenPlannerSuggestionReview(planReviewReopenIndex);
     }
 
     if (planBulkCreate) {

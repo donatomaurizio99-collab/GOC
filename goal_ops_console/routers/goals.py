@@ -8,11 +8,13 @@ from goal_ops_console.models import (
     ConflictError,
     DomainError,
     GoalCreateRequest,
+    NotFoundError,
     PlannerBulkTaskCreateRequest,
     PlannerBulkTaskCreateResponse,
     PlannerPreviewResponse,
     PlannerReviewDecisionRequest,
     PlannerReviewDecisionResponse,
+    PlannerReviewReopenResponse,
     PlannerTaskCreateRequest,
     PlannerTaskCreateResponse,
     PlannerTaskSuggestionOverride,
@@ -275,6 +277,38 @@ def _ensure_suggestion_can_be_created(goal_id: str, suggestion_index: int, servi
         )
 
 
+def _reopen_planner_review(goal_id: str, suggestion_index: int, services: AppServices) -> dict:
+    existing_review = _get_planner_review(goal_id, suggestion_index, services)
+    if existing_review is None:
+        raise NotFoundError(f"Planner suggestion {suggestion_index} has no review decision for goal {goal_id}")
+    if existing_review["decision"] == "created":
+        raise ConflictError(
+            f"Planner suggestion already exists as task {existing_review['task_id']} for goal {goal_id}"
+        )
+    timestamp = now_utc()
+    with services.db.transaction() as tx:
+        tx.execute(
+            "DELETE FROM planner_suggestion_reviews WHERE goal_id = ? AND suggestion_index = ?",
+            goal_id,
+            suggestion_index,
+        )
+        services.event_bus.record_event(
+            "planner.suggestion_review_reopened",
+            goal_id,
+            f"{goal_id}:planner:{suggestion_index}",
+            {
+                "goal_id": goal_id,
+                "suggestion_index": suggestion_index,
+                "cleared_decision": existing_review["decision"],
+                "cleared_comment": existing_review["comment"],
+                "source": existing_review["planner_source"],
+                "reopened_at": timestamp,
+            },
+            tx=tx,
+        )
+    return existing_review
+
+
 @router.post("/{goal_id}/plan", response_model=PlannerPreviewResponse)
 def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
     return _preview_goal_plan(goal_id, services)
@@ -307,6 +341,25 @@ def review_plan_suggestion(
         "suggestion_index": request.suggestion_index,
         "suggestion": refreshed_suggestion,
         "review": review,
+    }
+
+
+@router.delete("/{goal_id}/plan/reviews/{suggestion_index}", response_model=PlannerReviewReopenResponse)
+def reopen_plan_suggestion_review(
+    goal_id: str,
+    suggestion_index: int,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    plan = _preview_goal_plan(goal_id, services)
+    _get_plan_suggestion(plan, suggestion_index, goal_id)
+    cleared_review = _reopen_planner_review(goal_id, suggestion_index, services)
+    refreshed_plan = _preview_goal_plan(goal_id, services)
+    refreshed_suggestion = _get_plan_suggestion(refreshed_plan, suggestion_index, goal_id)
+    return {
+        "goal_id": goal_id,
+        "suggestion_index": suggestion_index,
+        "suggestion": refreshed_suggestion,
+        "cleared_review": cleared_review,
     }
 
 
