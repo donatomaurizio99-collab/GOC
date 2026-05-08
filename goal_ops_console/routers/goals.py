@@ -9,6 +9,8 @@ from goal_ops_console.models import (
     DomainError,
     GoalCreateRequest,
     NotFoundError,
+    PlannerBulkReviewDecisionRequest,
+    PlannerBulkReviewDecisionResponse,
     PlannerBulkTaskCreateRequest,
     PlannerBulkTaskCreateResponse,
     PlannerPreviewResponse,
@@ -288,6 +290,11 @@ def _normalized_review_comment(comment: str | None) -> str | None:
     return cleaned or None
 
 
+def _ensure_unique_suggestion_indexes(goal_id: str, suggestion_indexes: list[int]) -> None:
+    if len(set(suggestion_indexes)) != len(suggestion_indexes):
+        raise DomainError(f"Planner suggestion indexes must be unique for goal {goal_id}")
+
+
 def _create_planner_review(
     *,
     goal_id: str,
@@ -350,6 +357,57 @@ def _create_planner_review(
     review = _get_planner_review(goal_id, suggestion_index, services)
     assert review is not None
     return review
+
+
+def _create_planner_reviews(
+    *,
+    goal_id: str,
+    resolved_suggestions: list[tuple[int, dict]],
+    services: AppServices,
+    decision: str,
+    comment: str | None = None,
+) -> list[dict]:
+    timestamp = now_utc()
+    normalized_comment = _normalized_review_comment(comment)
+    with services.db.transaction() as tx:
+        for suggestion_index, suggestion in resolved_suggestions:
+            tx.execute(
+                """INSERT INTO planner_suggestion_reviews
+                   (goal_id, suggestion_index, decision, comment, task_id, planner_source,
+                    suggestion_title, suggestion_description, suggestion_rationale,
+                    suggestion_priority_hint, operator_override, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                goal_id,
+                suggestion_index,
+                decision,
+                normalized_comment,
+                None,
+                suggestion["source"],
+                suggestion["title"],
+                suggestion["description"],
+                suggestion["rationale"],
+                suggestion["priority_hint"],
+                None,
+                timestamp,
+                timestamp,
+            )
+            services.event_bus.record_event(
+                "planner.suggestion_reviewed",
+                goal_id,
+                f"{goal_id}:planner:{suggestion_index}",
+                {
+                    "goal_id": goal_id,
+                    "suggestion_index": suggestion_index,
+                    "decision": decision,
+                    "comment": normalized_comment,
+                    "task_id": None,
+                    "source": suggestion["source"],
+                },
+                tx=tx,
+            )
+    reviews = [_get_planner_review(goal_id, suggestion_index, services) for suggestion_index, _ in resolved_suggestions]
+    assert all(review is not None for review in reviews)
+    return [review for review in reviews if review is not None]
 
 
 def _ensure_suggestion_can_be_created(goal_id: str, suggestion_index: int, services: AppServices) -> None:
@@ -446,6 +504,51 @@ def review_plan_suggestion(
         "suggestion_index": request.suggestion_index,
         "suggestion": refreshed_suggestion,
         "review": review,
+    }
+
+
+@router.post("/{goal_id}/plan/reviews/bulk", status_code=201, response_model=PlannerBulkReviewDecisionResponse)
+def review_plan_suggestions_bulk(
+    goal_id: str,
+    request: PlannerBulkReviewDecisionRequest,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    plan = _preview_goal_plan(goal_id, services)
+    _ensure_unique_suggestion_indexes(goal_id, request.suggestion_indexes)
+    existing_reviews_by_index = _planner_reviews_by_index(goal_id, services)
+    resolved_suggestions = []
+    for suggestion_index in request.suggestion_indexes:
+        suggestion = _get_plan_suggestion(plan, suggestion_index, goal_id)
+        if suggestion["task_exists"]:
+            raise ConflictError(
+                f"Planner suggestion already exists as task {suggestion['existing_task_id']} for goal {goal_id}"
+            )
+        existing_review = existing_reviews_by_index.get(suggestion_index)
+        if existing_review is not None:
+            raise ConflictError(
+                f"Planner suggestion {suggestion_index} already has review decision "
+                f"{existing_review['decision']} for goal {goal_id}"
+            )
+        resolved_suggestions.append((suggestion_index, suggestion))
+
+    reviews = _create_planner_reviews(
+        goal_id=goal_id,
+        resolved_suggestions=resolved_suggestions,
+        services=services,
+        decision=request.decision,
+        comment=request.comment,
+    )
+    refreshed_plan = _preview_goal_plan(goal_id, services)
+    refreshed_suggestions = [
+        _get_plan_suggestion(refreshed_plan, suggestion_index, goal_id)
+        for suggestion_index in request.suggestion_indexes
+    ]
+    return {
+        "goal_id": goal_id,
+        "requested_suggestion_indexes": request.suggestion_indexes,
+        "decision": request.decision,
+        "suggestions": refreshed_suggestions,
+        "reviews": reviews,
     }
 
 

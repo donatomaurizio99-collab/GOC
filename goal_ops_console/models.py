@@ -136,6 +136,20 @@ class PlannerReviewDecisionResponse(BaseModel):
     review: PlannerSuggestionReview
 
 
+class PlannerBulkReviewDecisionRequest(BaseModel):
+    suggestion_indexes: list[int] = Field(min_length=1, max_length=5)
+    decision: Literal["deferred", "rejected"]
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class PlannerBulkReviewDecisionResponse(BaseModel):
+    goal_id: str
+    requested_suggestion_indexes: list[int]
+    decision: Literal["deferred", "rejected"]
+    suggestions: list[PlannerTaskSuggestion]
+    reviews: list[PlannerSuggestionReview]
+
+
 class PlannerReviewReopenResponse(BaseModel):
     goal_id: str
     suggestion_index: int

@@ -16265,6 +16265,101 @@ def test_272u_goal_planner_review_inbox_rejects_invalid_filter_values(client):
     assert invalid_sort.status_code == 422
 
 
+def test_272v_goal_plan_bulk_review_defers_selected_without_tasks(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk defer planner reviews", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    total = len(client.post(f"/goals/{goal['goal_id']}/plan").json()["suggestions"])
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [0, 1], "decision": "deferred", "comment": "Batch hold for owner."},
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    after = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    review_list = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()
+
+    assert response.status_code == 201
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["requested_suggestion_indexes"] == [0, 1]
+    assert payload["decision"] == "deferred"
+    assert [review["suggestion_index"] for review in payload["reviews"]] == [0, 1]
+    assert {review["decision"] for review in payload["reviews"]} == {"deferred"}
+    assert {review["comment"] for review in payload["reviews"]} == {"Batch hold for owner."}
+    assert [suggestion["review_decision"] for suggestion in payload["suggestions"]] == ["deferred", "deferred"]
+    assert [after["suggestions"][index]["review_decision"] for index in [0, 1]] == ["deferred", "deferred"]
+    assert tasks == []
+    assert review_list["summary"] == {
+        "total_suggestions": total,
+        "pending": total - 2,
+        "created": 0,
+        "deferred": 2,
+        "rejected": 0,
+    }
+
+
+def test_272w_goal_plan_bulk_review_rejects_existing_review_without_partial_writes(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk review existing decision", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred"},
+    )
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [0, 1], "decision": "rejected", "comment": "Batch reject."},
+    )
+    reviews = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()["reviews"]
+    after = client.post(f"/goals/{goal['goal_id']}/plan").json()
+
+    assert response.status_code == 409
+    assert "already has review decision deferred" in response.json()["detail"]
+    assert [review["suggestion_index"] for review in reviews] == [0]
+    assert after["suggestions"][0]["review_decision"] == "deferred"
+    assert after["suggestions"][1]["review_decision"] == "pending"
+
+
+def test_272x_goal_plan_bulk_review_invalid_index_writes_nothing(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk review invalid index", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [0, 99], "decision": "rejected"},
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    reviews = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()["reviews"]
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Planner suggestion index 99 not found for goal {goal['goal_id']}"
+    assert tasks == []
+    assert reviews == []
+
+
+def test_272y_goal_plan_bulk_review_duplicate_indexes_write_nothing(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk review duplicate indexes", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews/bulk",
+        json={"suggestion_indexes": [0, 0], "decision": "deferred"},
+    )
+    reviews = client.get(f"/goals/{goal['goal_id']}/plan/reviews").json()["reviews"]
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Planner suggestion indexes must be unique for goal {goal['goal_id']}"
+    assert reviews == []
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 

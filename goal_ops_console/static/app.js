@@ -548,7 +548,7 @@ function renderPlannerSuggestionSelection(item, index) {
   }
   return (
     `<label class="meta"><input type="checkbox" data-plan-select-index="${index}"> `
-    + "Select for bulk create</label>"
+    + "Select for batch actions</label>"
   );
 }
 
@@ -778,8 +778,14 @@ function renderPlannerPreview(preview) {
     ${renderPlannerReviewSummary(preview)}
     <div class="actions" style="margin-top:0.75rem;">
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-create="true" ${selectableCount ? "" : "disabled"}>Create selected tasks</button>
+      <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-review-decision="deferred" ${selectableCount ? "" : "disabled"}>Defer selected</button>
+      <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-review-decision="rejected" ${selectableCount ? "" : "disabled"}>Reject selected</button>
       <span class="meta">${selectableCount} selectable suggestions</span>
     </div>
+    <label class="meta" style="display:block;margin-top:0.75rem;">
+      Batch review comment (optional)
+      <textarea data-plan-bulk-review-comment="true" rows="2" placeholder="Shared note for Defer selected or Reject selected"></textarea>
+    </label>
     <div class="stack-list" style="margin-top:0.75rem;">
       ${suggestions.map((item, index) => `
         <article class="entity-card">
@@ -1728,6 +1734,19 @@ function collectPlannerSuggestionOverrides(indexes) {
 
 function ensurePlannerSuggestionReadyForCreate(suggestion) {
   const decision = plannerSuggestionDecision(suggestion);
+  if (suggestion?.task_exists || decision === "created") {
+    throw new Error("Planner suggestion was already created. Run Plan Preview again or choose another suggestion.");
+  }
+  if (decision === "deferred" || decision === "rejected") {
+    throw new Error(`Planner suggestion was already ${decision}. Run Plan Preview again or choose another suggestion.`);
+  }
+}
+
+function ensurePlannerSuggestionReadyForReview(suggestion) {
+  const decision = plannerSuggestionDecision(suggestion);
+  if (suggestion?.task_exists || decision === "created") {
+    throw new Error("Planner suggestion was already created. Run Plan Preview again or choose another suggestion.");
+  }
   if (decision === "deferred" || decision === "rejected") {
     throw new Error(`Planner suggestion was already ${decision}. Run Plan Preview again or choose another suggestion.`);
   }
@@ -1735,6 +1754,10 @@ function ensurePlannerSuggestionReadyForCreate(suggestion) {
 
 function collectPlannerReviewComment(index) {
   return document.querySelector(`[data-plan-review-comment-index="${index}"]`)?.value.trim() || null;
+}
+
+function collectPlannerBulkReviewComment() {
+  return document.querySelector("[data-plan-bulk-review-comment]")?.value.trim() || null;
 }
 
 async function reviewPlannerSuggestion(indexValue, decision) {
@@ -1763,6 +1786,42 @@ async function reviewPlannerSuggestion(indexValue, decision) {
   document.getElementById("fault-goal-id").value = goalId;
   await refreshAll();
   await runPlannerPreview(goalId);
+}
+
+async function reviewSelectedPlannerSuggestions(decision) {
+  if (!plannerPreview?.goal_id) {
+    throw new Error("Run Plan Preview before reviewing suggested tasks.");
+  }
+  if (!["deferred", "rejected"].includes(decision)) {
+    throw new Error(`Unsupported planner review decision: ${decision}`);
+  }
+  const suggestionIndexes = selectedPlannerSuggestionIndexes();
+  if (!suggestionIndexes.length) {
+    throw new Error("Select at least one planner suggestion before bulk review.");
+  }
+  suggestionIndexes.forEach((index) => ensurePlannerSuggestionReadyForReview(plannerPreview.suggestions[index]));
+  const goalId = plannerPreview.goal_id;
+  const comment = collectPlannerBulkReviewComment();
+  ensureMutationAllowed(`Bulk planner review ${decision}`);
+  const response = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews/bulk`, {
+    method: "POST",
+    body: JSON.stringify({
+      suggestion_indexes: suggestionIndexes,
+      decision,
+      ...(comment ? { comment } : {}),
+    }),
+  });
+  document.getElementById("system-feedback").textContent = (
+    `Bulk planner review completed: ${response.reviews.length} suggestions marked ${response.decision}.`
+  );
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  await refreshAll();
+  await runPlannerPreview(goalId);
+  setActiveJump("goals-section");
 }
 
 async function reopenPlannerSuggestionReview(indexValue) {
@@ -2219,6 +2278,7 @@ document.addEventListener("click", async (event) => {
   const planReviewDecision = event.target.dataset.planReviewDecision;
   const planReviewReopenIndex = event.target.dataset.planReviewReopenIndex;
   const planBulkCreate = event.target.dataset.planBulkCreate;
+  const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
   const planNextReview = event.target.dataset.planNextReview;
   const operatorAction = event.target.dataset.operatorAction;
@@ -2285,6 +2345,11 @@ document.addEventListener("click", async (event) => {
     if (planReviewIndex !== undefined && planReviewDecision) {
       showError("task-error", null);
       await reviewPlannerSuggestion(planReviewIndex, planReviewDecision);
+    }
+
+    if (planBulkReviewDecision) {
+      showError("task-error", null);
+      await reviewSelectedPlannerSuggestions(planBulkReviewDecision);
     }
 
     if (planReviewReopenIndex !== undefined) {
