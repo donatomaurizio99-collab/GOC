@@ -47,6 +47,7 @@ const MUTATION_LOCK_FALLBACK_MESSAGE = (
 
 const viewCache = {
   goals: [],
+  plannerReviewInbox: null,
   tasks: [],
   workflows: [],
   workflowRuns: [],
@@ -452,6 +453,7 @@ function setAutoRefresh(enabled) {
 
 function rerenderFilteredViews() {
   renderGoals(viewCache.goals);
+  renderPlannerReviewInbox(viewCache.plannerReviewInbox);
   renderTasks(viewCache.tasks);
   renderWorkflows(viewCache.workflows, viewCache.workflowRuns);
   renderEvents(viewCache.events);
@@ -662,6 +664,62 @@ function renderPlannerReviewSummary(preview) {
       <summary class="meta">Saved review decisions (${reviews.length})</summary>
       <div class="stack-list" style="margin-top:0.5rem;">${reviewItems}</div>
     </details>
+  `;
+}
+
+function renderPlannerReviewInbox(payload) {
+  const container = document.getElementById("planner-review-inbox");
+  if (!container) return;
+  if (!payload) {
+    container.innerHTML = `
+      <span class="meta">Planner Review Inbox</span>
+      <p class="meta">Review coverage is loading.</p>
+    `;
+    return;
+  }
+  const summary = payload.summary || {};
+  const items = filterRows(payload.items || [], (item) => [
+    item.goal_id,
+    item.goal_title,
+    item.state,
+    item.needs_review ? "needs review" : "reviewed",
+  ]);
+  const itemMarkup = items.length
+    ? items.map((item) => {
+      const reviewState = item.needs_review ? "Needs review" : "Reviewed";
+      const lastReviewed = item.last_reviewed_at || "no saved decisions";
+      const itemSummary = item.summary || {};
+      return `
+        <article class="entity-card ${selectedGoalId === item.goal_id ? "selected" : ""}">
+          <div class="entity-header">
+            <div>
+              <div class="entity-title">${escapeHtml(item.goal_title)}</div>
+              <div class="meta">${escapeHtml(item.goal_id)} &middot; ${escapeHtml(lastReviewed)}</div>
+            </div>
+            <span class="pill ${item.needs_review ? "state-degraded" : "state-ok"}">${reviewState}</span>
+          </div>
+          <div class="entity-grid">
+            <div class="entity-metric"><span class="meta">Pending</span><strong>${itemSummary.pending || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Created</span><strong>${itemSummary.created || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Deferred</span><strong>${itemSummary.deferred || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Rejected</span><strong>${itemSummary.rejected || 0}</strong></div>
+          </div>
+          <div class="actions" style="margin-top:0.75rem;">
+            <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="meta">${filteredEmptyMessage("No planner review items yet.")}</div>`;
+  container.innerHTML = `
+    <span class="meta">Planner Review Inbox &middot; ${summary.total_goals || 0} goals</span>
+    <div class="entity-grid" style="margin-top:0.75rem;">
+      <div class="entity-metric"><span class="meta">Needs Review</span><strong>${summary.goals_needing_review || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending_suggestions || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Created</span><strong>${summary.created || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Deferred</span><strong>${summary.deferred || 0}</strong></div>
+    </div>
+    <div class="stack-list" style="margin-top:0.75rem;">${itemMarkup}</div>
   `;
 }
 
@@ -1363,6 +1421,12 @@ async function refreshGoals() {
   updateSelectedGoalLabel();
 }
 
+async function refreshPlannerReviewInbox() {
+  const inbox = await api("/goals/planner/reviews");
+  viewCache.plannerReviewInbox = inbox;
+  renderPlannerReviewInbox(viewCache.plannerReviewInbox);
+}
+
 async function refreshWorkflows() {
   const [workflowPayload, runPayload] = await Promise.all([
     api("/workflows"),
@@ -1488,6 +1552,7 @@ async function refreshHealth() {
 async function refreshAll() {
   await Promise.all([
     refreshGoals(),
+    refreshPlannerReviewInbox(),
     refreshTasks(),
     refreshWorkflows(),
     refreshEvents(),
@@ -1508,6 +1573,7 @@ function startAutoRefreshLoop() {
       return;
     }
     refreshGoals().catch(() => {});
+    refreshPlannerReviewInbox().catch(() => {});
     refreshTasks().catch(() => {});
     refreshWorkflows().catch(() => {});
     refreshEvents().catch(() => {});
@@ -2008,7 +2074,9 @@ document.getElementById("flow-trace-form").addEventListener("submit", async (eve
   await refreshFlowTrace();
 });
 
-document.getElementById("refresh-goals").addEventListener("click", refreshGoals);
+document.getElementById("refresh-goals").addEventListener("click", async () => {
+  await Promise.all([refreshGoals(), refreshPlannerReviewInbox()]);
+});
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-workflows").addEventListener("click", refreshWorkflows);
 document.getElementById("refresh-events").addEventListener("click", refreshEvents);
