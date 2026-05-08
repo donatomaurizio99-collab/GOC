@@ -329,6 +329,19 @@ COMMIT;
 PRAGMA foreign_keys = ON;
 """,
     ),
+    (
+        2,
+        """
+BEGIN IMMEDIATE;
+ALTER TABLE tasks ADD COLUMN planner_source TEXT;
+ALTER TABLE tasks ADD COLUMN planner_suggestion_index INTEGER;
+ALTER TABLE tasks ADD COLUMN planner_priority_hint TEXT;
+ALTER TABLE tasks ADD COLUMN planner_suggestion_description TEXT;
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (2, 'task_planner_provenance', datetime('now'));
+COMMIT;
+""",
+    ),
 )
 T = TypeVar("T")
 

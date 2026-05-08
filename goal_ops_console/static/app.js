@@ -564,6 +564,23 @@ function renderTaskButtons(task) {
   return buttons.join("");
 }
 
+function renderTaskPlannerProvenance(task) {
+  if (!task.planner_source) {
+    return "";
+  }
+  const parts = [`Planner: ${escapeHtml(task.planner_source)}`];
+  if (task.planner_suggestion_index !== null && task.planner_suggestion_index !== undefined) {
+    const suggestionIndex = Number(task.planner_suggestion_index);
+    if (Number.isFinite(suggestionIndex)) {
+      parts.push(`suggestion #${suggestionIndex + 1}`);
+    }
+  }
+  if (task.planner_priority_hint) {
+    parts.push(`priority: ${escapeHtml(task.planner_priority_hint)}`);
+  }
+  return `<div class="meta">${parts.join(" &middot; ")}</div>`;
+}
+
 function renderGoals(goals) {
   const filteredGoals = filterRows(goals, (goal) => [
     goal.goal_id,
@@ -616,6 +633,10 @@ function renderTasks(tasks) {
     task.failure_type,
     task.error_hash,
     task.correlation_id,
+    task.planner_source,
+    task.planner_suggestion_index,
+    task.planner_priority_hint,
+    task.planner_suggestion_description,
   ]);
   if (!filteredTasks.length) {
     container.innerHTML = `<div class="meta">${filteredEmptyMessage("No tasks for the current selection.")}</div>`;
@@ -629,6 +650,7 @@ function renderTasks(tasks) {
           <div>
             <div class="entity-title">${task.title}</div>
             <div class="meta">${task.task_id}</div>
+            ${renderTaskPlannerProvenance(task)}
           </div>
           <span class="pill ${stateClass(task.status)}">${task.status}</span>
         </div>

@@ -28,7 +28,16 @@ class ExecutionLayer:
         self.failure_intelligence = failure_intelligence
         self.observability = observability
 
-    def create_task(self, *, goal_id: str, title: str) -> dict[str, Any]:
+    def create_task(
+        self,
+        *,
+        goal_id: str,
+        title: str,
+        planner_source: str | None = None,
+        planner_suggestion_index: int | None = None,
+        planner_priority_hint: str | None = None,
+        planner_suggestion_description: str | None = None,
+    ) -> dict[str, Any]:
         goal = self.state_manager.get_goal(goal_id)
         if goal["state"] in {"archived", "cancelled"}:
             raise ConflictError(f"Goal {goal_id} cannot accept new tasks in state {goal['state']}")
@@ -36,12 +45,26 @@ class ExecutionLayer:
         task_id = new_id()
         timestamp = now_utc()
         correlation_id = f"{goal_id}:{task_id}:0"
+        event_payload: dict[str, Any] = {"goal_id": goal_id, "title": title}
+        if planner_source is not None:
+            event_payload["planner"] = {
+                "source": planner_source,
+                "suggestion_index": planner_suggestion_index,
+                "priority_hint": planner_priority_hint,
+            }
         with self.db.transaction() as tx:
             tx.execute(
-                "INSERT INTO tasks (task_id, goal_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO tasks "
+                "(task_id, goal_id, title, planner_source, planner_suggestion_index, "
+                "planner_priority_hint, planner_suggestion_description, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 task_id,
                 goal_id,
                 title,
+                planner_source,
+                planner_suggestion_index,
+                planner_priority_hint,
+                planner_suggestion_description,
                 timestamp,
                 timestamp,
             )
@@ -59,7 +82,7 @@ class ExecutionLayer:
                 "task.created",
                 task_id,
                 correlation_id,
-                {"goal_id": goal_id, "title": title},
+                event_payload,
                 tx=tx,
             )
             self._metric("tasks.created", tx=tx)
@@ -75,6 +98,10 @@ class ExecutionLayer:
             f"""SELECT ts.task_id,
                        ts.goal_id,
                        t.title,
+                       t.planner_source,
+                       t.planner_suggestion_index,
+                       t.planner_priority_hint,
+                       t.planner_suggestion_description,
                        ts.correlation_id,
                        ts.status,
                        ts.retry_count,
@@ -96,6 +123,10 @@ class ExecutionLayer:
             """SELECT ts.task_id,
                       ts.goal_id,
                       t.title,
+                      t.planner_source,
+                      t.planner_suggestion_index,
+                      t.planner_priority_hint,
+                      t.planner_suggestion_description,
                       ts.correlation_id,
                       ts.status,
                       ts.retry_count,
