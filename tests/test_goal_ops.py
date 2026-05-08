@@ -16177,13 +16177,17 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
 
     assert "function nextPlannerReviewItem()" in app_js
     assert "function firstPendingPlannerSuggestionIndex(suggestions)" in app_js
+    assert "function plannerReviewContinuityMessage(prefix)" in app_js
     assert "nextReviewItem?.next_suggestion?.suggestion_index" in app_js
     assert "runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true })" in app_js
+    assert "runPlannerPreview(goalId, { focusNextPending: true })" in app_js
     assert "data-planner-suggestion-index" in app_js
     assert "scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex)" in app_js
     assert "Opened next review target" in app_js
+    assert "Review complete" in app_js
     assert "planner-suggestion-focus" in app_js
     assert ".planner-suggestion-focus" in template
+    assert ".planner-review-complete" in template
     assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
     assert '"static_asset_version": _static_asset_version()' in system_router
 
