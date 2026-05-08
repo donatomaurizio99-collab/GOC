@@ -535,6 +535,32 @@ function renderPlannerSuggestionSelection(item, index) {
   );
 }
 
+function renderPlannerSuggestionEditor(item, index) {
+  if (item.task_exists) {
+    return "";
+  }
+  return `
+    <div class="entity-grid" style="margin-top:0.75rem;">
+      <label class="entity-metric">
+        <span class="meta">Review title</span>
+        <input type="text" data-plan-title-index="${index}" value="${escapeHtml(item.title)}">
+      </label>
+      <label class="entity-metric">
+        <span class="meta">Review priority</span>
+        <select data-plan-priority-index="${index}">
+          ${["low", "medium", "high"].map((priority) => (
+            `<option value="${priority}" ${priority === item.priority_hint ? "selected" : ""}>${priority}</option>`
+          )).join("")}
+        </select>
+      </label>
+    </div>
+    <label class="meta" style="display:block;margin-top:0.75rem;">
+      Review description
+      <textarea data-plan-description-index="${index}" rows="3">${escapeHtml(item.description)}</textarea>
+    </label>
+  `;
+}
+
 function renderPlannerPreview(preview) {
   const container = document.getElementById("planner-preview");
   if (!container) return;
@@ -566,6 +592,7 @@ function renderPlannerPreview(preview) {
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
           <p class="meta">${escapeHtml(item.description)}</p>
+          ${renderPlannerSuggestionEditor(item, index)}
           ${renderPlannerSuggestionSelection(item, index)}
           <div class="actions">
             ${renderPlannerSuggestionAction(item, index)}
@@ -611,6 +638,12 @@ function renderTaskPlannerProvenance(task) {
   }
   if (task.planner_priority_hint) {
     parts.push(`priority: ${escapeHtml(task.planner_priority_hint)}`);
+  }
+  if (task.planner_operator_overrides && typeof task.planner_operator_overrides === "object") {
+    const editedFields = Object.keys(task.planner_operator_overrides).sort();
+    if (editedFields.length) {
+      parts.push(`operator edits: ${escapeHtml(editedFields.join(", "))}`);
+    }
   }
   return `<div class="meta">${parts.join(" &middot; ")}</div>`;
 }
@@ -1443,19 +1476,57 @@ function selectedPlannerSuggestionIndexes() {
     .map((input) => parsePlannerSuggestionIndex(input.dataset.planSelectIndex));
 }
 
+function collectPlannerSuggestionOverride(index) {
+  const suggestion = plannerPreview?.suggestions?.[index];
+  if (!suggestion) {
+    throw new Error("Planner suggestion is no longer available. Run Plan Preview again.");
+  }
+
+  const title = document.querySelector(`[data-plan-title-index="${index}"]`)?.value.trim() || "";
+  const description = document.querySelector(`[data-plan-description-index="${index}"]`)?.value.trim() || "";
+  const priorityHint = document.querySelector(`[data-plan-priority-index="${index}"]`)?.value || "";
+  const override = {};
+  if (title !== suggestion.title) {
+    override.title = title;
+  }
+  if (description !== suggestion.description) {
+    override.description = description;
+  }
+  if (priorityHint !== suggestion.priority_hint) {
+    override.priority_hint = priorityHint;
+  }
+  return Object.keys(override).length ? override : null;
+}
+
+function collectPlannerSuggestionOverrides(indexes) {
+  return indexes.reduce((overrides, index) => {
+    const override = collectPlannerSuggestionOverride(index);
+    if (override) {
+      overrides[index] = override;
+    }
+    return overrides;
+  }, {});
+}
+
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
   }
   const suggestionIndex = parsePlannerSuggestionIndex(indexValue);
   const goalId = plannerPreview.goal_id;
+  const override = collectPlannerSuggestionOverride(suggestionIndex);
   ensureMutationAllowed("Planner task creation");
-  await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks`, {
+  const response = await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks`, {
     method: "POST",
     body: JSON.stringify({
       suggestion_index: suggestionIndex,
+      ...(override ? { override } : {}),
     }),
   });
+  document.getElementById("system-feedback").textContent = (
+    `Created planner task ${response.task.task_id}`
+    + `${override ? " with operator edits." : "."}`
+  );
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;
@@ -1475,13 +1546,19 @@ async function createTasksFromSelectedPlannerSuggestions() {
     throw new Error("Select at least one planner suggestion before bulk creation.");
   }
   const goalId = plannerPreview.goal_id;
+  const overrides = collectPlannerSuggestionOverrides(suggestionIndexes);
   ensureMutationAllowed("Bulk planner task creation");
-  await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks/bulk`, {
+  const response = await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks/bulk`, {
     method: "POST",
     body: JSON.stringify({
       suggestion_indexes: suggestionIndexes,
+      overrides,
     }),
   });
+  document.getElementById("system-feedback").textContent = (
+    `Bulk planner create completed: ${response.created.length} created, `
+    + `${response.skipped_duplicates.length} duplicates skipped.`
+  );
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;

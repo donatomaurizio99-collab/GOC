@@ -1191,6 +1191,17 @@ def test_53_task_planner_provenance_schema_migration(services):
     }.issubset(columns)
 
 
+def test_53b_task_planner_operator_override_schema_migration(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 3"
+    )
+    columns = {column["name"] for column in services.db.fetch_all("PRAGMA table_info(tasks)")}
+
+    assert row is not None
+    assert row["name"] == "task_planner_operator_overrides"
+    assert "planner_operator_overrides" in columns
+
+
 def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
     first = client.post(
         "/workflows/maintenance.retention_cleanup/start",
@@ -15709,6 +15720,44 @@ def test_272b_goal_plan_preview_marks_existing_suggestion_after_task_create(clie
     assert after["suggestions"][1]["existing_task_id"] is None
 
 
+def test_272c_goal_plan_task_create_applies_operator_override_with_original_provenance(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Review suggested planner task", "urgency": 0.7, "value": 0.7, "deadline_score": 0.3},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    selected = preview["suggestions"][0]
+    priority_override = "low" if selected["priority_hint"] != "low" else "high"
+    override = {
+        "title": "Operator reviewed task title",
+        "description": "Operator reviewed task description.",
+        "priority_hint": priority_override,
+    }
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks",
+        json={"suggestion_index": 0, "override": override},
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 201
+    assert payload["suggestion"] == selected
+    assert payload["applied_suggestion"]["title"] == override["title"]
+    assert payload["applied_suggestion"]["description"] == override["description"]
+    assert payload["applied_suggestion"]["priority_hint"] == override["priority_hint"]
+    assert payload["operator_override"] == override
+    assert payload["task"]["title"] == override["title"]
+    assert payload["task"]["planner_source"] == selected["source"]
+    assert payload["task"]["planner_suggestion_index"] == 0
+    assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
+    assert payload["task"]["planner_suggestion_description"] == selected["description"]
+    assert payload["task"]["planner_operator_overrides"] == override
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == override["title"]
+    assert tasks[0]["planner_operator_overrides"] == override
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 
@@ -15820,6 +15869,42 @@ def test_276c_goal_plan_bulk_task_create_skips_existing_duplicates(client):
     assert len(tasks) == 2
 
 
+def test_276c2_goal_plan_bulk_task_create_uses_overrides_and_skips_applied_duplicate_titles(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk reviewed duplicate titles", "urgency": 0.7, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    shared_title = "Operator reviewed shared task"
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={
+            "suggestion_indexes": [0, 1],
+            "overrides": {
+                0: {"title": shared_title},
+                1: {"title": shared_title, "description": "Second reviewed description."},
+            },
+        },
+    )
+    payload = response.json()
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 201
+    assert [item["suggestion_index"] for item in payload["created"]] == [0]
+    assert payload["created"][0]["applied_suggestion"]["title"] == shared_title
+    assert payload["created"][0]["operator_override"] == {"title": shared_title}
+    assert len(payload["skipped_duplicates"]) == 1
+    assert payload["skipped_duplicates"][0]["suggestion_index"] == 1
+    assert payload["skipped_duplicates"][0]["existing_task_id"] == payload["created"][0]["task"]["task_id"]
+    assert payload["skipped_duplicates"][0]["operator_override"] == {
+        "title": shared_title,
+        "description": "Second reviewed description.",
+    }
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == shared_title
+    assert tasks[0]["planner_operator_overrides"] == {"title": shared_title}
+
+
 def test_276d_goal_plan_bulk_task_create_invalid_index_does_not_create_tasks(client):
     goal = client.post(
         "/goals",
@@ -15837,6 +15922,26 @@ def test_276d_goal_plan_bulk_task_create_invalid_index_does_not_create_tasks(cli
     assert tasks == []
 
 
+def test_276e_goal_plan_bulk_task_create_unrequested_override_index_does_not_create_tasks(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Bulk reject unrequested override", "urgency": 0.4, "value": 0.4, "deadline_score": 0.2},
+    ).json()
+
+    response = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={
+            "suggestion_indexes": [0],
+            "overrides": {1: {"title": "Unrequested override"}},
+        },
+    )
+    tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Planner override index 1 was not requested for goal {goal['goal_id']}"
+    assert tasks == []
+
+
 def test_277_manual_task_create_has_no_planner_provenance(client):
     goal = create_active_goal(client, "Manual task provenance")
 
@@ -15849,8 +15954,10 @@ def test_277_manual_task_create_has_no_planner_provenance(client):
     assert task["planner_suggestion_index"] is None
     assert task["planner_priority_hint"] is None
     assert task["planner_suggestion_description"] is None
+    assert task["planner_operator_overrides"] is None
     assert len(tasks) == 1
     assert tasks[0]["planner_source"] is None
     assert tasks[0]["planner_suggestion_index"] is None
     assert tasks[0]["planner_priority_hint"] is None
     assert tasks[0]["planner_suggestion_description"] is None
+    assert tasks[0]["planner_operator_overrides"] is None

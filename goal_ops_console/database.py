@@ -342,6 +342,16 @@ VALUES (2, 'task_planner_provenance', datetime('now'));
 COMMIT;
 """,
     ),
+    (
+        3,
+        """
+BEGIN IMMEDIATE;
+ALTER TABLE tasks ADD COLUMN planner_operator_overrides TEXT;
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (3, 'task_planner_operator_overrides', datetime('now'));
+COMMIT;
+""",
+    ),
 )
 T = TypeVar("T")
 
