@@ -525,6 +525,16 @@ function renderPlannerSuggestionAction(item, index) {
   );
 }
 
+function renderPlannerSuggestionSelection(item, index) {
+  if (item.task_exists) {
+    return "";
+  }
+  return (
+    `<label class="meta"><input type="checkbox" data-plan-select-index="${index}"> `
+    + "Select for bulk create</label>"
+  );
+}
+
 function renderPlannerPreview(preview) {
   const container = document.getElementById("planner-preview");
   if (!container) return;
@@ -536,10 +546,15 @@ function renderPlannerPreview(preview) {
     return;
   }
   const suggestions = preview.suggestions || [];
+  const selectableCount = suggestions.filter((item) => !item.task_exists).length;
   container.innerHTML = `
     <span class="meta">Planner Preview · ${escapeHtml(preview.source)}</span>
     <h3>${escapeHtml(preview.goal_title)}</h3>
     <div class="meta">${escapeHtml(preview.goal_id)} · ${suggestions.length} suggested tasks · no tasks created automatically</div>
+    <div class="actions" style="margin-top:0.75rem;">
+      <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-create="true" ${selectableCount ? "" : "disabled"}>Create selected tasks</button>
+      <span class="meta">${selectableCount} selectable suggestions</span>
+    </div>
     <div class="stack-list" style="margin-top:0.75rem;">
       ${suggestions.map((item, index) => `
         <article class="entity-card">
@@ -551,6 +566,7 @@ function renderPlannerPreview(preview) {
             <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
           </div>
           <p class="meta">${escapeHtml(item.description)}</p>
+          ${renderPlannerSuggestionSelection(item, index)}
           <div class="actions">
             ${renderPlannerSuggestionAction(item, index)}
           </div>
@@ -1422,6 +1438,11 @@ function parsePlannerSuggestionIndex(indexValue) {
   return index;
 }
 
+function selectedPlannerSuggestionIndexes() {
+  return Array.from(document.querySelectorAll("[data-plan-select-index]:checked"))
+    .map((input) => parsePlannerSuggestionIndex(input.dataset.planSelectIndex));
+}
+
 async function createTaskFromPlannerSuggestion(indexValue) {
   if (!plannerPreview?.goal_id) {
     throw new Error("Run Plan Preview before creating a suggested task.");
@@ -1433,6 +1454,32 @@ async function createTaskFromPlannerSuggestion(indexValue) {
     method: "POST",
     body: JSON.stringify({
       suggestion_index: suggestionIndex,
+    }),
+  });
+  selectedGoalId = goalId;
+  document.getElementById("task-goal-id").value = goalId;
+  document.getElementById("event-correlation-id").value = goalId;
+  document.getElementById("trace-goal-id").value = goalId;
+  document.getElementById("fault-goal-id").value = goalId;
+  await refreshAll();
+  await runPlannerPreview(goalId);
+  setActiveJump("tasks-section");
+}
+
+async function createTasksFromSelectedPlannerSuggestions() {
+  if (!plannerPreview?.goal_id) {
+    throw new Error("Run Plan Preview before creating suggested tasks.");
+  }
+  const suggestionIndexes = selectedPlannerSuggestionIndexes();
+  if (!suggestionIndexes.length) {
+    throw new Error("Select at least one planner suggestion before bulk creation.");
+  }
+  const goalId = plannerPreview.goal_id;
+  ensureMutationAllowed("Bulk planner task creation");
+  await api(`/goals/${encodeURIComponent(goalId)}/plan/tasks/bulk`, {
+    method: "POST",
+    body: JSON.stringify({
+      suggestion_indexes: suggestionIndexes,
     }),
   });
   selectedGoalId = goalId;
@@ -1807,6 +1854,7 @@ document.addEventListener("click", async (event) => {
   const selectGoal = event.target.dataset.selectGoal;
   const planGoal = event.target.dataset.planGoal;
   const planSuggestionIndex = event.target.dataset.planSuggestionIndex;
+  const planBulkCreate = event.target.dataset.planBulkCreate;
   const operatorAction = event.target.dataset.operatorAction;
   const jumpTarget = event.target.dataset.jumpTarget;
 
@@ -1852,6 +1900,11 @@ document.addEventListener("click", async (event) => {
     if (planSuggestionIndex !== undefined) {
       showError("task-error", null);
       await createTaskFromPlannerSuggestion(planSuggestionIndex);
+    }
+
+    if (planBulkCreate) {
+      showError("task-error", null);
+      await createTasksFromSelectedPlannerSuggestions();
     }
 
     if (taskAction && taskId) {

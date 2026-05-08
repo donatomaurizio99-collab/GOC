@@ -90,11 +90,22 @@ class PlannerTaskCreateRequest(BaseModel):
     suggestion_index: int = Field(ge=0)
 
 
+class PlannerBulkTaskCreateRequest(BaseModel):
+    suggestion_indexes: list[int] = Field(min_length=1, max_length=5)
+
+
 class PlannerTaskCreateResponse(BaseModel):
     goal_id: str
     suggestion_index: int
     suggestion: PlannerTaskSuggestion
     task: dict[str, Any]
+
+
+class PlannerBulkTaskCreateResponse(BaseModel):
+    goal_id: str
+    requested_suggestion_indexes: list[int]
+    created: list[dict[str, Any]]
+    skipped_duplicates: list[dict[str, Any]]
 
 
 class TaskCreateRequest(BaseModel):
