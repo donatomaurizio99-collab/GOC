@@ -352,6 +352,16 @@ VALUES (3, 'task_planner_operator_overrides', datetime('now'));
 COMMIT;
 """,
     ),
+    (
+        4,
+        """
+BEGIN IMMEDIATE;
+ALTER TABLE tasks ADD COLUMN planner_suggestion_rationale TEXT;
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (4, 'task_planner_suggestion_rationale', datetime('now'));
+COMMIT;
+""",
+    ),
 )
 T = TypeVar("T")
 

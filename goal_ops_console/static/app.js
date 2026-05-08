@@ -646,7 +646,10 @@ function renderTaskPlannerProvenance(task) {
       parts.push(`operator edits: ${escapeHtml(editedFields.join(", "))}`);
     }
   }
-  return `<div class="meta">${parts.join(" &middot; ")}</div>`;
+  const rationale = task.planner_suggestion_rationale
+    ? `<div class="meta"><strong>Why suggested:</strong> ${escapeHtml(task.planner_suggestion_rationale)}</div>`
+    : "";
+  return `<div class="meta">${parts.join(" &middot; ")}</div>${rationale}`;
 }
 
 function renderGoals(goals) {
@@ -705,6 +708,7 @@ function renderTasks(tasks) {
     task.planner_suggestion_index,
     task.planner_priority_hint,
     task.planner_suggestion_description,
+    task.planner_suggestion_rationale,
   ]);
   if (!filteredTasks.length) {
     container.innerHTML = `<div class="meta">${filteredEmptyMessage("No tasks for the current selection.")}</div>`;
