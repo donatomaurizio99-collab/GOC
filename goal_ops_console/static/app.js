@@ -1209,6 +1209,12 @@ function plannerGlobalHandoffVisibleItems(payload) {
     item.latest_deferred_suggestion?.title || "",
     item.first_deferred_suggestion?.title || "",
     item.first_deferred?.title || "",
+    ...plannerCreatedTaskPreviewItems(item).flatMap((task) => [
+      task.task_id,
+      task.task_title,
+      task.task_status,
+      task.title,
+    ]),
     ...plannerGlobalHandoffActions(item).flatMap((action) => [
       action.id,
       action.label,
@@ -1247,6 +1253,39 @@ function firstPlannerHandoffSuggestion(item, key, fallbackKey, alternateKey = nu
 function plannerHandoffSuggestionIndex(item) {
   const index = Number.parseInt(item?.suggestion_index, 10);
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function plannerCreatedTaskPreviewItems(item) {
+  return Array.isArray(item?.created_tasks_preview) ? item.created_tasks_preview : [];
+}
+
+function renderPlannerCreatedTaskPreview(item) {
+  const tasks = plannerCreatedTaskPreviewItems(item);
+  if (!tasks.length) {
+    return "";
+  }
+  const createdTotal = item?.summary?.created ?? item?.created ?? tasks.length;
+  const remainingCount = Math.max(0, createdTotal - tasks.length);
+  const remainingLabel = remainingCount
+    ? ` &middot; ${remainingCount} more in task list`
+    : "";
+  return `
+    <div class="planner-created-task-preview">
+      <div class="meta"><strong>Created planner tasks</strong> &middot; read-only${remainingLabel}</div>
+      ${tasks.map((task) => `
+        <div class="planner-created-task-preview-item">
+          <div>
+            <div class="entity-title">${escapeHtml(task.task_title || task.title || task.task_id)}</div>
+            <div class="meta">
+              #${Number(task.suggestion_index) + 1}
+              &middot; ${escapeHtml(task.task_id || "unknown task")}
+            </div>
+          </div>
+          <span class="pill ${stateClass(task.task_status)}">${escapeHtml(task.task_status || "unknown")}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderPlannerFollowUpActionButton(action, item) {
@@ -1370,6 +1409,7 @@ function renderPlannerGlobalHandoffs(payload) {
             <div class="entity-metric"><span class="meta">Rejected</span><strong>${itemSummary.rejected || 0}</strong></div>
             <div class="entity-metric"><span class="meta">Pending</span><strong>${itemSummary.pending || 0}</strong></div>
           </div>
+          ${renderPlannerCreatedTaskPreview(item)}
           ${renderPlannerFollowUpActions(item)}
           <div class="actions" style="margin-top:0.75rem;">
             <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>

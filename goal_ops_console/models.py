@@ -264,6 +264,7 @@ class PlannerGlobalHandoffItem(BaseModel):
     next_pending_suggestion: PlannerHandoffSuggestionItem | None = None
     latest_deferred_suggestion: PlannerHandoffSuggestionItem | None = None
     created_task_statuses: dict[str, int] = Field(default_factory=dict)
+    created_tasks_preview: list[PlannerHandoffCreatedTaskItem] = Field(default_factory=list)
     follow_up_actions: list[PlannerGlobalHandoffFollowUpAction] = Field(default_factory=list)
 
 
