@@ -198,6 +198,36 @@ class PlannerReviewAuditResponse(BaseModel):
     entries: list[PlannerReviewAuditEntry]
 
 
+class PlannerHandoffSuggestionItem(BaseModel):
+    suggestion_index: int
+    title: str
+    description: str
+    rationale: str
+    priority_hint: str
+    source: str
+    comment: str | None = None
+    reviewed_at: str | None = None
+
+
+class PlannerHandoffCreatedTaskItem(PlannerHandoffSuggestionItem):
+    task_id: str
+    task_title: str
+    task_status: str
+    operator_override: dict[str, Any] | None = None
+
+
+class PlannerReviewHandoffResponse(BaseModel):
+    goal_id: str
+    goal_title: str
+    source: str
+    summary: PlannerReviewSummary
+    next_operator_action: str
+    created_tasks: list[PlannerHandoffCreatedTaskItem]
+    deferred_suggestions: list[PlannerHandoffSuggestionItem]
+    rejected_suggestions: list[PlannerHandoffSuggestionItem]
+    pending_suggestions: list[PlannerHandoffSuggestionItem]
+
+
 class PlannerReviewInboxNextSuggestion(BaseModel):
     suggestion_index: int
     title: str
