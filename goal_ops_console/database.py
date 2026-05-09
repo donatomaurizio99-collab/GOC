@@ -1,3 +1,16 @@
+"""SQLite persistence boundary for the supervised desktop runtime.
+
+Concurrency contract:
+- Open a fresh SQLite connection for each operation/transaction; the only
+  long-lived keeper connection is for shared in-memory test databases.
+- Enable foreign keys and a 5s busy timeout on every connection.
+- Use `BEGIN IMMEDIATE` for mutating transactions so write contention is
+  explicit and retried at the database boundary.
+- Retry transient SQLite lock errors with a short bounded backoff.
+- Do not force WAL mode yet. The runtime is Windows/desktop oriented and may
+  run from synced folders, so journal-mode changes must be deliberate.
+"""
+
 import contextlib
 import shutil
 import sqlite3
@@ -261,6 +274,7 @@ CREATE INDEX IF NOT EXISTS idx_metrics_updated_at ON metrics_counters(updated_at
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 LOCK_RETRY_ATTEMPTS = 8
 LOCK_RETRY_BASE_SECONDS = 0.01
+SQLITE_TRANSACTION_BEGIN_MODE = "BEGIN IMMEDIATE"
 SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
     "file is not a database",
@@ -486,6 +500,41 @@ class Database:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
         return conn
+
+    def sqlite_contract_snapshot(self) -> dict[str, object]:
+        conn = self._connect()
+        try:
+            observed_busy_timeout = int(conn.execute("PRAGMA busy_timeout").fetchone()[0])
+            observed_foreign_keys = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+            observed_journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+        finally:
+            conn.close()
+
+        return {
+            "ok": bool(
+                observed_busy_timeout == SQLITE_BUSY_TIMEOUT_MS
+                and observed_foreign_keys == 1
+            ),
+            "connection_scope": (
+                "fresh_connection_per_operation_with_shared_memory_keeper_for_tests"
+            ),
+            "check_same_thread": False,
+            "isolation_level": None,
+            "foreign_keys": "ON",
+            "busy_timeout_ms": SQLITE_BUSY_TIMEOUT_MS,
+            "lock_retry_attempts": LOCK_RETRY_ATTEMPTS,
+            "lock_retry_base_seconds": LOCK_RETRY_BASE_SECONDS,
+            "transaction_begin_mode": SQLITE_TRANSACTION_BEGIN_MODE,
+            "wal_forced": False,
+            "journal_mode_note": (
+                "Uses SQLite default journal mode unless an operator changes it explicitly."
+            ),
+            "observed": {
+                "busy_timeout_ms": observed_busy_timeout,
+                "foreign_keys": bool(observed_foreign_keys),
+                "journal_mode": observed_journal_mode,
+            },
+        }
 
     def _is_lock_error(self, error: sqlite3.OperationalError) -> bool:
         message = str(error).lower()
@@ -804,7 +853,7 @@ WHERE idempotency_key IS NOT NULL;
             for attempt in range(LOCK_RETRY_ATTEMPTS):
                 trial = self._connect()
                 try:
-                    trial.execute("BEGIN IMMEDIATE")
+                    trial.execute(SQLITE_TRANSACTION_BEGIN_MODE)
                     conn = trial
                     break
                 except sqlite3.OperationalError as error:

@@ -10,6 +10,16 @@ from goal_ops_console.models import BackpressureError
 if TYPE_CHECKING:
     from goal_ops_console.observability import ObservabilityService
 
+RETENTION_DELETE_METRICS = {
+    "events": "maintenance.retention.events_deleted",
+    "event_processing": "maintenance.retention.event_processing_deleted",
+    "failure_log": "maintenance.retention.failure_log_deleted",
+    "audit_integrity": "maintenance.retention.audit_integrity_deleted",
+    "audit_log": "maintenance.retention.audit_log_deleted",
+    "idempotency_keys": "maintenance.retention.idempotency_deleted",
+}
+RETENTION_CLEANUP_RUNS_METRIC = "maintenance.retention.cleanup_runs"
+
 
 def make_payload(data: dict[str, Any] | None = None) -> str:
     return json.dumps({"schema_version": 1, "data": data or {}})
@@ -184,6 +194,7 @@ class EventBus:
                 self._metric("maintenance.retention.audit_log_deleted", audit_log_deleted, tx=tx)
             if idempotency_deleted:
                 self._metric("maintenance.retention.idempotency_deleted", idempotency_deleted, tx=tx)
+            self._metric(RETENTION_CLEANUP_RUNS_METRIC, tx=tx)
         return {
             "events_deleted": events_deleted,
             "event_processing_deleted": event_processing_deleted,
@@ -191,6 +202,44 @@ class EventBus:
             "audit_integrity_deleted": audit_integrity_deleted,
             "audit_log_deleted": audit_log_deleted,
             "idempotency_deleted": idempotency_deleted,
+        }
+
+    def retention_snapshot(self) -> dict[str, Any]:
+        metric_names = [RETENTION_CLEANUP_RUNS_METRIC, *RETENTION_DELETE_METRICS.values()]
+        placeholders = ", ".join("?" for _ in metric_names)
+        rows = self.db.fetch_all(
+            f"""SELECT metric_name, value, updated_at
+                FROM metrics_counters
+                WHERE metric_name IN ({placeholders})""",
+            *metric_names,
+        )
+        metrics = {str(row["metric_name"]): dict(row) for row in rows}
+
+        deleted_by_store: dict[str, int] = {}
+        last_delete_at_by_store: dict[str, str | None] = {}
+        for store, metric_name in RETENTION_DELETE_METRICS.items():
+            row = metrics.get(metric_name) or {}
+            deleted_by_store[store] = int(row.get("value") or 0)
+            last_delete_at_by_store[store] = (
+                str(row["updated_at"]) if row.get("updated_at") is not None else None
+            )
+
+        cleanup_row = metrics.get(RETENTION_CLEANUP_RUNS_METRIC) or {}
+        return {
+            "events_days": self.events_retention_days,
+            "event_processing_days": self.event_processing_retention_days,
+            "failure_log_days": self.failure_log_retention_days,
+            "audit_log_days": self.audit_log_retention_days,
+            "idempotency_keys_days": self.idempotency_retention_days,
+            "cleanup_runs_total": int(cleanup_row.get("value") or 0),
+            "last_cleanup_at_utc": (
+                str(cleanup_row["updated_at"])
+                if cleanup_row.get("updated_at") is not None
+                else None
+            ),
+            "deleted_rows_total": sum(deleted_by_store.values()),
+            "deleted_rows_by_store_total": deleted_by_store,
+            "last_delete_at_utc_by_store": last_delete_at_by_store,
         }
 
     def list_events(
