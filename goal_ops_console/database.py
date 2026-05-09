@@ -406,6 +406,39 @@ VALUES (5, 'planner_suggestion_reviews', datetime('now'));
 COMMIT;
 """,
     ),
+    (
+        6,
+        """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS planner_suggestions (
+  suggestion_id       TEXT PRIMARY KEY,
+  goal_id             TEXT NOT NULL,
+  suggestion_index    INTEGER NOT NULL,
+  planner_source      TEXT NOT NULL,
+  title               TEXT NOT NULL,
+  description         TEXT NOT NULL,
+  rationale           TEXT NOT NULL,
+  priority_hint       TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  FOREIGN KEY(goal_id) REFERENCES goals(goal_id),
+  UNIQUE(goal_id, suggestion_index)
+);
+ALTER TABLE tasks ADD COLUMN planner_suggestion_id TEXT;
+ALTER TABLE planner_suggestion_reviews ADD COLUMN suggestion_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_suggestions_goal_index
+ON planner_suggestions(goal_id, suggestion_index);
+CREATE INDEX IF NOT EXISTS idx_planner_suggestions_goal_created
+ON planner_suggestions(goal_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_tasks_planner_suggestion_id
+ON tasks(planner_suggestion_id);
+CREATE INDEX IF NOT EXISTS idx_planner_suggestion_reviews_suggestion_id
+ON planner_suggestion_reviews(suggestion_id);
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (6, 'planner_suggestions', datetime('now'));
+COMMIT;
+""",
+    ),
 )
 T = TypeVar("T")
 
@@ -675,6 +708,14 @@ class Database:
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency
 ON workflow_runs(workflow_id, idempotency_key)
 WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_suggestions_goal_index
+ON planner_suggestions(goal_id, suggestion_index);
+CREATE INDEX IF NOT EXISTS idx_planner_suggestions_goal_created
+ON planner_suggestions(goal_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_tasks_planner_suggestion_id
+ON tasks(planner_suggestion_id);
+CREATE INDEX IF NOT EXISTS idx_planner_suggestion_reviews_suggestion_id
+ON planner_suggestion_reviews(suggestion_id);
 """
         )
 

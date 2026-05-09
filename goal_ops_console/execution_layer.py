@@ -35,6 +35,7 @@ class ExecutionLayer:
         goal_id: str,
         title: str,
         planner_source: str | None = None,
+        planner_suggestion_id: str | None = None,
         planner_suggestion_index: int | None = None,
         planner_priority_hint: str | None = None,
         planner_suggestion_description: str | None = None,
@@ -52,6 +53,7 @@ class ExecutionLayer:
         if planner_source is not None:
             event_payload["planner"] = {
                 "source": planner_source,
+                "suggestion_id": planner_suggestion_id,
                 "suggestion_index": planner_suggestion_index,
                 "priority_hint": planner_priority_hint,
                 "rationale": planner_suggestion_rationale,
@@ -66,15 +68,16 @@ class ExecutionLayer:
         with self.db.transaction() as tx:
             tx.execute(
                 "INSERT INTO tasks "
-                "(task_id, goal_id, title, planner_source, planner_suggestion_index, "
+                "(task_id, goal_id, title, planner_source, planner_suggestion_id, planner_suggestion_index, "
                 "planner_priority_hint, planner_suggestion_description, planner_suggestion_rationale, "
                 "planner_operator_overrides, "
                 "created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 task_id,
                 goal_id,
                 title,
                 planner_source,
+                planner_suggestion_id,
                 planner_suggestion_index,
                 planner_priority_hint,
                 planner_suggestion_description,
@@ -114,6 +117,7 @@ class ExecutionLayer:
                        ts.goal_id,
                        t.title,
                        t.planner_source,
+                       t.planner_suggestion_id,
                        t.planner_suggestion_index,
                        t.planner_priority_hint,
                        t.planner_suggestion_description,
@@ -141,6 +145,7 @@ class ExecutionLayer:
                       ts.goal_id,
                       t.title,
                       t.planner_source,
+                      t.planner_suggestion_id,
                       t.planner_suggestion_index,
                       t.planner_priority_hint,
                       t.planner_suggestion_description,

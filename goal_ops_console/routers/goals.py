@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 
-from goal_ops_console.database import now_utc
+from goal_ops_console.database import new_id, now_utc
 from goal_ops_console.models import (
     ConflictError,
     DomainError,
@@ -62,9 +62,80 @@ def get_goal(goal_id: str, services: AppServices = Depends(get_services)) -> dic
     return services.state_manager.get_goal(goal_id)
 
 
-def _preview_goal_plan(goal_id: str, services: AppServices) -> dict:
+def _planner_suggestion_from_row(row: Any) -> dict:
+    return {
+        "suggestion_id": str(row["suggestion_id"]),
+        "title": str(row["title"]),
+        "description": str(row["description"]),
+        "rationale": str(row["rationale"]),
+        "priority_hint": str(row["priority_hint"]),
+        "source": str(row["planner_source"]),
+    }
+
+
+def _planner_suggestions_by_index(goal_id: str, services: AppServices) -> dict[int, dict]:
+    rows = services.db.fetch_all(
+        """SELECT suggestion_id,
+                  suggestion_index,
+                  planner_source,
+                  title,
+                  description,
+                  rationale,
+                  priority_hint
+           FROM planner_suggestions
+           WHERE goal_id = ?
+           ORDER BY suggestion_index ASC""",
+        goal_id,
+    )
+    return {int(row["suggestion_index"]): _planner_suggestion_from_row(row) for row in rows}
+
+
+def _persist_plan_suggestions(goal_id: str, plan: dict, services: AppServices) -> dict[int, dict]:
+    timestamp = now_utc()
+    with services.db.transaction() as tx:
+        for suggestion_index, suggestion in enumerate(plan["suggestions"]):
+            tx.execute(
+                """INSERT OR IGNORE INTO planner_suggestions
+                   (suggestion_id, goal_id, suggestion_index, planner_source, title,
+                    description, rationale, priority_hint, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                new_id(),
+                goal_id,
+                suggestion_index,
+                suggestion["source"],
+                suggestion["title"],
+                suggestion["description"],
+                suggestion["rationale"],
+                suggestion["priority_hint"],
+                timestamp,
+                timestamp,
+            )
+    return _planner_suggestions_by_index(goal_id, services)
+
+
+def _attach_persisted_suggestions(plan: dict, persisted_by_index: dict[int, dict]) -> None:
+    for suggestion_index, suggestion in enumerate(plan["suggestions"]):
+        persisted = persisted_by_index.get(suggestion_index)
+        if persisted is None:
+            suggestion["suggestion_id"] = None
+            continue
+        suggestion.update(persisted)
+
+
+def _preview_goal_plan(
+    goal_id: str,
+    services: AppServices,
+    *,
+    persist_suggestions: bool = False,
+) -> dict:
     goal = services.state_manager.get_goal(goal_id)
     plan = services.planner.create_plan(goal)
+    persisted_by_index = (
+        _persist_plan_suggestions(goal_id, plan, services)
+        if persist_suggestions
+        else _planner_suggestions_by_index(goal_id, services)
+    )
+    _attach_persisted_suggestions(plan, persisted_by_index)
     existing_by_title = _existing_tasks_by_title(goal_id, services)
     existing_by_index = _existing_tasks_by_suggestion_index(goal_id, services)
     reviews_by_index = _planner_reviews_by_index(goal_id, services)
@@ -138,6 +209,7 @@ def _create_task_from_suggestion(
         goal_id=goal_id,
         title=applied_suggestion["title"],
         planner_source=original_suggestion["source"],
+        planner_suggestion_id=original_suggestion.get("suggestion_id"),
         planner_suggestion_index=suggestion_index,
         planner_priority_hint=original_suggestion["priority_hint"],
         planner_suggestion_description=original_suggestion["description"],
@@ -163,6 +235,7 @@ def _planner_reviews_by_index(goal_id: str, services: AppServices) -> dict[int, 
                   decision,
                   comment,
                   task_id,
+                  suggestion_id,
                   planner_source,
                   suggestion_title,
                   suggestion_description,
@@ -690,6 +763,7 @@ def _get_planner_review(goal_id: str, suggestion_index: int, services: AppServic
                   decision,
                   comment,
                   task_id,
+                  suggestion_id,
                   planner_source,
                   suggestion_title,
                   suggestion_description,
@@ -751,15 +825,16 @@ def _create_planner_review(
     with services.db.transaction() as tx:
         tx.execute(
             """INSERT INTO planner_suggestion_reviews
-               (goal_id, suggestion_index, decision, comment, task_id, planner_source,
+               (goal_id, suggestion_index, decision, comment, task_id, suggestion_id, planner_source,
                 suggestion_title, suggestion_description, suggestion_rationale,
                 suggestion_priority_hint, operator_override, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             goal_id,
             suggestion_index,
             decision,
             normalized_comment,
             task_id,
+            suggestion.get("suggestion_id"),
             suggestion["source"],
             suggestion["title"],
             suggestion["description"],
@@ -779,6 +854,7 @@ def _create_planner_review(
                 "decision": decision,
                 "comment": normalized_comment,
                 "task_id": task_id,
+                "suggestion_id": suggestion.get("suggestion_id"),
                 "source": suggestion["source"],
             },
             tx=tx,
@@ -802,15 +878,16 @@ def _create_planner_reviews(
         for suggestion_index, suggestion in resolved_suggestions:
             tx.execute(
                 """INSERT INTO planner_suggestion_reviews
-                   (goal_id, suggestion_index, decision, comment, task_id, planner_source,
+                   (goal_id, suggestion_index, decision, comment, task_id, suggestion_id, planner_source,
                     suggestion_title, suggestion_description, suggestion_rationale,
                     suggestion_priority_hint, operator_override, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 goal_id,
                 suggestion_index,
                 decision,
                 normalized_comment,
                 None,
+                suggestion.get("suggestion_id"),
                 suggestion["source"],
                 suggestion["title"],
                 suggestion["description"],
@@ -830,6 +907,7 @@ def _create_planner_reviews(
                     "decision": decision,
                     "comment": normalized_comment,
                     "task_id": None,
+                    "suggestion_id": suggestion.get("suggestion_id"),
                     "source": suggestion["source"],
                 },
                 tx=tx,
@@ -874,6 +952,7 @@ def _reopen_planner_review(goal_id: str, suggestion_index: int, services: AppSer
             {
                 "goal_id": goal_id,
                 "suggestion_index": suggestion_index,
+                "suggestion_id": existing_review.get("suggestion_id"),
                 "cleared_decision": existing_review["decision"],
                 "cleared_comment": existing_review["comment"],
                 "source": existing_review["planner_source"],
@@ -886,7 +965,7 @@ def _reopen_planner_review(goal_id: str, suggestion_index: int, services: AppSer
 
 @router.post("/{goal_id}/plan", response_model=PlannerPreviewResponse)
 def preview_goal_plan(goal_id: str, services: AppServices = Depends(get_services)) -> dict:
-    return _preview_goal_plan(goal_id, services)
+    return _preview_goal_plan(goal_id, services, persist_suggestions=True)
 
 
 @router.get("/{goal_id}/plan/reviews", response_model=PlannerReviewListResponse)
@@ -952,7 +1031,7 @@ def review_plan_suggestion(
     request: PlannerReviewDecisionRequest,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    plan = _preview_goal_plan(goal_id, services)
+    plan = _preview_goal_plan(goal_id, services, persist_suggestions=True)
     suggestion = _get_plan_suggestion(plan, request.suggestion_index, goal_id)
     if suggestion["task_exists"]:
         raise ConflictError(
@@ -982,7 +1061,7 @@ def review_plan_suggestions_bulk(
     request: PlannerBulkReviewDecisionRequest,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    plan = _preview_goal_plan(goal_id, services)
+    plan = _preview_goal_plan(goal_id, services, persist_suggestions=True)
     _ensure_unique_suggestion_indexes(goal_id, request.suggestion_indexes)
     existing_reviews_by_index = _planner_reviews_by_index(goal_id, services)
     resolved_suggestions = []
@@ -1027,7 +1106,7 @@ def reopen_plan_suggestion_review(
     suggestion_index: int,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    plan = _preview_goal_plan(goal_id, services)
+    plan = _preview_goal_plan(goal_id, services, persist_suggestions=True)
     _get_plan_suggestion(plan, suggestion_index, goal_id)
     cleared_review = _reopen_planner_review(goal_id, suggestion_index, services)
     refreshed_plan = _preview_goal_plan(goal_id, services)
@@ -1046,7 +1125,7 @@ def create_task_from_plan_suggestion(
     request: PlannerTaskCreateRequest,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    plan = _preview_goal_plan(goal_id, services)
+    plan = _preview_goal_plan(goal_id, services, persist_suggestions=True)
     suggestion = _get_plan_suggestion(plan, request.suggestion_index, goal_id)
     _ensure_suggestion_can_be_created(goal_id, request.suggestion_index, services)
     if suggestion["task_exists"]:
@@ -1094,7 +1173,7 @@ def create_tasks_from_plan_suggestions(
     request: PlannerBulkTaskCreateRequest,
     services: AppServices = Depends(get_services),
 ) -> dict:
-    plan = _preview_goal_plan(goal_id, services)
+    plan = _preview_goal_plan(goal_id, services, persist_suggestions=True)
     for suggestion_index in request.suggestion_indexes:
         _get_plan_suggestion(plan, suggestion_index, goal_id)
     requested_indexes = set(request.suggestion_indexes)
