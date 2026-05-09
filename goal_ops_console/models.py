@@ -228,6 +228,20 @@ class PlannerReviewHandoffResponse(BaseModel):
     pending_suggestions: list[PlannerHandoffSuggestionItem]
 
 
+class PlannerGlobalHandoffFollowUpAction(BaseModel):
+    id: Literal[
+        "review_pending_suggestion",
+        "resolve_deferred_followup",
+        "monitor_created_tasks",
+        "no_action_required",
+    ]
+    label: str
+    description: str
+    action_type: Literal["open_plan_preview", "select_goal_tasks", "none"]
+    target: dict[str, Any] = Field(default_factory=dict)
+    mutates: bool = False
+
+
 class PlannerGlobalHandoffItem(BaseModel):
     goal_id: str
     goal_title: str
@@ -250,6 +264,7 @@ class PlannerGlobalHandoffItem(BaseModel):
     next_pending_suggestion: PlannerHandoffSuggestionItem | None = None
     latest_deferred_suggestion: PlannerHandoffSuggestionItem | None = None
     created_task_statuses: dict[str, int] = Field(default_factory=dict)
+    follow_up_actions: list[PlannerGlobalHandoffFollowUpAction] = Field(default_factory=list)
 
 
 class PlannerGlobalHandoffSummary(BaseModel):

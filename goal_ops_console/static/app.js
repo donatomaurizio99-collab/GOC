@@ -1042,6 +1042,59 @@ function plannerGlobalHandoffReasonLabel(reason) {
   return labels[reason] || "Needs attention";
 }
 
+function plannerGlobalHandoffActions(item) {
+  if (Array.isArray(item?.follow_up_actions) && item.follow_up_actions.length) {
+    return item.follow_up_actions;
+  }
+  const pendingSuggestion = firstPlannerHandoffSuggestion(item, "next_pending_suggestion", "next_pending");
+  const deferredSuggestion = firstPlannerHandoffSuggestion(
+    item,
+    "latest_deferred_suggestion",
+    "first_deferred_suggestion",
+    "first_deferred",
+  );
+  const pendingIndex = plannerHandoffSuggestionIndex(pendingSuggestion);
+  const deferredIndex = plannerHandoffSuggestionIndex(deferredSuggestion);
+  if (pendingSuggestion) {
+    return [{
+      id: "review_pending_suggestion",
+      label: "Review next pending",
+      description: "Open the next pending planner suggestion and explicitly choose create, defer, or reject.",
+      action_type: "open_plan_preview",
+      target: { goal_id: item.goal_id, suggestion_index: pendingIndex, focus_next_pending: true },
+      mutates: false,
+    }];
+  }
+  if (deferredSuggestion) {
+    return [{
+      id: "resolve_deferred_followup",
+      label: "Resolve deferred follow-up",
+      description: "Open the latest deferred suggestion and decide whether to reopen it or leave it deferred.",
+      action_type: "open_plan_preview",
+      target: { goal_id: item.goal_id, suggestion_index: deferredIndex },
+      mutates: false,
+    }];
+  }
+  if (plannerGlobalHandoffNeedsAttention(item) && ((item?.summary?.created || 0) > 0 || (item?.created || 0) > 0)) {
+    return [{
+      id: "monitor_created_tasks",
+      label: "Inspect created tasks",
+      description: "Open this goal's task list and monitor created planner tasks without changing status.",
+      action_type: "select_goal_tasks",
+      target: { goal_id: item.goal_id },
+      mutates: false,
+    }];
+  }
+  return [{
+    id: "no_action_required",
+    label: "No immediate action",
+    description: "This planner handoff is clear; continue monitoring or open the preview if context is needed.",
+    action_type: "none",
+    target: { goal_id: item.goal_id },
+    mutates: false,
+  }];
+}
+
 function plannerGlobalHandoffVisibleItems(payload) {
   return filterRows(plannerGlobalHandoffItems(payload), (item) => [
     item.goal_id,
@@ -1057,6 +1110,12 @@ function plannerGlobalHandoffVisibleItems(payload) {
     item.latest_deferred_suggestion?.title || "",
     item.first_deferred_suggestion?.title || "",
     item.first_deferred?.title || "",
+    ...plannerGlobalHandoffActions(item).flatMap((action) => [
+      action.id,
+      action.label,
+      action.description,
+      action.action_type,
+    ]),
   ]);
 }
 
@@ -1089,6 +1148,55 @@ function firstPlannerHandoffSuggestion(item, key, fallbackKey, alternateKey = nu
 function plannerHandoffSuggestionIndex(item) {
   const index = Number.parseInt(item?.suggestion_index, 10);
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function renderPlannerFollowUpActionButton(action, item) {
+  const target = action?.target || {};
+  const goalId = target.goal_id || item.goal_id;
+  if (action.action_type === "open_plan_preview") {
+    const suggestionIndex = Number.parseInt(target.suggestion_index, 10);
+    const suggestionValue = Number.isInteger(suggestionIndex) && suggestionIndex >= 0 ? String(suggestionIndex) : "";
+    const focusNextPending = target.focus_next_pending ? ' data-plan-focus-next-pending="true"' : "";
+    return `
+      <button
+        type="button"
+        class="secondary"
+        data-plan-goal="${escapeHtml(goalId)}"
+        data-plan-focus-suggestion="${escapeHtml(suggestionValue)}"${focusNextPending}
+      >${escapeHtml(action.label || "Open Plan Preview")}</button>
+    `;
+  }
+  if (action.action_type === "select_goal_tasks") {
+    return `
+      <button
+        type="button"
+        class="secondary"
+        data-plan-handoff-task-goal="${escapeHtml(goalId)}"
+      >${escapeHtml(action.label || "Inspect tasks")}</button>
+    `;
+  }
+  return `<button type="button" class="secondary" disabled>${escapeHtml(action.label || "No action")}</button>`;
+}
+
+function renderPlannerFollowUpActions(item) {
+  const actions = plannerGlobalHandoffActions(item);
+  if (!actions.length) {
+    return "";
+  }
+  return `
+    <div class="planner-handoff-actions">
+      <div class="meta"><strong>Suggested follow-up actions</strong> &middot; read-only</div>
+      ${actions.map((action) => `
+        <div class="planner-handoff-action">
+          <div>
+            <div class="entity-title">${escapeHtml(action.label || "Follow-up action")}</div>
+            <p class="meta">${escapeHtml(action.description || "Review this planner handoff before taking action.")}</p>
+          </div>
+          ${renderPlannerFollowUpActionButton(action, item)}
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderPlannerGlobalHandoffs(payload) {
@@ -1125,36 +1233,6 @@ function renderPlannerGlobalHandoffs(payload) {
   const itemMarkup = items.length
     ? items.map((item) => {
       const itemSummary = item.summary || {};
-      const pendingSuggestion = firstPlannerHandoffSuggestion(item, "next_pending_suggestion", "next_pending");
-      const deferredSuggestion = firstPlannerHandoffSuggestion(
-        item,
-        "latest_deferred_suggestion",
-        "first_deferred_suggestion",
-        "first_deferred",
-      );
-      const pendingIndex = plannerHandoffSuggestionIndex(pendingSuggestion);
-      const deferredIndex = plannerHandoffSuggestionIndex(deferredSuggestion);
-      const pendingAction = pendingSuggestion
-        ? `
-          <button
-            type="button"
-            class="secondary"
-            data-plan-goal="${escapeHtml(item.goal_id)}"
-            data-plan-focus-suggestion="${escapeHtml(String(pendingIndex ?? ""))}"
-            data-plan-focus-next-pending="true"
-          >Open next pending</button>
-        `
-        : "";
-      const deferredAction = deferredSuggestion
-        ? `
-          <button
-            type="button"
-            class="secondary"
-            data-plan-goal="${escapeHtml(item.goal_id)}"
-            data-plan-focus-suggestion="${escapeHtml(String(deferredIndex ?? ""))}"
-          >Open deferred follow-up</button>
-        `
-        : "";
       const needsAttention = plannerGlobalHandoffNeedsAttention(item);
       const attentionLabel = needsAttention ? "Needs attention" : "Ready";
       const attentionReason = plannerGlobalHandoffReason(item);
@@ -1185,10 +1263,9 @@ function renderPlannerGlobalHandoffs(payload) {
             <div class="entity-metric"><span class="meta">Rejected</span><strong>${itemSummary.rejected || 0}</strong></div>
             <div class="entity-metric"><span class="meta">Pending</span><strong>${itemSummary.pending || 0}</strong></div>
           </div>
+          ${renderPlannerFollowUpActions(item)}
           <div class="actions" style="margin-top:0.75rem;">
             <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
-            ${pendingAction}
-            ${deferredAction}
           </div>
         </article>
       `;
@@ -2920,6 +2997,7 @@ document.addEventListener("click", async (event) => {
   const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
   const planHandoffsStatus = event.target.dataset.planHandoffsStatus;
+  const planHandoffTaskGoal = event.target.dataset.planHandoffTaskGoal;
   const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
   const planHandoffsRefresh = event.target.dataset.planHandoffsRefresh;
   const planFocusSuggestion = event.target.dataset.planFocusSuggestion;
@@ -2980,6 +3058,17 @@ document.addEventListener("click", async (event) => {
     if (planHandoffsStatus) {
       plannerHandoffStatus = planHandoffsStatus;
       await refreshPlannerGlobalHandoffs();
+    }
+
+    if (planHandoffTaskGoal) {
+      selectedGoalId = planHandoffTaskGoal;
+      document.getElementById("task-goal-id").value = planHandoffTaskGoal;
+      document.getElementById("event-correlation-id").value = planHandoffTaskGoal;
+      document.getElementById("trace-goal-id").value = planHandoffTaskGoal;
+      document.getElementById("fault-goal-id").value = planHandoffTaskGoal;
+      setActiveJump("tasks-section");
+      await refreshTasks();
+      updateSelectedGoalLabel();
     }
 
     if (planFollowupsRefresh) {
@@ -3082,7 +3171,8 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal || planInboxStatus || planHandoffsStatus || planFollowupsRefresh || planHandoffsRefresh
+        : goalAction || planGoal || planInboxStatus || planHandoffsStatus || planHandoffTaskGoal
+          || planFollowupsRefresh || planHandoffsRefresh
           || planFollowupReopenGoal || planNextReview
           ? "goal-error"
           : "task-error";

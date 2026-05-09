@@ -73,17 +73,51 @@ def test_planner_global_handoffs_mixed_goals_rollup(client):
     assert items_by_goal[pending_goal["goal_id"]]["last_reviewed_at"] is None
     assert items_by_goal[pending_goal["goal_id"]]["pending"] == pending_total
     assert items_by_goal[pending_goal["goal_id"]]["next_pending_suggestion"]["suggestion_index"] == 0
+    assert items_by_goal[pending_goal["goal_id"]]["follow_up_actions"][0]["id"] == "review_pending_suggestion"
+    assert items_by_goal[pending_goal["goal_id"]]["follow_up_actions"][0]["action_type"] == "open_plan_preview"
+    assert items_by_goal[pending_goal["goal_id"]]["follow_up_actions"][0]["target"] == {
+        "goal_id": pending_goal["goal_id"],
+        "suggestion_index": 0,
+        "focus_next_pending": True,
+    }
     assert items_by_goal[deferred_goal["goal_id"]]["needs_operator_attention"] is True
     assert items_by_goal[deferred_goal["goal_id"]]["attention_reason"] == "deferred_followup"
     assert items_by_goal[deferred_goal["goal_id"]]["deferred"] == deferred_total
     assert items_by_goal[deferred_goal["goal_id"]]["latest_deferred_suggestion"]["comment"] == "Needs owner."
     assert items_by_goal[deferred_goal["goal_id"]]["last_reviewed_at"] is not None
+    assert items_by_goal[deferred_goal["goal_id"]]["follow_up_actions"][0]["id"] == "resolve_deferred_followup"
+    assert (
+        items_by_goal[deferred_goal["goal_id"]]["follow_up_actions"][0]["target"]["suggestion_index"]
+        == items_by_goal[deferred_goal["goal_id"]]["latest_deferred_suggestion"]["suggestion_index"]
+    )
     assert items_by_goal[created_goal["goal_id"]]["needs_operator_attention"] is True
     assert items_by_goal[created_goal["goal_id"]]["attention_reason"] == "created_task_not_terminal"
     assert items_by_goal[created_goal["goal_id"]]["created_task_statuses"] == {"pending": created_total}
+    assert items_by_goal[created_goal["goal_id"]]["follow_up_actions"][0]["id"] == "monitor_created_tasks"
+    assert items_by_goal[created_goal["goal_id"]]["follow_up_actions"][0]["action_type"] == "select_goal_tasks"
+    assert items_by_goal[created_goal["goal_id"]]["follow_up_actions"][0]["target"]["status_counts"] == {
+        "pending": created_total,
+    }
     assert items_by_goal[rejected_goal["goal_id"]]["needs_operator_attention"] is False
     assert items_by_goal[rejected_goal["goal_id"]]["attention_reason"] == "ready"
     assert items_by_goal[rejected_goal["goal_id"]]["rejected"] == rejected_total
+    assert items_by_goal[rejected_goal["goal_id"]]["follow_up_actions"] == [
+        {
+            "id": "no_action_required",
+            "label": "No immediate action",
+            "description": (
+                "This planner handoff is clear; continue monitoring or open the preview if context is needed."
+            ),
+            "action_type": "none",
+            "target": {"goal_id": rejected_goal["goal_id"]},
+            "mutates": False,
+        }
+    ]
+    assert all(
+        action["mutates"] is False
+        for item in items_by_goal.values()
+        for action in item["follow_up_actions"]
+    )
 
 
 def test_planner_global_handoffs_read_only(client):
