@@ -16894,6 +16894,119 @@ def test_272zc_goal_plan_review_audit_unknown_goal_returns_404(client):
     assert response.json()["detail"] == "Goal missing-goal not found"
 
 
+def test_272zd_system_planner_metrics_empty_state(client):
+    response = client.get("/system/planner_metrics")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["semantics"] == {
+        "current_decisions": ["pending", "created", "deferred", "rejected"],
+        "historical_event_counts": ["reopened"],
+        "pending_age_basis": "goal_created_at",
+    }
+    assert payload["goals_total"] == 0
+    assert payload["suggestions_total"] == 0
+    assert payload["counts_by_decision"] == {
+        "pending": 0,
+        "created": 0,
+        "deferred": 0,
+        "rejected": 0,
+        "reopened": 0,
+    }
+    assert payload["counts_by_source"] == {}
+    assert payload["pending_age"] == {
+        "basis": "goal_created_at",
+        "sample_count": 0,
+        "median_seconds": None,
+        "oldest_seconds": None,
+        "oldest_goal_id": None,
+        "oldest_goal_title": None,
+        "oldest_suggestion_index": None,
+    }
+    assert payload["deferred_followups"] == {"over_7d": 0, "oldest_age_seconds": None}
+    assert payload["created_task_statuses_from_planner"] == {}
+
+
+def test_272ze_system_planner_metrics_counts_decisions_and_remains_read_only(client):
+    primary_goal = client.post(
+        "/goals",
+        json={"title": "Metrics primary planner goal", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    secondary_goal = client.post(
+        "/goals",
+        json={"title": "Metrics deferred planner goal", "urgency": 0.5, "value": 0.6, "deadline_score": 0.1},
+    ).json()
+    primary_total = len(client.post(f"/goals/{primary_goal['goal_id']}/plan").json()["suggestions"])
+    secondary_total = len(client.post(f"/goals/{secondary_goal['goal_id']}/plan").json()["suggestions"])
+
+    client.post(f"/goals/{primary_goal['goal_id']}/plan/tasks", json={"suggestion_index": 0})
+    client.post(
+        f"/goals/{primary_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 1, "decision": "deferred", "comment": "Measure reopen."},
+    )
+    client.post(
+        f"/goals/{primary_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 2, "decision": "rejected", "comment": "Out of scope."},
+    )
+    client.delete(f"/goals/{primary_goal['goal_id']}/plan/reviews/1")
+    client.post(
+        f"/goals/{secondary_goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 0, "decision": "deferred", "comment": "Old follow-up."},
+    )
+
+    services = client.app.state.services
+    services.db.execute(
+        "UPDATE goals SET created_at = ? WHERE goal_id IN (?, ?)",
+        "2026-01-01 00:00:00",
+        primary_goal["goal_id"],
+        secondary_goal["goal_id"],
+    )
+    services.db.execute(
+        "UPDATE planner_suggestion_reviews SET updated_at = ? WHERE goal_id = ? AND suggestion_index = 0",
+        "2026-01-01 00:00:00",
+        secondary_goal["goal_id"],
+    )
+    before_tasks = services.db.fetch_scalar("SELECT COUNT(*) FROM tasks")
+    before_reviews = services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestion_reviews")
+    before_events = services.db.fetch_scalar("SELECT COUNT(*) FROM events")
+
+    response = client.get("/system/planner_metrics")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM tasks") == before_tasks
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestion_reviews") == before_reviews
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM events") == before_events
+    assert payload["goals_total"] == 2
+    assert payload["suggestions_total"] == primary_total + secondary_total
+    assert payload["counts_by_decision"] == {
+        "pending": primary_total + secondary_total - 3,
+        "created": 1,
+        "deferred": 1,
+        "rejected": 1,
+        "reopened": 1,
+    }
+    assert payload["counts_by_source"]["deterministic_planner"] == {
+        "total_suggestions": primary_total + secondary_total,
+        "pending": primary_total + secondary_total - 3,
+        "created": 1,
+        "deferred": 1,
+        "rejected": 1,
+        "reopened": 1,
+    }
+    assert payload["pending_age"]["basis"] == "goal_created_at"
+    assert payload["pending_age"]["sample_count"] == primary_total + secondary_total - 3
+    assert payload["pending_age"]["median_seconds"] > 0
+    assert payload["pending_age"]["oldest_seconds"] > 0
+    assert payload["pending_age"]["oldest_goal_id"] in {
+        primary_goal["goal_id"],
+        secondary_goal["goal_id"],
+    }
+    assert payload["deferred_followups"]["over_7d"] == 1
+    assert payload["deferred_followups"]["oldest_age_seconds"] >= 7 * 24 * 60 * 60
+    assert payload["created_task_statuses_from_planner"] == {"pending": 1}
+
+
 def test_273_goal_plan_task_create_unknown_goal_returns_404(client):
     response = client.post("/goals/missing-goal/plan/tasks", json={"suggestion_index": 0})
 

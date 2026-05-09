@@ -476,6 +476,220 @@ def _build_slo_payload(services: AppServices) -> dict[str, Any]:
     }
 
 
+def _parse_utc_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _age_seconds(now: datetime, value: object) -> float | None:
+    parsed = _parse_utc_timestamp(value)
+    if parsed is None:
+        return None
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    midpoint = len(sorted_values) // 2
+    if len(sorted_values) % 2:
+        return sorted_values[midpoint]
+    return (sorted_values[midpoint - 1] + sorted_values[midpoint]) / 2
+
+
+def _planner_metrics_source_bucket() -> dict[str, int]:
+    return {
+        "total_suggestions": 0,
+        "pending": 0,
+        "created": 0,
+        "deferred": 0,
+        "rejected": 0,
+        "reopened": 0,
+    }
+
+
+def _planner_review_rows_by_goal_index(services: AppServices) -> dict[tuple[str, int], dict[str, Any]]:
+    rows = services.db.fetch_all(
+        """SELECT goal_id,
+                  suggestion_index,
+                  decision,
+                  planner_source,
+                  updated_at
+           FROM planner_suggestion_reviews"""
+    )
+    return {
+        (str(row["goal_id"]), int(row["suggestion_index"])): dict(row)
+        for row in rows
+    }
+
+
+def _planner_task_rows_by_goal_index(services: AppServices) -> dict[tuple[str, int], dict[str, Any]]:
+    rows = services.db.fetch_all(
+        """SELECT t.goal_id,
+                  t.task_id,
+                  t.planner_source,
+                  t.planner_suggestion_index,
+                  COALESCE(ts.status, 'unknown') AS status
+           FROM tasks t
+           LEFT JOIN task_state ts ON ts.task_id = t.task_id
+           WHERE t.planner_source IS NOT NULL
+             AND t.planner_suggestion_index IS NOT NULL"""
+    )
+    tasks_by_index: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        key = (str(row["goal_id"]), int(row["planner_suggestion_index"]))
+        tasks_by_index.setdefault(key, dict(row))
+    return tasks_by_index
+
+
+def _planner_reopened_counts_by_source(services: AppServices) -> dict[str, int]:
+    rows = services.db.fetch_all(
+        "SELECT payload FROM events WHERE event_type = 'planner.suggestion_review_reopened'"
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload"] or "{}"))
+        except json.JSONDecodeError:
+            payload = {}
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        source = str(data.get("source") or "unknown") if isinstance(data, dict) else "unknown"
+        counts[source] = counts.get(source, 0) + 1
+    return counts
+
+
+def _planner_created_task_statuses(services: AppServices) -> dict[str, int]:
+    rows = services.db.fetch_all(
+        """SELECT COALESCE(ts.status, 'unknown') AS status,
+                  COUNT(*) AS total
+           FROM tasks t
+           LEFT JOIN task_state ts ON ts.task_id = t.task_id
+           WHERE t.planner_source IS NOT NULL
+           GROUP BY COALESCE(ts.status, 'unknown')
+           ORDER BY status ASC"""
+    )
+    return {str(row["status"]): int(row["total"] or 0) for row in rows}
+
+
+def _build_planner_metrics_payload(services: AppServices) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    goals = services.state_manager.list_goals()
+    reviews_by_index = _planner_review_rows_by_goal_index(services)
+    tasks_by_index = _planner_task_rows_by_goal_index(services)
+    reopened_by_source = _planner_reopened_counts_by_source(services)
+    counts_by_decision = {
+        "pending": 0,
+        "created": 0,
+        "deferred": 0,
+        "rejected": 0,
+        "reopened": sum(reopened_by_source.values()),
+    }
+    counts_by_source: dict[str, dict[str, int]] = {}
+    pending_ages: list[float] = []
+    oldest_pending: dict[str, Any] | None = None
+    deferred_over_7d = 0
+    oldest_deferred_age_seconds: float | None = None
+
+    def source_bucket(source: str) -> dict[str, int]:
+        return counts_by_source.setdefault(source, _planner_metrics_source_bucket())
+
+    for source, reopened_count in reopened_by_source.items():
+        source_bucket(source)["reopened"] += reopened_count
+
+    for goal in goals:
+        plan = services.planner.create_plan(goal)
+        goal_id = str(goal["goal_id"])
+        goal_created_at = goal.get("created_at")
+        goal_pending_age = _age_seconds(now, goal_created_at)
+        for suggestion_index, _suggestion in enumerate(plan["suggestions"]):
+            review = reviews_by_index.get((goal_id, suggestion_index))
+            task = tasks_by_index.get((goal_id, suggestion_index))
+            source = str(
+                (review or {}).get("planner_source")
+                or (task or {}).get("planner_source")
+                or plan["source"]
+            )
+            bucket = source_bucket(source)
+            bucket["total_suggestions"] += 1
+            if review is not None:
+                decision = str(review["decision"])
+            elif task is not None:
+                decision = "created"
+            else:
+                decision = "pending"
+            counts_by_decision[decision] += 1
+            bucket[decision] += 1
+            if decision == "pending" and goal_pending_age is not None:
+                pending_ages.append(goal_pending_age)
+                if oldest_pending is None or goal_pending_age > oldest_pending["age_seconds"]:
+                    oldest_pending = {
+                        "goal_id": goal_id,
+                        "goal_title": goal.get("title"),
+                        "suggestion_index": suggestion_index,
+                        "age_seconds": goal_pending_age,
+                    }
+            if review is not None and decision == "deferred":
+                deferred_age = _age_seconds(now, review.get("updated_at"))
+                if deferred_age is None:
+                    continue
+                if deferred_age >= 7 * 24 * 60 * 60:
+                    deferred_over_7d += 1
+                if oldest_deferred_age_seconds is None or deferred_age > oldest_deferred_age_seconds:
+                    oldest_deferred_age_seconds = deferred_age
+
+    return {
+        "timestamp_utc": _utc_iso(),
+        "spec_version": SPEC_VERSION,
+        "semantics": {
+            "current_decisions": ["pending", "created", "deferred", "rejected"],
+            "historical_event_counts": ["reopened"],
+            "pending_age_basis": "goal_created_at",
+        },
+        "goals_total": len(goals),
+        "suggestions_total": (
+            counts_by_decision["pending"]
+            + counts_by_decision["created"]
+            + counts_by_decision["deferred"]
+            + counts_by_decision["rejected"]
+        ),
+        "counts_by_decision": counts_by_decision,
+        "counts_by_source": counts_by_source,
+        "pending_age": {
+            "basis": "goal_created_at",
+            "sample_count": len(pending_ages),
+            "median_seconds": _median(pending_ages),
+            "oldest_seconds": oldest_pending["age_seconds"] if oldest_pending is not None else None,
+            "oldest_goal_id": oldest_pending["goal_id"] if oldest_pending is not None else None,
+            "oldest_goal_title": oldest_pending["goal_title"] if oldest_pending is not None else None,
+            "oldest_suggestion_index": oldest_pending["suggestion_index"] if oldest_pending is not None else None,
+        },
+        "deferred_followups": {
+            "over_7d": deferred_over_7d,
+            "oldest_age_seconds": oldest_deferred_age_seconds,
+        },
+        "created_task_statuses_from_planner": _planner_created_task_statuses(services),
+    }
+
+
 def _resolve_diagnostics_dir(configured_path: str) -> Path:
     normalized = configured_path.strip()
     if normalized:
@@ -695,6 +909,11 @@ def metrics_status(
         "metrics": services.observability.list_metrics(prefix=prefix, limit=limit),
         "summary": services.observability.metrics_summary(),
     }
+
+
+@router.get("/system/planner_metrics")
+def planner_metrics_status(services: AppServices = Depends(get_services)) -> dict[str, Any]:
+    return _build_planner_metrics_payload(services)
 
 
 @router.get("/system/audit")
