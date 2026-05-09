@@ -677,8 +677,27 @@
       color: var(--ok);
       font-weight: 600;
     }
+    .planner-created-task-preview {
+      display: grid;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      padding: 0.65rem;
+      border: 1px solid rgba(31, 27, 23, 0.08);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.5);
+    }
+    .planner-created-task-preview-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.55rem;
+      border-radius: 12px;
+      background: rgba(35, 102, 173, 0.06);
+    }
     @media (max-width: 720px) {
-      .planner-handoff-action {
+      .planner-handoff-action,
+      .planner-created-task-preview-item {
         grid-template-columns: 1fr;
       }
     }

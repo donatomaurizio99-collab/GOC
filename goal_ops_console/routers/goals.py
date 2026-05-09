@@ -35,6 +35,7 @@ _PLANNER_REVIEW_AUDIT_EVENT_TYPES = (
     "planner.suggestion_reviewed",
     "planner.suggestion_review_reopened",
 )
+_PLANNER_GLOBAL_CREATED_TASK_PREVIEW_LIMIT = 3
 
 
 @router.get("")
@@ -365,6 +366,18 @@ def _created_task_statuses(handoff: dict) -> dict[str, int]:
     return statuses
 
 
+def _planner_created_tasks_preview(handoff: dict) -> list[dict]:
+    sorted_tasks = sorted(
+        handoff["created_tasks"],
+        key=lambda task: (
+            task["task_status"] == "succeeded",
+            task["suggestion_index"],
+            task["task_id"],
+        ),
+    )
+    return sorted_tasks[:_PLANNER_GLOBAL_CREATED_TASK_PREVIEW_LIMIT]
+
+
 def _non_terminal_created_task_statuses(handoff: dict) -> dict[str, int]:
     statuses: dict[str, int] = {}
     for task in handoff["created_tasks"]:
@@ -490,6 +503,7 @@ def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
         ),
         "latest_deferred_suggestion": latest_deferred_suggestion,
         "created_task_statuses": _created_task_statuses(handoff),
+        "created_tasks_preview": _planner_created_tasks_preview(handoff),
         "follow_up_actions": _planner_global_follow_up_actions(handoff),
     }
 

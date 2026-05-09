@@ -16157,6 +16157,65 @@ def test_272n4_goal_plan_handoff_unknown_goal_returns_404(client):
     assert response.json()["detail"] == "Goal missing-goal not found"
 
 
+def test_272n5_goal_planner_global_handoffs_exposes_created_task_preview(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Global handoff created task drilldown", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    total = len(preview["suggestions"])
+    created = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={
+            "suggestion_indexes": list(range(total)),
+            "overrides": {
+                0: {"title": "Succeeded planner task"},
+                1: {"title": "Failed planner task"},
+                2: {"title": "Pending planner task"},
+                3: {"title": "Later pending planner task"},
+            },
+        },
+    ).json()
+    created_by_index = {item["suggestion_index"]: item for item in created["created"]}
+
+    client.post(f"/tasks/{created_by_index[0]['task']['task_id']}/success")
+    client.post(
+        f"/tasks/{created_by_index[1]['task']['task_id']}/fail",
+        json={"failure_type": "SkillFailure", "error_message": "Preview this task first"},
+    )
+    before_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    response = client.get("/goals/planner/handoffs?status=all")
+    payload = response.json()
+    item = next(entry for entry in payload["items"] if entry["goal_id"] == goal["goal_id"])
+    after_tasks = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+
+    assert response.status_code == 200
+    assert len(before_tasks) == total
+    assert after_tasks == before_tasks
+    assert item["attention_reason"] == "created_task_not_terminal"
+    assert item["created_task_statuses"] == {
+        "succeeded": 1,
+        "failed": 1,
+        "pending": total - 2,
+    }
+    assert item["summary"]["created"] == total
+    assert [task["suggestion_index"] for task in item["created_tasks_preview"]] == [1, 2, 3]
+    assert [task["task_status"] for task in item["created_tasks_preview"]] == ["failed", "pending", "pending"]
+    assert [task["task_title"] for task in item["created_tasks_preview"]] == [
+        "Failed planner task",
+        "Pending planner task",
+        "Later pending planner task",
+    ]
+    assert item["created_tasks_preview"][0]["task_id"] == created_by_index[1]["task"]["task_id"]
+    assert item["follow_up_actions"][0]["id"] == "monitor_created_tasks"
+    assert item["follow_up_actions"][0]["target"]["task_ids"] == [
+        created_by_index[1]["task"]["task_id"],
+        created_by_index[2]["task"]["task_id"],
+        created_by_index[3]["task"]["task_id"],
+    ]
+
+
 def test_272o_goal_planner_review_inbox_returns_goal_rollup(client):
     pending_goal = client.post(
         "/goals",
@@ -16285,6 +16344,8 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "function plannerGlobalHandoffReason(item)" in app_js
     assert "function plannerGlobalHandoffReasonLabel(reason)" in app_js
     assert "function plannerGlobalHandoffActions(item)" in app_js
+    assert "function plannerCreatedTaskPreviewItems(item)" in app_js
+    assert "function renderPlannerCreatedTaskPreview(item)" in app_js
     assert "function renderPlannerFollowUpActions(item)" in app_js
     assert "function renderPlannerFollowUpActionButton(action, item)" in app_js
     assert "function loadPlannerFollowUpContinuity()" in app_js
@@ -16306,7 +16367,9 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "data-plan-follow-up-goal-title" in app_js
     assert "attention_reason" in app_js
     assert "follow_up_actions" in app_js
+    assert "created_tasks_preview" in app_js
     assert "Suggested follow-up actions" in app_js
+    assert "Created planner tasks" in app_js
     assert "Last opened follow-up" in app_js
     assert "Follow-up continuity" in app_js
     assert "/plan/handoff" in app_js
@@ -16331,6 +16394,8 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert ".planner-handoff-actions" in template
     assert ".planner-handoff-action" in template
     assert ".planner-handoff-action-continuity" in template
+    assert ".planner-created-task-preview" in template
+    assert ".planner-created-task-preview-item" in template
     assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
     assert '"static_asset_version": _static_asset_version()' in system_router
 
