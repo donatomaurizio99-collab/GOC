@@ -623,6 +623,18 @@
     .planner-handoff-item {
       background: rgba(255, 255, 255, 0.62);
     }
+    #planner-global-handoffs {
+      border-color: rgba(35, 102, 173, 0.16);
+      background:
+        radial-gradient(circle at top left, rgba(35, 102, 173, 0.09), transparent 34%),
+        rgba(255, 255, 255, 0.72);
+    }
+    .planner-global-handoff-item {
+      border-color: rgba(35, 102, 173, 0.12);
+    }
+    .planner-handoff-attention strong {
+      color: var(--warn);
+    }
     .entity-header {
       display: flex;
       justify-content: space-between;
@@ -885,6 +897,10 @@
       <div id="planner-review-inbox" class="card" aria-live="polite">
         <span class="meta">Planner Review Inbox</span>
         <p class="meta">Review coverage is loading.</p>
+      </div>
+      <div id="planner-global-handoffs" class="card" aria-live="polite">
+        <span class="meta">Planner Handoff Queue</span>
+        <p class="meta">Global planner handoffs are loading.</p>
       </div>
       <div id="planner-deferred-followups" class="card" aria-live="polite">
         <span class="meta">Deferred Follow-ups</span>

@@ -14,6 +14,7 @@ from goal_ops_console.models import (
     PlannerBulkTaskCreateRequest,
     PlannerBulkTaskCreateResponse,
     PlannerDeferredFollowupResponse,
+    PlannerGlobalHandoffResponse,
     PlannerPreviewResponse,
     PlannerReviewAuditResponse,
     PlannerReviewDecisionRequest,
@@ -343,6 +344,91 @@ def _planner_review_handoff(goal_id: str, services: AppServices) -> dict:
         "deferred_suggestions": deferred_suggestions,
         "rejected_suggestions": rejected_suggestions,
         "pending_suggestions": pending_suggestions,
+    }
+
+
+def _latest_deferred_suggestion(handoff: dict) -> dict | None:
+    deferred_suggestions = handoff["deferred_suggestions"]
+    if not deferred_suggestions:
+        return None
+    return max(
+        deferred_suggestions,
+        key=lambda suggestion: (suggestion["reviewed_at"] or "", -suggestion["suggestion_index"]),
+    )
+
+
+def _created_task_statuses(handoff: dict) -> dict[str, int]:
+    statuses: dict[str, int] = {}
+    for task in handoff["created_tasks"]:
+        status = task["task_status"]
+        statuses[status] = statuses.get(status, 0) + 1
+    return statuses
+
+
+def _created_tasks_need_attention(handoff: dict) -> bool:
+    return any(task["task_status"] != "succeeded" for task in handoff["created_tasks"])
+
+
+def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
+    handoff = _planner_review_handoff(goal["goal_id"], services)
+    reviews = _planner_reviews_by_index(goal["goal_id"], services).values()
+    summary = handoff["summary"]
+    needs_operator_attention = (
+        summary["pending"] > 0
+        or summary["deferred"] > 0
+        or _created_tasks_need_attention(handoff)
+    )
+    return {
+        "goal_id": handoff["goal_id"],
+        "goal_title": handoff["goal_title"],
+        "state": goal["state"],
+        "source": handoff["source"],
+        "next_operator_action": handoff["next_operator_action"],
+        "needs_operator_attention": needs_operator_attention,
+        "summary": summary,
+        "pending": summary["pending"],
+        "deferred": summary["deferred"],
+        "rejected": summary["rejected"],
+        "created": summary["created"],
+        "last_reviewed_at": max((review["updated_at"] for review in reviews), default=None),
+        "next_pending_suggestion": (
+            handoff["pending_suggestions"][0]
+            if handoff["pending_suggestions"]
+            else None
+        ),
+        "latest_deferred_suggestion": _latest_deferred_suggestion(handoff),
+        "created_task_statuses": _created_task_statuses(handoff),
+    }
+
+
+def _sort_planner_global_handoff_items(items: list[dict]) -> list[dict]:
+    return sorted(
+        items,
+        key=lambda item: (
+            0 if item["needs_operator_attention"] else 1,
+            0 if item["pending"] > 0 else 1,
+            0 if item["deferred"] > 0 else 1,
+            0 if item["created"] > 0 else 1,
+            item["goal_title"].lower(),
+            item["goal_id"],
+        ),
+    )
+
+
+def _planner_global_handoffs(services: AppServices) -> dict:
+    items = _sort_planner_global_handoff_items(
+        [_planner_global_handoff_item(goal, services) for goal in services.state_manager.list_goals()]
+    )
+    return {
+        "summary": {
+            "total_goals": len(items),
+            "goals_needing_attention": sum(1 for item in items if item["needs_operator_attention"]),
+            "pending": sum(item["pending"] for item in items),
+            "deferred": sum(item["deferred"] for item in items),
+            "rejected": sum(item["rejected"] for item in items),
+            "created": sum(item["created"] for item in items),
+        },
+        "items": items,
     }
 
 
@@ -710,6 +796,13 @@ def list_planner_deferred_followups(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return _planner_deferred_followups(services)
+
+
+@router.get("/planner/handoffs", response_model=PlannerGlobalHandoffResponse)
+def list_planner_handoffs(
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_global_handoffs(services)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)

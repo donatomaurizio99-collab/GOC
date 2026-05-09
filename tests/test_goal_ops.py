@@ -16280,20 +16280,27 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "function plannerReviewContinuityMessage(prefix)" in app_js
     assert "function renderPlannerHandoffSummary(preview)" in app_js
     assert "function renderPlannerHandoffList(title, items, emptyMessage, itemRenderer)" in app_js
+    assert "function renderPlannerGlobalHandoffs(payload)" in app_js
+    assert "function plannerGlobalHandoffNeedsAttention(item)" in app_js
     assert "nextReviewItem?.next_suggestion?.suggestion_index" in app_js
     assert "runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true })" in app_js
     assert "runPlannerPreview(goalId, { focusNextPending: true })" in app_js
+    assert "/goals/planner/handoffs" in app_js
     assert "/plan/handoff" in app_js
     assert "Planner Handoff Summary" in app_js
+    assert "Planner Handoff Queue" in app_js
+    assert "Created task statuses" in app_js
     assert "Next operator action" in app_js
     assert "data-planner-suggestion-index" in app_js
-    assert "scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex)" in app_js
+    assert "scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex ?? scrollSuggestionIndex)" in app_js
     assert "Opened next review target" in app_js
     assert "Review complete" in app_js
     assert "planner-suggestion-focus" in app_js
     assert ".planner-suggestion-focus" in template
     assert ".planner-review-complete" in template
     assert ".planner-handoff-card" in template
+    assert "planner-global-handoffs" in template
+    assert ".planner-global-handoff-item" in template
     assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
     assert '"static_asset_version": _static_asset_version()' in system_router
 
