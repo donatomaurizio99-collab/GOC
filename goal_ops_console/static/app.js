@@ -14,6 +14,7 @@ const SECTION_IDS = [
   "states-section",
 ];
 const IS_DESKTOP_MODE = new URLSearchParams(window.location.search).get("desktop") === "1";
+const PLANNER_FOLLOW_UP_CONTINUITY_KEY = "goal_ops_planner_follow_up_continuity_v1";
 const VISUAL_PRESETS = [
   {
     id: "warm",
@@ -46,6 +47,7 @@ let plannerReviewInboxSort = "needs_review";
 let plannerHandoffStatus = "needs_attention";
 let plannerHandoffReason = "all";
 let plannerHandoffSort = "needs_attention";
+let plannerFollowUpContinuity = loadPlannerFollowUpContinuity();
 let focusedPlannerSuggestionIndex = null;
 const MUTATION_LOCK_FALLBACK_MESSAGE = (
   "Mutating operations are blocked while runtime is in critical protection mode."
@@ -1042,6 +1044,103 @@ function plannerGlobalHandoffReasonLabel(reason) {
   return labels[reason] || "Needs attention";
 }
 
+function loadPlannerFollowUpContinuity() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PLANNER_FOLLOW_UP_CONTINUITY_KEY) || "{}");
+    return {
+      last_opened: parsed?.last_opened || null,
+      by_action: parsed?.by_action && typeof parsed.by_action === "object" ? parsed.by_action : {},
+    };
+  } catch {
+    return { last_opened: null, by_action: {} };
+  }
+}
+
+function savePlannerFollowUpContinuity() {
+  try {
+    localStorage.setItem(PLANNER_FOLLOW_UP_CONTINUITY_KEY, JSON.stringify(plannerFollowUpContinuity));
+  } catch {
+    // Continuity is a browser convenience; losing it must never block operator workflows.
+  }
+}
+
+function plannerFollowUpActionKey(goalId, actionId) {
+  return `${goalId || "unknown"}::${actionId || "unknown"}`;
+}
+
+function plannerFollowUpActionRecord(goalId, actionId) {
+  return plannerFollowUpContinuity.by_action?.[plannerFollowUpActionKey(goalId, actionId)] || null;
+}
+
+function plannerFollowUpOpenedAtLabel(openedAt) {
+  if (!openedAt) {
+    return "";
+  }
+  const parsed = new Date(openedAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return openedAt;
+  }
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function recordPlannerFollowUpActionOpen({ goalId, goalTitle, actionId, label, actionType }) {
+  if (!goalId || !actionId) {
+    return;
+  }
+  const entry = {
+    goal_id: goalId,
+    goal_title: goalTitle || goalId,
+    action_id: actionId,
+    label: label || actionId,
+    action_type: actionType || "unknown",
+    opened_at: new Date().toISOString(),
+  };
+  plannerFollowUpContinuity = {
+    last_opened: entry,
+    by_action: {
+      ...(plannerFollowUpContinuity.by_action || {}),
+      [plannerFollowUpActionKey(goalId, actionId)]: entry,
+    },
+  };
+  savePlannerFollowUpContinuity();
+}
+
+function renderPlannerFollowUpContinuityBanner() {
+  const entry = plannerFollowUpContinuity.last_opened;
+  if (!entry) {
+    return `
+      <div class="planner-handoff-continuity">
+        <strong>Follow-up continuity</strong>
+        <span class="meta">No follow-up action opened yet in this browser.</span>
+      </div>
+    `;
+  }
+  return `
+    <div class="planner-handoff-continuity">
+      <strong>Last opened follow-up</strong>
+      <span class="meta">
+        ${escapeHtml(entry.label)} for ${escapeHtml(entry.goal_title || entry.goal_id)}
+        &middot; ${escapeHtml(plannerFollowUpOpenedAtLabel(entry.opened_at))}
+      </span>
+    </div>
+  `;
+}
+
+function renderPlannerFollowUpActionContinuity(action, item) {
+  const record = plannerFollowUpActionRecord(item.goal_id, action.id);
+  if (!record) {
+    return "";
+  }
+  return `
+    <div class="meta planner-handoff-action-continuity">
+      Last opened ${escapeHtml(plannerFollowUpOpenedAtLabel(record.opened_at))}.
+    </div>
+  `;
+}
+
 function plannerGlobalHandoffActions(item) {
   if (Array.isArray(item?.follow_up_actions) && item.follow_up_actions.length) {
     return item.follow_up_actions;
@@ -1153,6 +1252,13 @@ function plannerHandoffSuggestionIndex(item) {
 function renderPlannerFollowUpActionButton(action, item) {
   const target = action?.target || {};
   const goalId = target.goal_id || item.goal_id;
+  const goalTitle = item.goal_title || item.title || item.goal_id;
+  const continuityAttributes = (
+    ` data-plan-follow-up-action="${escapeHtml(action.id || "")}"`
+    + ` data-plan-follow-up-action-label="${escapeHtml(action.label || "")}"`
+    + ` data-plan-follow-up-action-type="${escapeHtml(action.action_type || "")}"`
+    + ` data-plan-follow-up-goal-title="${escapeHtml(goalTitle)}"`
+  );
   if (action.action_type === "open_plan_preview") {
     const suggestionIndex = Number.parseInt(target.suggestion_index, 10);
     const suggestionValue = Number.isInteger(suggestionIndex) && suggestionIndex >= 0 ? String(suggestionIndex) : "";
@@ -1162,7 +1268,7 @@ function renderPlannerFollowUpActionButton(action, item) {
         type="button"
         class="secondary"
         data-plan-goal="${escapeHtml(goalId)}"
-        data-plan-focus-suggestion="${escapeHtml(suggestionValue)}"${focusNextPending}
+        data-plan-focus-suggestion="${escapeHtml(suggestionValue)}"${focusNextPending}${continuityAttributes}
       >${escapeHtml(action.label || "Open Plan Preview")}</button>
     `;
   }
@@ -1171,7 +1277,7 @@ function renderPlannerFollowUpActionButton(action, item) {
       <button
         type="button"
         class="secondary"
-        data-plan-handoff-task-goal="${escapeHtml(goalId)}"
+        data-plan-handoff-task-goal="${escapeHtml(goalId)}"${continuityAttributes}
       >${escapeHtml(action.label || "Inspect tasks")}</button>
     `;
   }
@@ -1191,6 +1297,7 @@ function renderPlannerFollowUpActions(item) {
           <div>
             <div class="entity-title">${escapeHtml(action.label || "Follow-up action")}</div>
             <p class="meta">${escapeHtml(action.description || "Review this planner handoff before taking action.")}</p>
+            ${renderPlannerFollowUpActionContinuity(action, item)}
           </div>
           ${renderPlannerFollowUpActionButton(action, item)}
         </div>
@@ -1298,6 +1405,7 @@ function renderPlannerGlobalHandoffs(payload) {
         </select>
       </label>
     </div>
+    ${renderPlannerFollowUpContinuityBanner()}
     <div class="entity-grid" style="margin-top:0.75rem;">
       <div class="entity-metric planner-handoff-attention"><span class="meta">Needs Attention</span><strong>${summary.needs_attention || 0}</strong></div>
       <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending || 0}</strong></div>
@@ -2998,6 +3106,10 @@ document.addEventListener("click", async (event) => {
   const planInboxStatus = event.target.dataset.planInboxStatus;
   const planHandoffsStatus = event.target.dataset.planHandoffsStatus;
   const planHandoffTaskGoal = event.target.dataset.planHandoffTaskGoal;
+  const planFollowUpAction = event.target.dataset.planFollowUpAction;
+  const planFollowUpActionLabel = event.target.dataset.planFollowUpActionLabel;
+  const planFollowUpActionType = event.target.dataset.planFollowUpActionType;
+  const planFollowUpGoalTitle = event.target.dataset.planFollowUpGoalTitle;
   const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
   const planHandoffsRefresh = event.target.dataset.planHandoffsRefresh;
   const planFocusSuggestion = event.target.dataset.planFocusSuggestion;
@@ -3058,6 +3170,17 @@ document.addEventListener("click", async (event) => {
     if (planHandoffsStatus) {
       plannerHandoffStatus = planHandoffsStatus;
       await refreshPlannerGlobalHandoffs();
+    }
+
+    if (planFollowUpAction) {
+      recordPlannerFollowUpActionOpen({
+        goalId: planGoal || planHandoffTaskGoal,
+        goalTitle: planFollowUpGoalTitle,
+        actionId: planFollowUpAction,
+        label: planFollowUpActionLabel,
+        actionType: planFollowUpActionType,
+      });
+      renderPlannerGlobalHandoffs(viewCache.plannerGlobalHandoffs);
     }
 
     if (planHandoffTaskGoal) {
@@ -3172,6 +3295,7 @@ document.addEventListener("click", async (event) => {
       : workflowStart || workflowCancel
         ? "workflow-error"
         : goalAction || planGoal || planInboxStatus || planHandoffsStatus || planHandoffTaskGoal
+          || planFollowUpAction
           || planFollowupsRefresh || planHandoffsRefresh
           || planFollowupReopenGoal || planNextReview
           ? "goal-error"
