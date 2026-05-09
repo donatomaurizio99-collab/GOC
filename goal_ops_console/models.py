@@ -71,6 +71,7 @@ class GoalCreateRequest(BaseModel):
 
 
 class PlannerTaskSuggestion(BaseModel):
+    suggestion_id: str | None = None
     title: str
     description: str
     rationale: str
@@ -113,6 +114,7 @@ class PlannerSuggestionReview(BaseModel):
     decision: Literal["created", "deferred", "rejected"]
     comment: str | None = None
     task_id: str | None = None
+    suggestion_id: str | None = None
     planner_source: str
     suggestion_title: str
     suggestion_description: str

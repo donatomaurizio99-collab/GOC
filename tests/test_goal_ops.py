@@ -1299,6 +1299,7 @@ def test_53d_planner_review_decisions_schema_migration(services):
     assert {
         "goal_id",
         "suggestion_index",
+        "suggestion_id",
         "decision",
         "comment",
         "task_id",
@@ -1308,6 +1309,38 @@ def test_53d_planner_review_decisions_schema_migration(services):
         "suggestion_priority_hint",
         "operator_override",
     }.issubset(columns)
+
+
+def test_53e_planner_suggestions_schema_migration(services):
+    row = services.db.fetch_one(
+        "SELECT version, name FROM schema_migrations WHERE version = 6"
+    )
+    suggestion_columns = {
+        column["name"]
+        for column in services.db.fetch_all("PRAGMA table_info(planner_suggestions)")
+    }
+    task_columns = {column["name"] for column in services.db.fetch_all("PRAGMA table_info(tasks)")}
+    review_columns = {
+        column["name"]
+        for column in services.db.fetch_all("PRAGMA table_info(planner_suggestion_reviews)")
+    }
+
+    assert row is not None
+    assert row["name"] == "planner_suggestions"
+    assert {
+        "suggestion_id",
+        "goal_id",
+        "suggestion_index",
+        "planner_source",
+        "title",
+        "description",
+        "rationale",
+        "priority_hint",
+        "created_at",
+        "updated_at",
+    }.issubset(suggestion_columns)
+    assert "planner_suggestion_id" in task_columns
+    assert "suggestion_id" in review_columns
 
 
 def test_54_workflow_start_is_idempotent_with_idempotency_key(client):
@@ -15723,6 +15756,7 @@ def test_268_goal_plan_preview_returns_deterministic_suggestions(client):
     assert payload["goal_title"] == "Launch supervised planner"
     assert payload["source"] == "deterministic_planner"
     assert 3 <= len(payload["suggestions"]) <= 5
+    assert all(suggestion["suggestion_id"] for suggestion in payload["suggestions"])
     assert all(suggestion["task_exists"] is False for suggestion in payload["suggestions"])
     assert all(suggestion["existing_task_id"] is None for suggestion in payload["suggestions"])
 
@@ -15737,6 +15771,7 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
 
     for suggestion in payload["suggestions"]:
         assert set(suggestion) == {
+            "suggestion_id",
             "title",
             "description",
             "rationale",
@@ -15749,6 +15784,7 @@ def test_269_goal_plan_preview_suggestions_have_expected_fields(client):
             "review_task_id",
             "reviewed_at",
         }
+        assert suggestion["suggestion_id"]
         assert suggestion["title"]
         assert suggestion["description"]
         assert suggestion["rationale"]
@@ -15798,12 +15834,42 @@ def test_271_goal_plan_preview_does_not_create_tasks(client):
 
     response = client.post(f"/goals/{goal['goal_id']}/plan")
     after = client.get(f"/tasks?goal_id={goal['goal_id']}").json()
+    persisted_suggestions = client.app.state.services.db.fetch_scalar(
+        "SELECT COUNT(*) FROM planner_suggestions WHERE goal_id = ?",
+        goal["goal_id"],
+    )
 
     assert response.status_code == 200
     assert before == []
     assert after == []
+    assert persisted_suggestions == len(response.json()["suggestions"])
     assert all(suggestion["task_exists"] is False for suggestion in response.json()["suggestions"])
     assert all(suggestion["existing_task_id"] is None for suggestion in response.json()["suggestions"])
+
+
+def test_271b_goal_plan_preview_persists_suggestions_idempotently(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Persist planner suggestions", "urgency": 0.6, "value": 0.4, "deadline_score": 0.1},
+    ).json()
+
+    first = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    second = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    rows = client.app.state.services.db.fetch_all(
+        """SELECT suggestion_id, suggestion_index, title, planner_source
+           FROM planner_suggestions
+           WHERE goal_id = ?
+           ORDER BY suggestion_index ASC""",
+        goal["goal_id"],
+    )
+
+    assert first == second
+    assert len(rows) == len(first["suggestions"])
+    assert [row["suggestion_id"] for row in rows] == [
+        suggestion["suggestion_id"] for suggestion in first["suggestions"]
+    ]
+    assert [row["title"] for row in rows] == [suggestion["title"] for suggestion in first["suggestions"]]
+    assert {row["planner_source"] for row in rows} == {"deterministic_planner"}
 
 
 def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
@@ -15827,18 +15893,21 @@ def test_272_goal_plan_preview_suggestion_endpoint_creates_one_task(client):
     assert payload["suggestion"]["existing_task_id"] is None
     assert payload["task"]["title"] == selected["title"]
     assert payload["task"]["planner_source"] == selected["source"]
+    assert payload["task"]["planner_suggestion_id"] == selected["suggestion_id"]
     assert payload["task"]["planner_suggestion_index"] == 0
     assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
     assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
     assert payload["review"]["decision"] == "created"
     assert payload["review"]["task_id"] == payload["task"]["task_id"]
+    assert payload["review"]["suggestion_id"] == selected["suggestion_id"]
     assert payload["review"]["suggestion_rationale"] == selected["rationale"]
     assert len(tasks) == 1
     assert tasks[0]["goal_id"] == goal["goal_id"]
     assert tasks[0]["title"] == selected["title"]
     assert tasks[0]["title"] not in other_titles
     assert tasks[0]["planner_source"] == selected["source"]
+    assert tasks[0]["planner_suggestion_id"] == selected["suggestion_id"]
     assert tasks[0]["planner_suggestion_index"] == 0
     assert tasks[0]["planner_priority_hint"] == selected["priority_hint"]
     assert tasks[0]["planner_suggestion_description"] == selected["description"]
@@ -15895,12 +15964,14 @@ def test_272c_goal_plan_task_create_applies_operator_override_with_original_prov
     assert payload["operator_override"] == override
     assert payload["task"]["title"] == override["title"]
     assert payload["task"]["planner_source"] == selected["source"]
+    assert payload["task"]["planner_suggestion_id"] == selected["suggestion_id"]
     assert payload["task"]["planner_suggestion_index"] == 0
     assert payload["task"]["planner_priority_hint"] == selected["priority_hint"]
     assert payload["task"]["planner_suggestion_description"] == selected["description"]
     assert payload["task"]["planner_suggestion_rationale"] == selected["rationale"]
     assert payload["task"]["planner_operator_overrides"] == override
     assert payload["review"]["decision"] == "created"
+    assert payload["review"]["suggestion_id"] == selected["suggestion_id"]
     assert payload["review"]["operator_override"] == override
     assert len(tasks) == 1
     assert tasks[0]["title"] == override["title"]
@@ -15924,6 +15995,7 @@ def test_272d_goal_plan_review_defer_persists_decision_without_creating_task(cli
     assert response.status_code == 201
     payload = response.json()
     assert payload["review"]["decision"] == "deferred"
+    assert payload["review"]["suggestion_id"] == after["suggestions"][0]["suggestion_id"]
     assert payload["review"]["comment"] == "Wait for owner input."
     assert payload["review"]["task_id"] is None
     assert tasks == []
@@ -16974,7 +17046,7 @@ def test_272zd_system_planner_metrics_empty_state(client):
     assert payload["semantics"] == {
         "current_decisions": ["pending", "created", "deferred", "rejected"],
         "historical_event_counts": ["reopened"],
-        "pending_age_basis": "goal_created_at",
+        "pending_age_basis": "planner_suggestion_created_at",
     }
     assert payload["goals_total"] == 0
     assert payload["suggestions_total"] == 0
@@ -16987,12 +17059,13 @@ def test_272zd_system_planner_metrics_empty_state(client):
     }
     assert payload["counts_by_source"] == {}
     assert payload["pending_age"] == {
-        "basis": "goal_created_at",
+        "basis": "planner_suggestion_created_at",
         "sample_count": 0,
         "median_seconds": None,
         "oldest_seconds": None,
         "oldest_goal_id": None,
         "oldest_goal_title": None,
+        "oldest_suggestion_id": None,
         "oldest_suggestion_index": None,
     }
     assert payload["deferred_followups"] == {"over_7d": 0, "oldest_age_seconds": None}
@@ -17028,7 +17101,7 @@ def test_272ze_system_planner_metrics_counts_decisions_and_remains_read_only(cli
 
     services = client.app.state.services
     services.db.execute(
-        "UPDATE goals SET created_at = ? WHERE goal_id IN (?, ?)",
+        "UPDATE planner_suggestions SET created_at = ? WHERE goal_id IN (?, ?)",
         "2026-01-01 00:00:00",
         primary_goal["goal_id"],
         secondary_goal["goal_id"],
@@ -17041,6 +17114,7 @@ def test_272ze_system_planner_metrics_counts_decisions_and_remains_read_only(cli
     before_tasks = services.db.fetch_scalar("SELECT COUNT(*) FROM tasks")
     before_reviews = services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestion_reviews")
     before_events = services.db.fetch_scalar("SELECT COUNT(*) FROM events")
+    before_suggestions = services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestions")
 
     response = client.get("/system/planner_metrics")
     payload = response.json()
@@ -17049,6 +17123,7 @@ def test_272ze_system_planner_metrics_counts_decisions_and_remains_read_only(cli
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM tasks") == before_tasks
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestion_reviews") == before_reviews
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM events") == before_events
+    assert services.db.fetch_scalar("SELECT COUNT(*) FROM planner_suggestions") == before_suggestions
     assert payload["goals_total"] == 2
     assert payload["suggestions_total"] == primary_total + secondary_total
     assert payload["counts_by_decision"] == {
@@ -17066,7 +17141,7 @@ def test_272ze_system_planner_metrics_counts_decisions_and_remains_read_only(cli
         "rejected": 1,
         "reopened": 1,
     }
-    assert payload["pending_age"]["basis"] == "goal_created_at"
+    assert payload["pending_age"]["basis"] == "planner_suggestion_created_at"
     assert payload["pending_age"]["sample_count"] == primary_total + secondary_total - 3
     assert payload["pending_age"]["median_seconds"] > 0
     assert payload["pending_age"]["oldest_seconds"] > 0
@@ -17300,6 +17375,7 @@ def test_277_manual_task_create_has_no_planner_provenance(client):
 
     assert response.status_code == 201
     assert task["planner_source"] is None
+    assert task["planner_suggestion_id"] is None
     assert task["planner_suggestion_index"] is None
     assert task["planner_priority_hint"] is None
     assert task["planner_suggestion_description"] is None
@@ -17307,6 +17383,7 @@ def test_277_manual_task_create_has_no_planner_provenance(client):
     assert task["planner_operator_overrides"] is None
     assert len(tasks) == 1
     assert tasks[0]["planner_source"] is None
+    assert tasks[0]["planner_suggestion_id"] is None
     assert tasks[0]["planner_suggestion_index"] is None
     assert tasks[0]["planner_priority_hint"] is None
     assert tasks[0]["planner_suggestion_description"] is None
