@@ -16,7 +16,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from goal_ops_console.config import Settings
-from goal_ops_console.database import Database, new_id, now_utc
+from goal_ops_console.database import (
+    LOCK_RETRY_ATTEMPTS,
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLITE_TRANSACTION_BEGIN_MODE,
+    Database,
+    new_id,
+    now_utc,
+)
 from goal_ops_console.failure_intelligence import compute_error_hash
 from goal_ops_console.main import create_app
 from goal_ops_console.models import OptimisticLockError, RetryBudgetExceeded
@@ -567,6 +574,68 @@ def test_29_retention_cleanup_deletes_old_records(client):
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log WHERE audit_id = ?", old_audit_id) == 0
     assert services.db.fetch_scalar("SELECT COUNT(*) FROM audit_log_integrity WHERE audit_id = ?", old_audit_id) == 0
 
+    retention = client.get("/system/health").json()["retention"]
+    assert retention["cleanup_runs_total"] >= 1
+    assert retention["last_cleanup_at_utc"] is not None
+    assert retention["deleted_rows_by_store_total"]["events"] >= 1
+    assert retention["deleted_rows_by_store_total"]["event_processing"] >= 1
+    assert retention["deleted_rows_by_store_total"]["failure_log"] >= 1
+    assert retention["deleted_rows_by_store_total"]["audit_log"] >= 1
+    assert retention["deleted_rows_by_store_total"]["audit_integrity"] >= 1
+    assert retention["deleted_rows_total"] >= 5
+
+
+def test_29a_database_sqlite_contract_reports_pragmas_and_retry_policy(client):
+    services = client.app.state.services
+
+    contract = services.db.sqlite_contract_snapshot()
+
+    assert contract["ok"] is True
+    assert contract["busy_timeout_ms"] == SQLITE_BUSY_TIMEOUT_MS
+    assert contract["lock_retry_attempts"] == LOCK_RETRY_ATTEMPTS
+    assert contract["transaction_begin_mode"] == SQLITE_TRANSACTION_BEGIN_MODE
+    assert contract["wal_forced"] is False
+    assert contract["observed"]["busy_timeout_ms"] == SQLITE_BUSY_TIMEOUT_MS
+    assert contract["observed"]["foreign_keys"] is True
+    assert contract["observed"]["journal_mode"]
+
+    health = client.get("/system/health").json()
+    assert health["database"]["concurrency"]["ok"] is True
+    assert health["database"]["concurrency"]["transaction_begin_mode"] == SQLITE_TRANSACTION_BEGIN_MODE
+
+
+def test_29b_database_parallel_write_storm_uses_bounded_lock_retries(tmp_path):
+    db = Database(str(tmp_path / "write-storm.sqlite3"))
+    db.initialize()
+    barrier = threading.Barrier(12)
+    errors: list[str] = []
+
+    def writer(index: int) -> None:
+        try:
+            barrier.wait(timeout=2)
+            with db.transaction() as tx:
+                tx.execute(
+                    "INSERT INTO events "
+                    "(event_id, event_type, entity_id, correlation_id, payload, emitted_at) "
+                    "VALUES (?, ?, ?, ?, '{}', ?)",
+                    new_id(),
+                    "storm.write",
+                    f"entity-{index}",
+                    "storm",
+                    now_utc(),
+                )
+        except Exception as exc:
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=writer, args=(index,)) for index in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert errors == []
+    assert db.fetch_scalar("SELECT COUNT(*) FROM events WHERE event_type = 'storm.write'") == 12
+
 
 def test_30_backpressure_endpoint_and_health_include_limits(client):
     snapshot = client.get("/system/backpressure")
@@ -576,6 +645,9 @@ def test_30_backpressure_endpoint_and_health_include_limits(client):
     assert snapshot.json()["max_pending_events"] == client.app.state.services.settings.max_pending_events
     assert "backpressure" in health.json()
     assert "retention" in health.json()
+    assert health.json()["retention"]["cleanup_runs_total"] == 0
+    assert health.json()["retention"]["last_cleanup_at_utc"] is None
+    assert health.json()["retention"]["deleted_rows_total"] == 0
 
 
 def test_31_metrics_endpoint_exposes_hook_counters(client):

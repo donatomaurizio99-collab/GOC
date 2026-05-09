@@ -51,12 +51,9 @@ def _build_health_payload(services: AppServices) -> dict[str, Any]:
             "tasks": int(total_tasks),
         },
         "backpressure": backpressure,
-        "retention": {
-            "events_days": services.settings.events_retention_days,
-            "event_processing_days": services.settings.event_processing_retention_days,
-            "failure_log_days": services.settings.failure_log_retention_days,
-            "audit_log_days": services.settings.audit_log_retention_days,
-            "idempotency_keys_days": services.settings.idempotency_retention_days,
+        "retention": services.event_bus.retention_snapshot(),
+        "database": {
+            "concurrency": services.db.sqlite_contract_snapshot(),
         },
         "metrics": services.observability.metrics_summary(),
         "audit": {
