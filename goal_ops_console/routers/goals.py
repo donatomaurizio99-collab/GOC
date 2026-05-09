@@ -369,22 +369,30 @@ def _created_tasks_need_attention(handoff: dict) -> bool:
     return any(task["task_status"] != "succeeded" for task in handoff["created_tasks"])
 
 
+def _planner_global_attention_reason(handoff: dict) -> str:
+    summary = handoff["summary"]
+    if summary["pending"] > 0:
+        return "pending_review"
+    if summary["deferred"] > 0:
+        return "deferred_followup"
+    if _created_tasks_need_attention(handoff):
+        return "created_task_not_terminal"
+    return "ready"
+
+
 def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
     handoff = _planner_review_handoff(goal["goal_id"], services)
     reviews = _planner_reviews_by_index(goal["goal_id"], services).values()
     summary = handoff["summary"]
-    needs_operator_attention = (
-        summary["pending"] > 0
-        or summary["deferred"] > 0
-        or _created_tasks_need_attention(handoff)
-    )
+    attention_reason = _planner_global_attention_reason(handoff)
     return {
         "goal_id": handoff["goal_id"],
         "goal_title": handoff["goal_title"],
         "state": goal["state"],
         "source": handoff["source"],
         "next_operator_action": handoff["next_operator_action"],
-        "needs_operator_attention": needs_operator_attention,
+        "needs_operator_attention": attention_reason != "ready",
+        "attention_reason": attention_reason,
         "summary": summary,
         "pending": summary["pending"],
         "deferred": summary["deferred"],
@@ -401,24 +409,49 @@ def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
     }
 
 
-def _sort_planner_global_handoff_items(items: list[dict]) -> list[dict]:
+def _filter_planner_global_handoff_items(items: list[dict], status: str, reason: str) -> list[dict]:
+    if status == "needs_attention":
+        items = [item for item in items if item["needs_operator_attention"]]
+    elif status == "ready":
+        items = [item for item in items if not item["needs_operator_attention"]]
+    if reason != "all":
+        items = [item for item in items if item["attention_reason"] == reason]
+    return items
+
+
+def _sort_planner_global_handoff_items(items: list[dict], sort: str) -> list[dict]:
+    if sort == "goal_title":
+        return sorted(items, key=lambda item: (item["goal_title"].lower(), item["goal_id"]))
+    if sort == "last_reviewed_at":
+        sorted_items = sorted(items, key=lambda item: (item["goal_title"].lower(), item["goal_id"]))
+        sorted_items.sort(key=lambda item: item["last_reviewed_at"] or "", reverse=True)
+        return sorted_items
+    attention_reason_rank = {
+        "pending_review": 0,
+        "deferred_followup": 1,
+        "created_task_not_terminal": 2,
+        "ready": 3,
+    }
     return sorted(
         items,
         key=lambda item: (
             0 if item["needs_operator_attention"] else 1,
-            0 if item["pending"] > 0 else 1,
-            0 if item["deferred"] > 0 else 1,
-            0 if item["created"] > 0 else 1,
+            attention_reason_rank.get(item["attention_reason"], 4),
             item["goal_title"].lower(),
             item["goal_id"],
         ),
     )
 
 
-def _planner_global_handoffs(services: AppServices) -> dict:
-    items = _sort_planner_global_handoff_items(
-        [_planner_global_handoff_item(goal, services) for goal in services.state_manager.list_goals()]
-    )
+def _planner_global_handoffs(
+    services: AppServices,
+    status: str = "all",
+    reason: str = "all",
+    sort: str = "needs_attention",
+) -> dict:
+    items = [_planner_global_handoff_item(goal, services) for goal in services.state_manager.list_goals()]
+    items = _filter_planner_global_handoff_items(items, status, reason)
+    items = _sort_planner_global_handoff_items(items, sort)
     return {
         "summary": {
             "total_goals": len(items),
@@ -800,9 +833,18 @@ def list_planner_deferred_followups(
 
 @router.get("/planner/handoffs", response_model=PlannerGlobalHandoffResponse)
 def list_planner_handoffs(
+    status: Literal["all", "needs_attention", "ready"] = Query("all"),
+    reason: Literal[
+        "all",
+        "pending_review",
+        "deferred_followup",
+        "created_task_not_terminal",
+        "ready",
+    ] = Query("all"),
+    sort: Literal["needs_attention", "last_reviewed_at", "goal_title"] = Query("needs_attention"),
     services: AppServices = Depends(get_services),
 ) -> dict:
-    return _planner_global_handoffs(services)
+    return _planner_global_handoffs(services, status=status, reason=reason, sort=sort)
 
 
 @router.post("/{goal_id}/plan/reviews", status_code=201, response_model=PlannerReviewDecisionResponse)

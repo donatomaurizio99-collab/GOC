@@ -43,6 +43,9 @@ let globalFilterTerm = "";
 let jumpScrollScheduled = false;
 let plannerReviewInboxStatus = "needs_review";
 let plannerReviewInboxSort = "needs_review";
+let plannerHandoffStatus = "needs_attention";
+let plannerHandoffReason = "all";
+let plannerHandoffSort = "needs_attention";
 let focusedPlannerSuggestionIndex = null;
 const MUTATION_LOCK_FALLBACK_MESSAGE = (
   "Mutating operations are blocked while runtime is in critical protection mode."
@@ -1012,6 +1015,33 @@ function plannerGlobalHandoffNeedsAttention(item) {
   return Boolean((summary.pending || 0) > 0 || (summary.deferred || 0) > 0);
 }
 
+function plannerGlobalHandoffReason(item) {
+  if (item?.attention_reason) {
+    return item.attention_reason;
+  }
+  const summary = item?.summary || {};
+  if ((summary.pending || 0) > 0 || (item?.pending || 0) > 0) {
+    return "pending_review";
+  }
+  if ((summary.deferred || 0) > 0 || (item?.deferred || 0) > 0) {
+    return "deferred_followup";
+  }
+  if (plannerGlobalHandoffNeedsAttention(item) && ((summary.created || 0) > 0 || (item?.created || 0) > 0)) {
+    return "created_task_not_terminal";
+  }
+  return "ready";
+}
+
+function plannerGlobalHandoffReasonLabel(reason) {
+  const labels = {
+    pending_review: "Pending review",
+    deferred_followup: "Deferred follow-up",
+    created_task_not_terminal: "Created task not terminal",
+    ready: "Ready",
+  };
+  return labels[reason] || "Needs attention";
+}
+
 function plannerGlobalHandoffVisibleItems(payload) {
   return filterRows(plannerGlobalHandoffItems(payload), (item) => [
     item.goal_id,
@@ -1019,6 +1049,8 @@ function plannerGlobalHandoffVisibleItems(payload) {
     item.state,
     item.source,
     item.next_operator_action,
+    plannerGlobalHandoffReason(item),
+    plannerGlobalHandoffReasonLabel(plannerGlobalHandoffReason(item)),
     plannerGlobalHandoffNeedsAttention(item) ? "needs attention" : "reviewed",
     item.next_pending_suggestion?.title || "",
     item.next_pending?.title || "",
@@ -1082,6 +1114,14 @@ function renderPlannerGlobalHandoffs(payload) {
 
   const summary = plannerGlobalHandoffSummary(payload);
   const items = plannerGlobalHandoffVisibleItems(payload);
+  const statusButtons = [
+    ["needs_attention", "Needs attention"],
+    ["ready", "Ready"],
+    ["all", "All"],
+  ].map(([status, label]) => (
+    `<button type="button" class="secondary ${plannerHandoffStatus === status ? "active" : ""}" `
+    + `data-plan-handoffs-status="${status}">${label}</button>`
+  )).join("");
   const itemMarkup = items.length
     ? items.map((item) => {
       const itemSummary = item.summary || {};
@@ -1117,6 +1157,8 @@ function renderPlannerGlobalHandoffs(payload) {
         : "";
       const needsAttention = plannerGlobalHandoffNeedsAttention(item);
       const attentionLabel = needsAttention ? "Needs attention" : "Ready";
+      const attentionReason = plannerGlobalHandoffReason(item);
+      const attentionReasonLabel = plannerGlobalHandoffReasonLabel(attentionReason);
       const statusCounts = item.created_task_statuses && Object.keys(item.created_task_statuses).length
         ? Object.keys(item.created_task_statuses)
           .sort()
@@ -1130,7 +1172,10 @@ function renderPlannerGlobalHandoffs(payload) {
               <div class="entity-title">${escapeHtml(item.goal_title || item.title || item.goal_id)}</div>
               <div class="meta">${escapeHtml(item.goal_id)}${item.state ? ` &middot; ${escapeHtml(item.state)}` : ""}</div>
             </div>
-            <span class="pill ${needsAttention ? "state-degraded" : "state-ok"}">${attentionLabel}</span>
+            <div class="planner-handoff-badges">
+              <span class="pill ${needsAttention ? "state-degraded" : "state-ok"}">${attentionLabel}</span>
+              <span class="pill planner-handoff-reason">${escapeHtml(attentionReasonLabel)}</span>
+            </div>
           </div>
           <p class="meta"><strong>Next operator action:</strong> ${escapeHtml(item.next_operator_action || "Review planner handoff status.")}</p>
           <p class="meta"><strong>Created task statuses:</strong> ${escapeHtml(statusCounts)}</p>
@@ -1154,6 +1199,27 @@ function renderPlannerGlobalHandoffs(payload) {
     <div class="entity-header">
       <span class="meta">Planner Handoff Queue &middot; ${summary.total_goals || 0} goals</span>
       <button type="button" class="secondary" data-plan-handoffs-refresh="true">Refresh handoffs</button>
+    </div>
+    <div class="actions planner-handoff-controls" style="margin-top:0.75rem;">
+      ${statusButtons}
+      <label class="meta">
+        Reason
+        <select data-plan-handoffs-reason="true">
+          <option value="all" ${plannerHandoffReason === "all" ? "selected" : ""}>All reasons</option>
+          <option value="pending_review" ${plannerHandoffReason === "pending_review" ? "selected" : ""}>Pending review</option>
+          <option value="deferred_followup" ${plannerHandoffReason === "deferred_followup" ? "selected" : ""}>Deferred follow-up</option>
+          <option value="created_task_not_terminal" ${plannerHandoffReason === "created_task_not_terminal" ? "selected" : ""}>Created task not terminal</option>
+          <option value="ready" ${plannerHandoffReason === "ready" ? "selected" : ""}>Ready</option>
+        </select>
+      </label>
+      <label class="meta">
+        Sort
+        <select data-plan-handoffs-sort="true">
+          <option value="needs_attention" ${plannerHandoffSort === "needs_attention" ? "selected" : ""}>Needs attention first</option>
+          <option value="last_reviewed_at" ${plannerHandoffSort === "last_reviewed_at" ? "selected" : ""}>Last reviewed</option>
+          <option value="goal_title" ${plannerHandoffSort === "goal_title" ? "selected" : ""}>Goal title</option>
+        </select>
+      </label>
     </div>
     <div class="entity-grid" style="margin-top:0.75rem;">
       <div class="entity-metric planner-handoff-attention"><span class="meta">Needs Attention</span><strong>${summary.needs_attention || 0}</strong></div>
@@ -1970,7 +2036,12 @@ async function refreshPlannerDeferredFollowups() {
 
 async function refreshPlannerGlobalHandoffs() {
   try {
-    const payload = await api("/goals/planner/handoffs");
+    const params = new URLSearchParams({
+      status: plannerHandoffStatus,
+      reason: plannerHandoffReason,
+      sort: plannerHandoffSort,
+    });
+    const payload = await api(`/goals/planner/handoffs?${params.toString()}`);
     viewCache.plannerGlobalHandoffs = payload;
   } catch (error) {
     viewCache.plannerGlobalHandoffs = { error: error?.message || "Request failed" };
@@ -2848,6 +2919,7 @@ document.addEventListener("click", async (event) => {
   const planBulkCreate = event.target.dataset.planBulkCreate;
   const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
+  const planHandoffsStatus = event.target.dataset.planHandoffsStatus;
   const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
   const planHandoffsRefresh = event.target.dataset.planHandoffsRefresh;
   const planFocusSuggestion = event.target.dataset.planFocusSuggestion;
@@ -2903,6 +2975,11 @@ document.addEventListener("click", async (event) => {
     if (planInboxStatus) {
       plannerReviewInboxStatus = planInboxStatus;
       await refreshPlannerReviewInbox();
+    }
+
+    if (planHandoffsStatus) {
+      plannerHandoffStatus = planHandoffsStatus;
+      await refreshPlannerGlobalHandoffs();
     }
 
     if (planFollowupsRefresh) {
@@ -3005,7 +3082,7 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planHandoffsRefresh
+        : goalAction || planGoal || planInboxStatus || planHandoffsStatus || planFollowupsRefresh || planHandoffsRefresh
           || planFollowupReopenGoal || planNextReview
           ? "goal-error"
           : "task-error";
@@ -3014,12 +3091,26 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (!event.target.dataset.planInboxSort) {
+  const target = event.target;
+  const planInboxSort = target.dataset.planInboxSort;
+  const planHandoffsReason = target.dataset.planHandoffsReason;
+  const planHandoffsSort = target.dataset.planHandoffsSort;
+  if (!planInboxSort && !planHandoffsReason && !planHandoffsSort) {
     return;
   }
-  plannerReviewInboxSort = event.target.value || "needs_review";
   try {
-    await refreshPlannerReviewInbox();
+    if (planInboxSort) {
+      plannerReviewInboxSort = target.value || "needs_review";
+      await refreshPlannerReviewInbox();
+    }
+    if (planHandoffsReason) {
+      plannerHandoffReason = target.value || "all";
+      await refreshPlannerGlobalHandoffs();
+    }
+    if (planHandoffsSort) {
+      plannerHandoffSort = target.value || "needs_attention";
+      await refreshPlannerGlobalHandoffs();
+    }
   } catch (error) {
     showError("goal-error", error);
   }

@@ -235,6 +235,12 @@ class PlannerGlobalHandoffItem(BaseModel):
     source: str
     next_operator_action: str
     needs_operator_attention: bool
+    attention_reason: Literal[
+        "pending_review",
+        "deferred_followup",
+        "created_task_not_terminal",
+        "ready",
+    ]
     summary: PlannerReviewSummary
     pending: int
     deferred: int
