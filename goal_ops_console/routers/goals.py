@@ -18,6 +18,7 @@ from goal_ops_console.models import (
     PlannerReviewAuditResponse,
     PlannerReviewDecisionRequest,
     PlannerReviewDecisionResponse,
+    PlannerReviewHandoffResponse,
     PlannerReviewInboxResponse,
     PlannerReviewListResponse,
     PlannerReviewReopenResponse,
@@ -267,6 +268,81 @@ def _planner_review_audit(goal_id: str, services: AppServices, *, limit: int = 1
         "source": plan["source"],
         "summary": _planner_review_summary(plan),
         "entries": entries,
+    }
+
+
+def _planner_handoff_suggestion_item(suggestion_index: int, suggestion: dict, review: dict | None = None) -> dict:
+    return {
+        "suggestion_index": suggestion_index,
+        "title": suggestion["title"],
+        "description": suggestion["description"],
+        "rationale": suggestion["rationale"],
+        "priority_hint": suggestion["priority_hint"],
+        "source": suggestion["source"],
+        "comment": review["comment"] if review is not None else None,
+        "reviewed_at": review["updated_at"] if review is not None else None,
+    }
+
+
+def _planner_handoff_next_operator_action(summary: dict) -> str:
+    if summary["pending"] > 0:
+        return "Review pending planner suggestions; create, defer, or reject the next suggestion."
+    if summary["deferred"] > 0:
+        return "Resolve deferred planner follow-ups or reopen them when ready."
+    if summary["created"] > 0:
+        return "Execute or monitor created planner tasks and validate evidence."
+    if summary["rejected"] > 0:
+        return "Confirm rejected suggestions remain intentionally out of scope."
+    return "Run Planner Preview to generate deterministic suggestions."
+
+
+def _planner_review_handoff(goal_id: str, services: AppServices) -> dict:
+    plan = _preview_goal_plan(goal_id, services)
+    summary = _planner_review_summary(plan)
+    reviews_by_index = _planner_reviews_by_index(goal_id, services)
+    tasks_by_id = {
+        task["task_id"]: task
+        for task in services.execution_layer.list_tasks(goal_id=goal_id)
+    }
+    created_tasks = []
+    deferred_suggestions = []
+    rejected_suggestions = []
+    pending_suggestions = []
+
+    for suggestion_index, suggestion in enumerate(plan["suggestions"]):
+        review = reviews_by_index.get(suggestion_index)
+        decision = suggestion["review_decision"]
+        if decision == "created":
+            task_id = suggestion["review_task_id"] or suggestion["existing_task_id"]
+            if not task_id:
+                continue
+            task = tasks_by_id.get(task_id, {})
+            created_tasks.append(
+                {
+                    **_planner_handoff_suggestion_item(suggestion_index, suggestion, review),
+                    "task_id": task_id,
+                    "task_title": task.get("title") or suggestion["title"],
+                    "task_status": task.get("status") or "unknown",
+                    "operator_override": review["operator_override"] if review is not None else None,
+                }
+            )
+        elif decision == "deferred":
+            deferred_suggestions.append(_planner_handoff_suggestion_item(suggestion_index, suggestion, review))
+        elif decision == "rejected":
+            rejected_suggestions.append(_planner_handoff_suggestion_item(suggestion_index, suggestion, review))
+        else:
+            pending_suggestions.append(_planner_handoff_suggestion_item(suggestion_index, suggestion))
+
+    return {
+        "goal_id": plan["goal_id"],
+        "goal_title": plan["goal_title"],
+        "source": plan["source"],
+        "summary": summary,
+        "next_operator_action": _planner_handoff_next_operator_action(summary),
+        "created_tasks": created_tasks,
+        "deferred_suggestions": deferred_suggestions,
+        "rejected_suggestions": rejected_suggestions,
+        "pending_suggestions": pending_suggestions,
     }
 
 
@@ -610,6 +686,14 @@ def list_plan_suggestion_review_audit(
     services: AppServices = Depends(get_services),
 ) -> dict:
     return _planner_review_audit(goal_id, services, limit=limit)
+
+
+@router.get("/{goal_id}/plan/handoff", response_model=PlannerReviewHandoffResponse)
+def get_plan_review_handoff(
+    goal_id: str,
+    services: AppServices = Depends(get_services),
+) -> dict:
+    return _planner_review_handoff(goal_id, services)
 
 
 @router.get("/planner/reviews", response_model=PlannerReviewInboxResponse)

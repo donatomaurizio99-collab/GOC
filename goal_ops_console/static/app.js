@@ -766,6 +766,118 @@ function renderPlannerReviewAudit(preview) {
   `;
 }
 
+function plannerReviewHandoff(preview) {
+  return preview.review_handoff || {
+    summary: plannerReviewSummaryFromSuggestions(preview.suggestions || []),
+    next_operator_action: "Run Planner Preview and review suggestions before handoff.",
+    created_tasks: [],
+    deferred_suggestions: [],
+    rejected_suggestions: [],
+    pending_suggestions: [],
+  };
+}
+
+function renderPlannerHandoffSuggestionItem(item) {
+  const comment = item.comment ? `<div class="meta">Comment: ${escapeHtml(item.comment)}</div>` : "";
+  const reviewedAt = item.reviewed_at ? ` &middot; ${escapeHtml(item.reviewed_at)}` : "";
+  return `
+    <div class="card planner-handoff-item">
+      <div class="entity-header">
+        <div>
+          <div class="meta">Suggestion #${Number(item.suggestion_index) + 1}${reviewedAt}</div>
+          <div class="entity-title">${escapeHtml(item.title)}</div>
+        </div>
+        <span class="pill state-${escapeHtml(item.priority_hint)}">${escapeHtml(item.priority_hint)}</span>
+      </div>
+      <p class="meta">${escapeHtml(item.description)}</p>
+      <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.rationale)}</p>
+      ${comment}
+    </div>
+  `;
+}
+
+function renderPlannerHandoffTaskItem(item) {
+  const override = item.operator_override && typeof item.operator_override === "object"
+    ? Object.keys(item.operator_override).sort().join(", ")
+    : "";
+  const overrideLine = override ? `<div class="meta">Operator edits: ${escapeHtml(override)}</div>` : "";
+  return `
+    <div class="card planner-handoff-item">
+      <div class="entity-header">
+        <div>
+          <div class="meta">Task ${escapeHtml(item.task_id)} &middot; suggestion #${Number(item.suggestion_index) + 1}</div>
+          <div class="entity-title">${escapeHtml(item.task_title || item.title)}</div>
+        </div>
+        <span class="pill ${stateClass(item.task_status)}">${escapeHtml(item.task_status || "unknown")}</span>
+      </div>
+      <p class="meta">${escapeHtml(item.description)}</p>
+      <p class="meta"><strong>Why suggested:</strong> ${escapeHtml(item.rationale)}</p>
+      ${overrideLine}
+    </div>
+  `;
+}
+
+function renderPlannerHandoffList(title, items, emptyMessage, itemRenderer) {
+  const content = items.length
+    ? items.map((item) => itemRenderer(item)).join("")
+    : `<div class="meta">${emptyMessage}</div>`;
+  return `
+    <details class="planner-handoff-list" open>
+      <summary class="meta">${escapeHtml(title)} (${items.length})</summary>
+      <div class="stack-list" style="margin-top:0.5rem;">${content}</div>
+    </details>
+  `;
+}
+
+function renderPlannerHandoffSummary(preview) {
+  const handoff = plannerReviewHandoff(preview);
+  const summary = handoff.summary || plannerReviewSummaryFromSuggestions(preview.suggestions || []);
+  return `
+    <div class="planner-handoff-card" aria-label="Planner handoff summary">
+      <div class="entity-header">
+        <div>
+          <span class="meta">Planner Handoff Summary</span>
+          <h3>Operator handoff</h3>
+        </div>
+        <span class="pill ${summary.pending ? "state-degraded" : "state-ok"}">
+          ${summary.pending ? "needs review" : "reviewed"}
+        </span>
+      </div>
+      <p class="meta"><strong>Next operator action:</strong> ${escapeHtml(handoff.next_operator_action)}</p>
+      <div class="entity-grid">
+        <div class="entity-metric"><span class="meta">Created Tasks</span><strong>${summary.created || 0}</strong></div>
+        <div class="entity-metric"><span class="meta">Deferred</span><strong>${summary.deferred || 0}</strong></div>
+        <div class="entity-metric"><span class="meta">Rejected</span><strong>${summary.rejected || 0}</strong></div>
+        <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending || 0}</strong></div>
+      </div>
+      ${renderPlannerHandoffList(
+        "Created tasks",
+        handoff.created_tasks || [],
+        "No planner tasks have been created from this goal yet.",
+        renderPlannerHandoffTaskItem,
+      )}
+      ${renderPlannerHandoffList(
+        "Deferred suggestions",
+        handoff.deferred_suggestions || [],
+        "No deferred planner suggestions.",
+        renderPlannerHandoffSuggestionItem,
+      )}
+      ${renderPlannerHandoffList(
+        "Rejected suggestions",
+        handoff.rejected_suggestions || [],
+        "No rejected planner suggestions.",
+        renderPlannerHandoffSuggestionItem,
+      )}
+      ${renderPlannerHandoffList(
+        "Pending suggestions",
+        handoff.pending_suggestions || [],
+        "No pending planner suggestions.",
+        renderPlannerHandoffSuggestionItem,
+      )}
+    </div>
+  `;
+}
+
 function renderPlannerReviewInbox(payload) {
   const container = document.getElementById("planner-review-inbox");
   if (!container) return;
@@ -960,6 +1072,7 @@ function renderPlannerPreview(preview) {
     <div class="meta">${escapeHtml(preview.goal_id)} &middot; ${suggestions.length} suggested tasks &middot; no tasks created automatically</div>
     ${renderPlannerReviewSummary(preview)}
     ${renderPlannerReviewAudit(preview)}
+    ${renderPlannerHandoffSummary(preview)}
     <div class="actions" style="margin-top:0.75rem;">
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-create="true" ${selectableCount ? "" : "disabled"}>Create selected tasks</button>
       <button type="button" class="secondary" data-mutation-control="true" data-plan-bulk-review-decision="deferred" ${selectableCount ? "" : "disabled"}>Defer selected</button>
@@ -1882,7 +1995,13 @@ async function runPlannerPreview(goalId, options = {}) {
   const preview = await api(`/goals/${encodeURIComponent(goalId)}/plan`, { method: "POST" });
   const reviewQueue = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews`);
   const reviewAudit = await api(`/goals/${encodeURIComponent(goalId)}/plan/reviews/audit`);
-  plannerPreview = { ...preview, review_queue: reviewQueue, review_audit: reviewAudit };
+  const reviewHandoff = await api(`/goals/${encodeURIComponent(goalId)}/plan/handoff`);
+  plannerPreview = {
+    ...preview,
+    review_queue: reviewQueue,
+    review_audit: reviewAudit,
+    review_handoff: reviewHandoff,
+  };
   focusedPlannerSuggestionIndex = normalizePlannerSuggestionFocus(
     options.focusSuggestionIndex,
     plannerPreview.suggestions,

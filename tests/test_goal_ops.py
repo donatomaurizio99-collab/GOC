@@ -16057,6 +16057,106 @@ def test_272n_goal_plan_review_list_updates_after_reopen(client):
     assert after["reviews"] == []
 
 
+def test_272n2_goal_plan_handoff_summary_groups_review_outcomes(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Handoff planner outcomes", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    preview = client.post(f"/goals/{goal['goal_id']}/plan").json()
+    total = len(preview["suggestions"])
+    created = client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks",
+        json={
+            "suggestion_index": 0,
+            "override": {"title": "Handoff-ready created task", "priority_hint": "high"},
+        },
+    ).json()
+    deferred = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 1, "decision": "deferred", "comment": "Wait for owner confirmation."},
+    ).json()
+    rejected = client.post(
+        f"/goals/{goal['goal_id']}/plan/reviews",
+        json={"suggestion_index": 2, "decision": "rejected", "comment": "Not needed this cycle."},
+    ).json()
+
+    response = client.get(f"/goals/{goal['goal_id']}/plan/handoff")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["goal_id"] == goal["goal_id"]
+    assert payload["goal_title"] == goal["title"]
+    assert payload["source"] == "deterministic_planner"
+    assert payload["summary"] == {
+        "total_suggestions": total,
+        "pending": total - 3,
+        "created": 1,
+        "deferred": 1,
+        "rejected": 1,
+    }
+    assert payload["next_operator_action"] == (
+        "Review pending planner suggestions; create, defer, or reject the next suggestion."
+    )
+    assert payload["created_tasks"] == [
+        {
+            "suggestion_index": 0,
+            "title": preview["suggestions"][0]["title"],
+            "description": preview["suggestions"][0]["description"],
+            "rationale": preview["suggestions"][0]["rationale"],
+            "priority_hint": preview["suggestions"][0]["priority_hint"],
+            "source": "deterministic_planner",
+            "comment": None,
+            "reviewed_at": created["review"]["updated_at"],
+            "task_id": created["task"]["task_id"],
+            "task_title": "Handoff-ready created task",
+            "task_status": "pending",
+            "operator_override": {"priority_hint": "high", "title": "Handoff-ready created task"},
+        }
+    ]
+    assert payload["deferred_suggestions"][0]["suggestion_index"] == 1
+    assert payload["deferred_suggestions"][0]["comment"] == "Wait for owner confirmation."
+    assert payload["deferred_suggestions"][0]["reviewed_at"] == deferred["review"]["updated_at"]
+    assert payload["rejected_suggestions"][0]["suggestion_index"] == 2
+    assert payload["rejected_suggestions"][0]["comment"] == "Not needed this cycle."
+    assert payload["rejected_suggestions"][0]["reviewed_at"] == rejected["review"]["updated_at"]
+    assert [item["suggestion_index"] for item in payload["pending_suggestions"]] == list(range(3, total))
+
+
+def test_272n3_goal_plan_handoff_summary_updates_when_review_complete(client):
+    goal = client.post(
+        "/goals",
+        json={"title": "Complete planner handoff", "urgency": 0.6, "value": 0.7, "deadline_score": 0.2},
+    ).json()
+    total = len(client.post(f"/goals/{goal['goal_id']}/plan").json()["suggestions"])
+
+    client.post(
+        f"/goals/{goal['goal_id']}/plan/tasks/bulk",
+        json={"suggestion_indexes": list(range(total)), "overrides": {}},
+    )
+
+    payload = client.get(f"/goals/{goal['goal_id']}/plan/handoff").json()
+
+    assert payload["summary"] == {
+        "total_suggestions": total,
+        "pending": 0,
+        "created": total,
+        "deferred": 0,
+        "rejected": 0,
+    }
+    assert payload["next_operator_action"] == "Execute or monitor created planner tasks and validate evidence."
+    assert len(payload["created_tasks"]) == total
+    assert payload["deferred_suggestions"] == []
+    assert payload["rejected_suggestions"] == []
+    assert payload["pending_suggestions"] == []
+
+
+def test_272n4_goal_plan_handoff_unknown_goal_returns_404(client):
+    response = client.get("/goals/missing-goal/plan/handoff")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Goal missing-goal not found"
+
+
 def test_272o_goal_planner_review_inbox_returns_goal_rollup(client):
     pending_goal = client.post(
         "/goals",
@@ -16178,9 +16278,14 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "function nextPlannerReviewItem()" in app_js
     assert "function firstPendingPlannerSuggestionIndex(suggestions)" in app_js
     assert "function plannerReviewContinuityMessage(prefix)" in app_js
+    assert "function renderPlannerHandoffSummary(preview)" in app_js
+    assert "function renderPlannerHandoffList(title, items, emptyMessage, itemRenderer)" in app_js
     assert "nextReviewItem?.next_suggestion?.suggestion_index" in app_js
     assert "runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true })" in app_js
     assert "runPlannerPreview(goalId, { focusNextPending: true })" in app_js
+    assert "/plan/handoff" in app_js
+    assert "Planner Handoff Summary" in app_js
+    assert "Next operator action" in app_js
     assert "data-planner-suggestion-index" in app_js
     assert "scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex)" in app_js
     assert "Opened next review target" in app_js
@@ -16188,6 +16293,7 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "planner-suggestion-focus" in app_js
     assert ".planner-suggestion-focus" in template
     assert ".planner-review-complete" in template
+    assert ".planner-handoff-card" in template
     assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
     assert '"static_asset_version": _static_asset_version()' in system_router
 
