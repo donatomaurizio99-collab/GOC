@@ -365,6 +365,16 @@ def _created_task_statuses(handoff: dict) -> dict[str, int]:
     return statuses
 
 
+def _non_terminal_created_task_statuses(handoff: dict) -> dict[str, int]:
+    statuses: dict[str, int] = {}
+    for task in handoff["created_tasks"]:
+        status = task["task_status"]
+        if status == "succeeded":
+            continue
+        statuses[status] = statuses.get(status, 0) + 1
+    return statuses
+
+
 def _created_tasks_need_attention(handoff: dict) -> bool:
     return any(task["task_status"] != "succeeded" for task in handoff["created_tasks"])
 
@@ -380,11 +390,85 @@ def _planner_global_attention_reason(handoff: dict) -> str:
     return "ready"
 
 
+def _planner_global_follow_up_actions(handoff: dict) -> list[dict]:
+    actions = []
+    goal_id = handoff["goal_id"]
+    pending_suggestions = handoff["pending_suggestions"]
+    if pending_suggestions:
+        suggestion = pending_suggestions[0]
+        actions.append(
+            {
+                "id": "review_pending_suggestion",
+                "label": "Review next pending",
+                "description": (
+                    "Open the next pending planner suggestion and explicitly choose create, defer, or reject."
+                ),
+                "action_type": "open_plan_preview",
+                "target": {
+                    "goal_id": goal_id,
+                    "suggestion_index": suggestion["suggestion_index"],
+                    "focus_next_pending": True,
+                },
+                "mutates": False,
+            }
+        )
+    deferred_suggestion = _latest_deferred_suggestion(handoff)
+    if deferred_suggestion is not None:
+        actions.append(
+            {
+                "id": "resolve_deferred_followup",
+                "label": "Resolve deferred follow-up",
+                "description": (
+                    "Open the latest deferred suggestion and decide whether to reopen it or leave it deferred."
+                ),
+                "action_type": "open_plan_preview",
+                "target": {
+                    "goal_id": goal_id,
+                    "suggestion_index": deferred_suggestion["suggestion_index"],
+                },
+                "mutates": False,
+            }
+        )
+    non_terminal_statuses = _non_terminal_created_task_statuses(handoff)
+    if non_terminal_statuses:
+        actions.append(
+            {
+                "id": "monitor_created_tasks",
+                "label": "Inspect created tasks",
+                "description": "Open this goal's task list and monitor created planner tasks without changing status.",
+                "action_type": "select_goal_tasks",
+                "target": {
+                    "goal_id": goal_id,
+                    "task_ids": [
+                        task["task_id"]
+                        for task in handoff["created_tasks"]
+                        if task["task_status"] != "succeeded"
+                    ],
+                    "status_counts": non_terminal_statuses,
+                },
+                "mutates": False,
+            }
+        )
+    if not actions:
+        actions.append(
+            {
+                "id": "no_action_required",
+                "label": "No immediate action",
+                "description": "This planner handoff is clear; continue monitoring or open the preview if context is needed.",
+                "action_type": "none",
+                "target": {"goal_id": goal_id},
+                "mutates": False,
+            }
+        )
+    return actions
+
+
 def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
     handoff = _planner_review_handoff(goal["goal_id"], services)
     reviews = _planner_reviews_by_index(goal["goal_id"], services).values()
     summary = handoff["summary"]
     attention_reason = _planner_global_attention_reason(handoff)
+    latest_deferred_suggestion = _latest_deferred_suggestion(handoff)
     return {
         "goal_id": handoff["goal_id"],
         "goal_title": handoff["goal_title"],
@@ -404,8 +488,9 @@ def _planner_global_handoff_item(goal: dict, services: AppServices) -> dict:
             if handoff["pending_suggestions"]
             else None
         ),
-        "latest_deferred_suggestion": _latest_deferred_suggestion(handoff),
+        "latest_deferred_suggestion": latest_deferred_suggestion,
         "created_task_statuses": _created_task_statuses(handoff),
+        "follow_up_actions": _planner_global_follow_up_actions(handoff),
     }
 
 

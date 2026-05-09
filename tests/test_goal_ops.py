@@ -16284,6 +16284,9 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "function plannerGlobalHandoffNeedsAttention(item)" in app_js
     assert "function plannerGlobalHandoffReason(item)" in app_js
     assert "function plannerGlobalHandoffReasonLabel(reason)" in app_js
+    assert "function plannerGlobalHandoffActions(item)" in app_js
+    assert "function renderPlannerFollowUpActions(item)" in app_js
+    assert "function renderPlannerFollowUpActionButton(action, item)" in app_js
     assert "nextReviewItem?.next_suggestion?.suggestion_index" in app_js
     assert "runPlannerPreview(nextGoalId, { focusSuggestionIndex, focusNextPending: true })" in app_js
     assert "runPlannerPreview(goalId, { focusNextPending: true })" in app_js
@@ -16291,7 +16294,10 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert "data-plan-handoffs-status" in app_js
     assert "data-plan-handoffs-reason" in app_js
     assert "data-plan-handoffs-sort" in app_js
+    assert "data-plan-handoff-task-goal" in app_js
     assert "attention_reason" in app_js
+    assert "follow_up_actions" in app_js
+    assert "Suggested follow-up actions" in app_js
     assert "/plan/handoff" in app_js
     assert "Planner Handoff Summary" in app_js
     assert "Planner Handoff Queue" in app_js
@@ -16310,6 +16316,8 @@ def test_272o4_planner_review_inbox_open_next_review_focus_contract():
     assert ".planner-global-handoff-item" in template
     assert ".planner-handoff-controls" in template
     assert ".planner-handoff-reason" in template
+    assert ".planner-handoff-actions" in template
+    assert ".planner-handoff-action" in template
     assert 'src="/static/app.js?v={{ static_asset_version }}"' in template
     assert '"static_asset_version": _static_asset_version()' in system_router
 
