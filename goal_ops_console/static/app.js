@@ -52,6 +52,7 @@ const viewCache = {
   goals: [],
   plannerReviewInbox: null,
   plannerDeferredFollowups: null,
+  plannerGlobalHandoffs: null,
   tasks: [],
   workflows: [],
   workflowRuns: [],
@@ -459,6 +460,7 @@ function rerenderFilteredViews() {
   renderGoals(viewCache.goals);
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
   renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
+  renderPlannerGlobalHandoffs(viewCache.plannerGlobalHandoffs);
   renderTasks(viewCache.tasks);
   renderWorkflows(viewCache.workflows, viewCache.workflowRuns);
   renderEvents(viewCache.events);
@@ -668,6 +670,14 @@ function normalizePlannerSuggestionFocus(indexValue, suggestions) {
   }
   const suggestion = suggestions[index];
   if (suggestion?.task_exists || plannerSuggestionDecision(suggestion) !== "pending") {
+    return null;
+  }
+  return index;
+}
+
+function normalizePlannerSuggestionScroll(indexValue, suggestions) {
+  const index = Number.parseInt(indexValue, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= (suggestions || []).length) {
     return null;
   }
   return index;
@@ -982,6 +992,177 @@ function plannerDeferredFollowupVisibleItems(payload) {
     item.comment || "",
     item.deferred_at,
   ]);
+}
+
+function plannerGlobalHandoffItems(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  return payload?.items || payload?.handoffs || payload?.goals || [];
+}
+
+function plannerGlobalHandoffNeedsAttention(item) {
+  if (typeof item?.needs_operator_attention === "boolean") {
+    return item.needs_operator_attention;
+  }
+  if (typeof item?.needs_attention === "boolean") {
+    return item.needs_attention;
+  }
+  const summary = item?.summary || {};
+  return Boolean((summary.pending || 0) > 0 || (summary.deferred || 0) > 0);
+}
+
+function plannerGlobalHandoffVisibleItems(payload) {
+  return filterRows(plannerGlobalHandoffItems(payload), (item) => [
+    item.goal_id,
+    item.goal_title || item.title,
+    item.state,
+    item.source,
+    item.next_operator_action,
+    plannerGlobalHandoffNeedsAttention(item) ? "needs attention" : "reviewed",
+    item.next_pending_suggestion?.title || "",
+    item.next_pending?.title || "",
+    item.latest_deferred_suggestion?.title || "",
+    item.first_deferred_suggestion?.title || "",
+    item.first_deferred?.title || "",
+  ]);
+}
+
+function plannerGlobalHandoffSummary(payload) {
+  const summary = payload?.summary || {};
+  const items = plannerGlobalHandoffItems(payload);
+  return {
+    total_goals: summary.total_goals ?? items.length,
+    needs_attention: (
+      summary.needs_attention
+      ?? summary.goals_needing_attention
+      ?? items.filter((item) => plannerGlobalHandoffNeedsAttention(item)).length
+    ),
+    pending: summary.pending ?? summary.pending_suggestions ?? 0,
+    created: summary.created ?? summary.created_tasks ?? 0,
+    deferred: summary.deferred ?? summary.deferred_suggestions ?? 0,
+    rejected: summary.rejected ?? summary.rejected_suggestions ?? 0,
+  };
+}
+
+function firstPlannerHandoffSuggestion(item, key, fallbackKey, alternateKey = null) {
+  const candidate = item?.[key] || item?.[fallbackKey] || (alternateKey ? item?.[alternateKey] : null);
+  if (candidate) {
+    return candidate;
+  }
+  const listKey = key === "next_pending_suggestion" ? "pending_suggestions" : "deferred_suggestions";
+  return Array.isArray(item?.[listKey]) ? item[listKey][0] : null;
+}
+
+function plannerHandoffSuggestionIndex(item) {
+  const index = Number.parseInt(item?.suggestion_index, 10);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function renderPlannerGlobalHandoffs(payload) {
+  const container = document.getElementById("planner-global-handoffs");
+  if (!container) return;
+  if (!payload) {
+    container.innerHTML = `
+      <span class="meta">Planner Handoff Queue</span>
+      <p class="meta">Global planner handoffs are loading.</p>
+    `;
+    return;
+  }
+  if (payload.error) {
+    container.innerHTML = `
+      <span class="meta">Planner Handoff Queue</span>
+      <p class="meta">Unable to load planner handoffs: ${escapeHtml(payload.error)}</p>
+      <div class="actions" style="margin-top:0.75rem;">
+        <button type="button" class="secondary" data-plan-handoffs-refresh="true">Refresh handoffs</button>
+      </div>
+    `;
+    return;
+  }
+
+  const summary = plannerGlobalHandoffSummary(payload);
+  const items = plannerGlobalHandoffVisibleItems(payload);
+  const itemMarkup = items.length
+    ? items.map((item) => {
+      const itemSummary = item.summary || {};
+      const pendingSuggestion = firstPlannerHandoffSuggestion(item, "next_pending_suggestion", "next_pending");
+      const deferredSuggestion = firstPlannerHandoffSuggestion(
+        item,
+        "latest_deferred_suggestion",
+        "first_deferred_suggestion",
+        "first_deferred",
+      );
+      const pendingIndex = plannerHandoffSuggestionIndex(pendingSuggestion);
+      const deferredIndex = plannerHandoffSuggestionIndex(deferredSuggestion);
+      const pendingAction = pendingSuggestion
+        ? `
+          <button
+            type="button"
+            class="secondary"
+            data-plan-goal="${escapeHtml(item.goal_id)}"
+            data-plan-focus-suggestion="${escapeHtml(String(pendingIndex ?? ""))}"
+            data-plan-focus-next-pending="true"
+          >Open next pending</button>
+        `
+        : "";
+      const deferredAction = deferredSuggestion
+        ? `
+          <button
+            type="button"
+            class="secondary"
+            data-plan-goal="${escapeHtml(item.goal_id)}"
+            data-plan-focus-suggestion="${escapeHtml(String(deferredIndex ?? ""))}"
+          >Open deferred follow-up</button>
+        `
+        : "";
+      const needsAttention = plannerGlobalHandoffNeedsAttention(item);
+      const attentionLabel = needsAttention ? "Needs attention" : "Ready";
+      const statusCounts = item.created_task_statuses && Object.keys(item.created_task_statuses).length
+        ? Object.keys(item.created_task_statuses)
+          .sort()
+          .map((status) => `${status}: ${item.created_task_statuses[status]}`)
+          .join(", ")
+        : "none";
+      return `
+        <article class="entity-card planner-global-handoff-item ${selectedGoalId === item.goal_id ? "selected" : ""}">
+          <div class="entity-header">
+            <div>
+              <div class="entity-title">${escapeHtml(item.goal_title || item.title || item.goal_id)}</div>
+              <div class="meta">${escapeHtml(item.goal_id)}${item.state ? ` &middot; ${escapeHtml(item.state)}` : ""}</div>
+            </div>
+            <span class="pill ${needsAttention ? "state-degraded" : "state-ok"}">${attentionLabel}</span>
+          </div>
+          <p class="meta"><strong>Next operator action:</strong> ${escapeHtml(item.next_operator_action || "Review planner handoff status.")}</p>
+          <p class="meta"><strong>Created task statuses:</strong> ${escapeHtml(statusCounts)}</p>
+          <div class="entity-grid">
+            <div class="entity-metric"><span class="meta">Created</span><strong>${itemSummary.created || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Deferred</span><strong>${itemSummary.deferred || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Rejected</span><strong>${itemSummary.rejected || 0}</strong></div>
+            <div class="entity-metric"><span class="meta">Pending</span><strong>${itemSummary.pending || 0}</strong></div>
+          </div>
+          <div class="actions" style="margin-top:0.75rem;">
+            <button type="button" class="secondary" data-plan-goal="${escapeHtml(item.goal_id)}">Open Plan Preview</button>
+            ${pendingAction}
+            ${deferredAction}
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="meta">${filteredEmptyMessage("No planner handoffs are queued.")}</div>`;
+
+  container.innerHTML = `
+    <div class="entity-header">
+      <span class="meta">Planner Handoff Queue &middot; ${summary.total_goals || 0} goals</span>
+      <button type="button" class="secondary" data-plan-handoffs-refresh="true">Refresh handoffs</button>
+    </div>
+    <div class="entity-grid" style="margin-top:0.75rem;">
+      <div class="entity-metric planner-handoff-attention"><span class="meta">Needs Attention</span><strong>${summary.needs_attention || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Pending</span><strong>${summary.pending || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Deferred</span><strong>${summary.deferred || 0}</strong></div>
+      <div class="entity-metric"><span class="meta">Created</span><strong>${summary.created || 0}</strong></div>
+    </div>
+    <div class="stack-list" style="margin-top:0.75rem;">${itemMarkup}</div>
+  `;
 }
 
 function renderPlannerDeferredFollowups(payload) {
@@ -1787,6 +1968,16 @@ async function refreshPlannerDeferredFollowups() {
   renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
 }
 
+async function refreshPlannerGlobalHandoffs() {
+  try {
+    const payload = await api("/goals/planner/handoffs");
+    viewCache.plannerGlobalHandoffs = payload;
+  } catch (error) {
+    viewCache.plannerGlobalHandoffs = { error: error?.message || "Request failed" };
+  }
+  renderPlannerGlobalHandoffs(viewCache.plannerGlobalHandoffs);
+}
+
 async function refreshWorkflows() {
   const [workflowPayload, runPayload] = await Promise.all([
     api("/workflows"),
@@ -1914,6 +2105,7 @@ async function refreshAll() {
     refreshGoals(),
     refreshPlannerReviewInbox(),
     refreshPlannerDeferredFollowups(),
+    refreshPlannerGlobalHandoffs(),
     refreshTasks(),
     refreshWorkflows(),
     refreshEvents(),
@@ -1936,6 +2128,7 @@ function startAutoRefreshLoop() {
     refreshGoals().catch(() => {});
     refreshPlannerReviewInbox().catch(() => {});
     refreshPlannerDeferredFollowups().catch(() => {});
+    refreshPlannerGlobalHandoffs().catch(() => {});
     refreshTasks().catch(() => {});
     refreshWorkflows().catch(() => {});
     refreshEvents().catch(() => {});
@@ -2009,6 +2202,10 @@ async function runPlannerPreview(goalId, options = {}) {
   if (focusedPlannerSuggestionIndex === null && options.focusNextPending) {
     focusedPlannerSuggestionIndex = firstPendingPlannerSuggestionIndex(plannerPreview.suggestions);
   }
+  const scrollSuggestionIndex = normalizePlannerSuggestionScroll(
+    options.focusSuggestionIndex,
+    plannerPreview.suggestions,
+  );
   selectedGoalId = goalId;
   document.getElementById("task-goal-id").value = goalId;
   document.getElementById("event-correlation-id").value = goalId;
@@ -2017,8 +2214,9 @@ async function runPlannerPreview(goalId, options = {}) {
   renderPlannerPreview(plannerPreview);
   renderPlannerReviewInbox(viewCache.plannerReviewInbox);
   renderPlannerDeferredFollowups(viewCache.plannerDeferredFollowups);
+  renderPlannerGlobalHandoffs(viewCache.plannerGlobalHandoffs);
   updateSelectedGoalLabel();
-  scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex);
+  scrollPlannerSuggestionIntoView(focusedPlannerSuggestionIndex ?? scrollSuggestionIndex);
 }
 
 function parsePlannerSuggestionIndex(indexValue) {
@@ -2537,7 +2735,12 @@ document.getElementById("flow-trace-form").addEventListener("submit", async (eve
 });
 
 document.getElementById("refresh-goals").addEventListener("click", async () => {
-  await Promise.all([refreshGoals(), refreshPlannerReviewInbox(), refreshPlannerDeferredFollowups()]);
+  await Promise.all([
+    refreshGoals(),
+    refreshPlannerReviewInbox(),
+    refreshPlannerDeferredFollowups(),
+    refreshPlannerGlobalHandoffs(),
+  ]);
 });
 document.getElementById("refresh-tasks").addEventListener("click", refreshTasks);
 document.getElementById("refresh-workflows").addEventListener("click", refreshWorkflows);
@@ -2646,6 +2849,9 @@ document.addEventListener("click", async (event) => {
   const planBulkReviewDecision = event.target.dataset.planBulkReviewDecision;
   const planInboxStatus = event.target.dataset.planInboxStatus;
   const planFollowupsRefresh = event.target.dataset.planFollowupsRefresh;
+  const planHandoffsRefresh = event.target.dataset.planHandoffsRefresh;
+  const planFocusSuggestion = event.target.dataset.planFocusSuggestion;
+  const planFocusNextPending = event.target.dataset.planFocusNextPending;
   const planFollowupReopenGoal = event.target.dataset.planFollowupReopenGoal;
   const planFollowupReopenIndex = event.target.dataset.planFollowupReopenIndex;
   const planNextReview = event.target.dataset.planNextReview;
@@ -2687,7 +2893,10 @@ document.addEventListener("click", async (event) => {
     }
 
     if (planGoal) {
-      await runPlannerPreview(planGoal);
+      await runPlannerPreview(planGoal, {
+        focusSuggestionIndex: planFocusSuggestion,
+        focusNextPending: planFocusNextPending === "true",
+      });
       setActiveJump("goals-section");
     }
 
@@ -2698,6 +2907,10 @@ document.addEventListener("click", async (event) => {
 
     if (planFollowupsRefresh) {
       await refreshPlannerDeferredFollowups();
+    }
+
+    if (planHandoffsRefresh) {
+      await refreshPlannerGlobalHandoffs();
     }
 
     if (planFollowupReopenGoal && planFollowupReopenIndex !== undefined) {
@@ -2792,7 +3005,8 @@ document.addEventListener("click", async (event) => {
       ? "system-feedback"
       : workflowStart || workflowCancel
         ? "workflow-error"
-        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planFollowupReopenGoal || planNextReview
+        : goalAction || planGoal || planInboxStatus || planFollowupsRefresh || planHandoffsRefresh
+          || planFollowupReopenGoal || planNextReview
           ? "goal-error"
           : "task-error";
     showError(target, error);

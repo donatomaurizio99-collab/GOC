@@ -228,6 +228,38 @@ class PlannerReviewHandoffResponse(BaseModel):
     pending_suggestions: list[PlannerHandoffSuggestionItem]
 
 
+class PlannerGlobalHandoffItem(BaseModel):
+    goal_id: str
+    goal_title: str
+    state: str
+    source: str
+    next_operator_action: str
+    needs_operator_attention: bool
+    summary: PlannerReviewSummary
+    pending: int
+    deferred: int
+    rejected: int
+    created: int
+    last_reviewed_at: str | None = None
+    next_pending_suggestion: PlannerHandoffSuggestionItem | None = None
+    latest_deferred_suggestion: PlannerHandoffSuggestionItem | None = None
+    created_task_statuses: dict[str, int] = Field(default_factory=dict)
+
+
+class PlannerGlobalHandoffSummary(BaseModel):
+    total_goals: int
+    goals_needing_attention: int
+    pending: int
+    deferred: int
+    rejected: int
+    created: int
+
+
+class PlannerGlobalHandoffResponse(BaseModel):
+    summary: PlannerGlobalHandoffSummary
+    items: list[PlannerGlobalHandoffItem]
+
+
 class PlannerReviewInboxNextSuggestion(BaseModel):
     suggestion_index: int
     title: str
